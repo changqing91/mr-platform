@@ -1,0 +1,1628 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WhatTech MR Dashboard</title>
+    
+    <!-- 1. 引入 Tailwind CSS 用于样式 -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- 2. 定义 Import Map，强制统一 React 版本以修复 Error #31 -->
+    <script type="importmap">
+    {
+        "imports": {
+            "react": "https://esm.sh/react@18.3.1",
+            "react-dom/client": "https://esm.sh/react-dom@18.3.1/client?deps=react@18.3.1",
+            "lucide-react": "https://esm.sh/lucide-react@0.469.0?deps=react@18.3.1"
+        }
+    }
+    </script>
+
+    <!-- 3. 引入 Babel 用于解析 JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <!-- 全局样式微调 -->
+    <style>
+        body { margin: 0; background-color: #f3f4f6; }
+        /* 修复 esm.sh 加载 lucide 图标时的细微样式问题 */
+        svg { vertical-align: middle; }
+    </style>
+</head>
+<body>
+    <!-- React 挂载点 -->
+    <div id="root"></div>
+
+    <!-- 4. 你的 React 代码 (type="text/babel" 且 data-type="module") -->
+    <script type="text/babel" data-type="module">
+        import React, { useState, useEffect, useMemo, useRef } from 'react';
+        import { createRoot } from 'react-dom/client';
+        import {
+            Monitor, Play, Square, Layers, Ruler, Scissors, Activity, Box, Search,
+            CheckCircle, AlertCircle, Cpu, Plus, Server, FilePlus, Image as ImageIcon,
+            Save, HardDrive, ArrowLeft, CheckSquare, Copy, Upload, FileText, Trash2,
+            Power, AlertTriangle, Eye, Glasses, SplitSquareHorizontal, Settings, Grid,
+            Link, FolderOpen, Rocket, Edit2, LayoutDashboard, Clock, Layers2, RotateCcw,
+            Headset, User, Lock, LogOut, Flashlight, Disc, Move, Mic, PenTool, List,
+            Check, ArrowUp, ArrowDown, RefreshCw, Calendar, Tag, Filter, Wrench
+        } from 'lucide-react';
+
+        // --- Global Styles & Constants ---
+        const THEME_COLOR = '#39C5BB';
+
+        const GlobalStyles = () => (
+            <style>{`
+            .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+            .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+            .custom-scrollbar::-webkit-scrollbar-thumb { background-color: #D1D5DB; border-radius: 20px; }
+            .custom-scrollbar:hover::-webkit-scrollbar-thumb { background-color: #9CA3AF; }
+            
+            @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+            .fade-in { animation: fadeIn 0.3s ease-out; }
+            
+            .monitor-grid-bg {
+                background-color: #ffffff;
+                background-image: linear-gradient(#f3f4f6 1px, transparent 1px),
+                linear-gradient(90deg, #f3f4f6 1px, transparent 1px);
+                background-size: 40px 40px;
+            }
+            
+            body { user-select: none; }
+            input { user-select: text; }
+            `}</style>
+        );
+
+        // --- Offline Placeholder Component ---
+        const ProjectThumbnail = ({ project, className }) => {
+            if (project?.thumbnail) {
+                return <img src={project.thumbnail} alt={project.name} className={`${className} object-cover`} />;
+            }
+
+            const colors = [
+                ['#3b82f6', '#1d4ed8'], ['#10b981', '#047857'], ['#8b5cf6', '#6d28d9'],
+                ['#f59e0b', '#b45309'], ['#ef4444', '#b91c1c'], ['#6366f1', '#4338ca'],
+                ['#ec4899', '#be185d'], ['#14b8a6', '#0f766e'],
+            ];
+            
+            const index = (project?.id || 0) % colors.length;
+            const [c1, c2] = colors[index];
+
+            return (
+                <div className={`${className} flex items-center justify-center relative overflow-hidden`} style={{ background: `linear-gradient(135deg, ${c1}, ${c2})` }}>
+                    <div className="absolute inset-0 opacity-20" style={{ backgroundImage: 'radial-gradient(circle at 2px 2px, white 1px, transparent 0)', backgroundSize: '16px 16px' }}></div>
+                    {project?.type === 'VRED' ? <Box className="text-white/40 w-1/3 h-1/3" /> : <Layers className="text-white/40 w-1/3 h-1/3" />}
+                </div>
+            );
+        };
+
+        // --- Data (Offline Friendly) ---
+        const INITIAL_PROJECTS = [
+            { id: 1, name: 'Audi RS e-tron GT', type: 'VRED', thumbnail: null, size: '4.2 GB', date: '2023-10-15', tags: ['Concept', 'EV', 'Exterior'] },
+            { id: 3, name: 'Mercedes-Benz Vision', type: 'VRED', thumbnail: null, size: '5.1 GB', date: '2023-11-02', tags: ['Concept', 'Sedan'] },
+            { id: 5, name: 'Tesla Cybertruck', type: 'VRED', thumbnail: null, size: '1.5 GB', date: '2023-09-20', tags: ['Truck', 'EV', 'Low Poly'] },
+            { id: 6, name: 'Cyberpunk Concept', type: 'VRED', thumbnail: null, size: '6.2 GB', date: '2023-12-05', tags: ['Sci-Fi', 'Concept'] },
+            { id: 7, name: 'Ferrari F8 Tributo', type: 'VRED', thumbnail: null, size: '3.5 GB', date: '2023-08-10', tags: ['Sport', 'Coupe'] },
+        ];
+
+        const INITIAL_MACHINES = [
+            { id: 'm1', name: 'Render Node 01', ip: '192.168.1.101', port: '8888', status: 'idle', currentProject: null, health: 'good' },
+            { id: 'm2', name: 'Render Node 02', ip: '192.168.1.102', port: '8888', status: 'idle', currentProject: null, health: 'good' },
+            { id: 'm3', name: 'VR Station A', ip: '192.168.1.105', port: '9001', status: 'running', currentProject: 1, health: 'good' }, 
+            { id: 'm4', name: 'HoloLens Proxy', ip: '192.168.1.110', port: '8080', status: 'offline', currentProject: null, health: 'bad' },
+            { id: 'm5', name: 'Render Node 03', ip: '192.168.1.103', port: '8888', status: 'idle', currentProject: null, health: 'good' }, 
+            { id: 'm6', name: 'Render Node 04', ip: '192.168.1.104', port: '8888', status: 'idle', currentProject: null, health: 'good' }, 
+        ];
+
+        const MR_TOOLS = [
+            { id: 'measure', name: '测量工具', icon: Ruler, description: '点对点距离测量' },
+            { id: 'flashlight', name: '手电筒工具', icon: Flashlight, description: '虚拟手电筒照明' },
+            { id: 'section', name: '剖面工具', icon: Scissors, description: 'X/Y/Z轴剖面裁剪' },
+            { id: 'turntable', name: '展示台工具', icon: Disc, description: '自动旋转展示台' },
+            { id: 'adjust', name: '物体调整工具', icon: Move, description: '移动/旋转/缩放' },
+            { id: 'voice_note', name: '语音标注工具', icon: Mic, description: '添加语音注释' },
+            { id: 'draw_note', name: '图形标注工具', icon: PenTool, description: '空间手绘标注' },
+        ];
+
+        // --- Login Component ---
+        const LoginScreen = ({ handleLogin, loginForm, setLoginForm }) => (
+            <div className="absolute inset-0 z-50 bg-white flex items-center justify-center animate-in fade-in duration-500">
+                <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl overflow-hidden relative border border-gray-100">
+                    <div className="h-2 bg-[#39C5BB] w-full absolute top-0"></div>
+                    <div className="p-8 pt-12">
+                        <div className="text-center mb-10">
+                            <div className="inline-flex items-center justify-center w-16 h-16 rounded-xl bg-[#39C5BB]/10 text-[#39C5BB] mb-4 shadow-sm">
+                                <Box size={32} strokeWidth={3} />
+                            </div>
+                            <h1 className="text-2xl font-bold text-gray-800 tracking-tight">WhatTech <span style={{ color: THEME_COLOR }}>MR</span></h1>
+                            <p className="text-gray-500 text-sm mt-2">企业级混合现实运维管理平台</p>
+                        </div>
+                        
+                        <form onSubmit={handleLogin} className="space-y-6">
+                            <div>
+                                <label className="block text-sm font-bold text-gray-700 mb-2 ml-1">账号</label>
+                                <div className="relative">
+                                    <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-gray-400">
+                                        <User size={18} />
+                                    </div>
+                                    <input 
+                                        type="text" 
+                                        className="w-full pl-11 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#39C5BB] focus:border-transparent transition-all" 
+                                        placeholder="请输入用户名" 
+                                        value={loginForm.username}
+                                        onChange={(e) => setLoginForm({...loginForm, username: e.target.value})}
+                                    />
+                                </div>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-bold text-gray-700 mb-2 ml-1">密码</label>
+                                <div className="relative">
+                                    <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-gray-400">
+                                        <Lock size={18} />
+                                    </div>
+                                    <input 
+                                        type="password" 
+                                        className="w-full pl-11 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#39C5BB] focus:border-transparent transition-all" 
+                                        placeholder="请输入密码" 
+                                        value={loginForm.password}
+                                        onChange={(e) => setLoginForm({...loginForm, password: e.target.value})}
+                                    />
+                                </div>
+                            </div>
+                            <button type="submit" className="w-full py-3.5 bg-[#39C5BB] hover:bg-[#2dbdb3] text-white rounded-xl font-bold shadow-lg shadow-[#39C5BB]/30 transition-all transform active:scale-[0.98] flex items-center justify-center gap-2 mt-4">
+                                登录平台 <ArrowLeft size={18} className="rotate-180" />
+                            </button>
+                        </form>
+                    </div>
+                    <div className="bg-gray-50 p-4 text-center text-xs text-gray-400 border-t border-gray-100">
+                        &copy; 2024 WhatTech Inc. All rights reserved.
+                    </div>
+                </div>
+            </div>
+        );
+
+        // --- Main App Component ---
+        const App = () => {
+            const [projects, setProjects] = useState(INITIAL_PROJECTS);
+            const [machines, setMachines] = useState(INITIAL_MACHINES);
+            const [selectedProject, setSelectedProject] = useState(null);
+            const [activeMachineId, setActiveMachineId] = useState(null); 
+            const [streamingMachineId, setStreamingMachineId] = useState(null); 
+            const [isBatchMode, setIsBatchMode] = useState(false); 
+            const [selectedBatchIds, setSelectedBatchIds] = useState(new Set()); 
+            const [notifications, setNotifications] = useState([]);
+            const [searchQuery, setSearchQuery] = useState(''); 
+            const [isScriptBatchMode, setIsScriptBatchMode] = useState(false);
+            const [selectedScriptIds, setSelectedScriptIds] = useState(new Set());
+            const [activeScripts, setActiveScripts] = useState({});
+            const [pendingLaunches, setPendingLaunches] = useState({});
+            const [showMachineModal, setShowMachineModal] = useState(false);
+            const [showProjectModal, setShowProjectModal] = useState(false);
+            const [showGlobalKillModal, setShowGlobalKillModal] = useState(false); 
+            const [showMonitorWall, setShowMonitorWall] = useState(false); 
+            const [killCandidate, setKillCandidate] = useState(null); 
+            const [nodeToDelete, setNodeToDelete] = useState(null); 
+            const [editingNode, setEditingNode] = useState(null); 
+            const [isConfirmingKill, setIsConfirmingKill] = useState(false); 
+            const [showClearNodesModal, setShowClearNodesModal] = useState(false);
+            const [newMachineForm, setNewMachineForm] = useState({ name: '', ip: '', port: '' });
+            const [newProjectForm, setNewProjectForm] = useState({ name: '', type: '', size: '', thumbnail: null, fileName: '', tags: '' });
+            const [streamParams, setStreamParams] = useState({
+                hmdIp: '', hmdPort: '', offsetX: '0.0', offsetY: '1.2', offsetZ: '0.0', isTracking: false, trackingInterval: '1.0',
+                schemeIp: '', schemePort: '', schemeCompareActive: false, wireAddress: '',
+                liveRefFolder: '', realtimeRefActive: false, showCalibration: false,
+                displayMode: 'standard', // 'standard' | 'immersive'
+                immersiveType: 'xr',      // 'xr' (Default/VR) | 'mr'
+            });
+            const [projectViewMode, setProjectViewMode] = useState('grid');
+            const [sortBy, setSortBy] = useState('date');
+            const [sortOrder, setSortOrder] = useState('desc');
+            const [showTagFilter, setShowTagFilter] = useState(false);
+            const [selectedFilterTags, setSelectedFilterTags] = useState(new Set());
+            
+            // Renaming State
+            const [renamingId, setRenamingId] = useState(null);
+            const [renameValue, setRenameValue] = useState('');
+            const renameInputRef = useRef(null);
+
+            // Tags Editing State
+            const [editingTagsId, setEditingTagsId] = useState(null);
+            const [tagsInputValue, setTagsInputValue] = useState('');
+            const tagsInputRef = useRef(null);
+
+            // Replace File State
+            const replaceInputRef = useRef(null);
+            const [projectToReplace, setProjectToReplace] = useState(null);
+
+            // Login State
+            const [isLoggedIn, setIsLoggedIn] = useState(false);
+            const [loginForm, setLoginForm] = useState({ username: '', password: '' });
+            const [currentUser, setCurrentUser] = useState(null);
+
+            const addNotification = (message, type = 'info') => {
+                const id = Date.now();
+                setNotifications(prev => [...prev, { id, message, type }]);
+                setTimeout(() => setNotifications(prev => prev.filter(n => n.id !== id)), 3000);
+            };
+
+            // --- Status Helper ---
+            const getProjectStatus = (projectId) => {
+                const runningNode = machines.find(m => m.currentProject === projectId && (m.status === 'running' || m.status === 'booting'));
+                if (runningNode) {
+                    return { label: '运行中', color: 'text-green-500', bg: 'bg-green-500', isActive: true };
+                }
+                return { label: '离线', color: 'text-gray-400', bg: 'bg-gray-300', isActive: false };
+            };
+
+            // --- Derived Data for Filtering ---
+            const allAvailableTags = useMemo(() => {
+                const tags = new Set();
+                projects.forEach(p => {
+                    if (p.tags && Array.isArray(p.tags)) {
+                        p.tags.forEach(t => tags.add(t));
+                    }
+                });
+                return Array.from(tags).sort();
+            }, [projects]);
+
+            const handleLogin = (e) => {
+                e.preventDefault();
+                // 简化登录逻辑，任何输入都通过，或者保留原密码
+                if ((loginForm.username === 'admin' && loginForm.password === '123.sdf') || true) {
+                    setIsLoggedIn(true);
+                    // Use local mock user instead of external avatar
+                    setCurrentUser({ name: 'Admin', role: 'Administrator' });
+                    addNotification('登录成功，欢迎回来！', 'success');
+                } else {
+                    addNotification('账号或密码错误', 'warning');
+                }
+            };
+
+            const handleLogout = () => {
+                setIsLoggedIn(false);
+                setCurrentUser(null);
+                setLoginForm({ username: '', password: '' });
+            };
+
+            const toggleBatchMode = () => {
+                setIsBatchMode(!isBatchMode);
+                setActiveMachineId(null);
+                setStreamingMachineId(null);
+                setShowMonitorWall(false);
+                setSelectedBatchIds(new Set());
+                setSelectedProject(null);
+                setPendingLaunches({}); 
+                setIsScriptBatchMode(false);
+                setSelectedScriptIds(new Set());
+            };
+
+            const selectAllRunningNodes = () => {
+                const runningIds = machines.filter(m => m.status === 'running').map(m => m.id);
+                if (runningIds.length === 0) {
+                    addNotification('当前没有运行中的节点', 'warning');
+                    return;
+                }
+                const newSet = new Set(runningIds);
+                setSelectedBatchIds(newSet);
+                addNotification(`已全选 ${runningIds.length} 个运行中的节点`, 'info');
+            };
+            
+            const selectAllIdleNodes = () => {
+                const idleIds = machines.filter(m => m.status === 'idle').map(m => m.id);
+                if (idleIds.length === 0) {
+                    addNotification('当前没有空闲节点', 'warning');
+                    return;
+                }
+                setSelectedBatchIds(new Set(idleIds));
+                addNotification(`已全选 ${idleIds.length} 个空闲节点，请点击左侧项目进行分配`, 'info');
+            };
+
+            const confirmClearAllNodes = () => {
+                setMachines([]);
+                setShowClearNodesModal(false);
+                addNotification('所有计算节点已清除', 'success');
+            };
+
+            const handleMachineClick = (machine) => {
+                if (machine.status === 'offline' && !isBatchMode) return;
+                
+                if (isBatchMode && !selectedProject) {
+                    const newSelected = new Set(selectedBatchIds);
+                    if (newSelected.has(machine.id)) newSelected.delete(machine.id); else newSelected.add(machine.id);
+                    setSelectedBatchIds(newSelected);
+                    return;
+                }
+
+                if (machine.status === 'idle') {
+                    if (selectedProject) {
+                        setPendingLaunches(prev => {
+                            const newPending = { ...prev };
+                            if (newPending[machine.id]?.id === selectedProject.id) {
+                                delete newPending[machine.id];
+                            } else {
+                                newPending[machine.id] = selectedProject;
+                            }
+                            return newPending;
+                        });
+                    } else {
+                        addNotification('请先在左侧选择一个项目，再点击节点进行绑定', 'info');
+                    }
+                }
+            };
+
+            const handleProjectClick = (project) => {
+                if (isBatchMode && selectedBatchIds.size > 0) {
+                    const firstId = Array.from(selectedBatchIds)[0];
+                    const firstMachine = machines.find(m => m.id === firstId);
+                    
+                    if (firstMachine && firstMachine.status === 'idle') {
+                        setPendingLaunches(prev => {
+                            const next = { ...prev };
+                            selectedBatchIds.forEach(mid => {
+                                next[mid] = project;
+                            });
+                            return next;
+                        });
+                        addNotification(`已将 "${project.name}" 分配给 ${selectedBatchIds.size} 个节点`, 'success');
+                        setSelectedBatchIds(new Set()); 
+                    } else {
+                        addNotification('无法分配：当前选中的是“运行中”节点 (请使用脚本工具)', 'warning');
+                    }
+                } 
+                else {
+                    setSelectedProject(selectedProject?.id === project.id ? null : project);
+                }
+            };
+
+            // Renaming Functions
+            const startRenaming = (project, e) => {
+                e.stopPropagation();
+                setRenamingId(project.id);
+                setRenameValue(project.name);
+                setTimeout(() => {
+                    if (renameInputRef.current) {
+                        renameInputRef.current.focus();
+                    }
+                }, 50);
+            };
+
+            const saveRename = (id) => {
+                if (renameValue.trim()) {
+                    setProjects(prev => prev.map(p => p.id === id ? { ...p, name: renameValue } : p));
+                    addNotification('项目名称已更新', 'success');
+                }
+                setRenamingId(null);
+                setRenameValue('');
+            };
+
+            const handleRenameKeyDown = (e, id) => {
+                if (e.key === 'Enter') {
+                    saveRename(id);
+                } else if (e.key === 'Escape') {
+                    setRenamingId(null);
+                }
+            };
+
+            // Tags Editing Functions
+            const startEditingTags = (project, e) => {
+                e.stopPropagation();
+                setEditingTagsId(project.id);
+                setTagsInputValue(project.tags ? project.tags.join(', ') : '');
+                setTimeout(() => {
+                    if (tagsInputRef.current) {
+                        tagsInputRef.current.focus();
+                    }
+                }, 50);
+            };
+
+            const saveTags = (id) => {
+                const newTags = tagsInputValue.split(',').map(t => t.trim()).filter(t => t);
+                setProjects(prev => prev.map(p => p.id === id ? { ...p, tags: newTags } : p));
+                addNotification('项目标签已更新', 'success');
+                setEditingTagsId(null);
+                setTagsInputValue('');
+            };
+
+            const handleTagsKeyDown = (e, id) => {
+                if (e.key === 'Enter') {
+                    saveTags(id);
+                } else if (e.key === 'Escape') {
+                    setEditingTagsId(null);
+                }
+            };
+
+            // Replace File Functions
+            const handleReplaceClick = (e, project) => {
+                e.stopPropagation();
+                setProjectToReplace(project.id);
+                if (replaceInputRef.current) {
+                    replaceInputRef.current.click();
+                }
+            };
+
+            const handleReplaceFileChange = (e) => {
+                const file = e.target.files[0];
+                if (!file || !projectToReplace) return;
+
+                let sizeStr = (file.size / (1024 * 1024) > 1024) ? `${(file.size / (1024 * 1024 * 1024)).toFixed(2)} GB` : `${(file.size / (1024 * 1024)).toFixed(1)} MB`;
+                const fullName = file.name;
+                const lastDotIndex = fullName.lastIndexOf('.');
+                const extension = lastDotIndex !== -1 ? fullName.substring(lastDotIndex).toLowerCase() : '';
+                let detectedType = 'Other';
+                if (extension === '.vpb') detectedType = 'VRED';
+                else if (extension === '.wire') detectedType = 'Alias';
+
+                setProjects(prev => prev.map(p => {
+                    if (p.id === projectToReplace) {
+                        return { 
+                            ...p, 
+                            size: sizeStr,
+                            type: detectedType,
+                        };
+                    }
+                    return p;
+                }));
+
+                addNotification(`项目文件已替换为: ${fullName}`, 'success');
+                setProjectToReplace(null);
+                e.target.value = null; 
+            };
+
+            const openAddModal = () => { setEditingNode(null); setNewMachineForm({ name: '', ip: '', port: '' }); setShowMachineModal(true); };
+            const openEditModal = (machine, e) => { e.stopPropagation(); setEditingNode(machine); setNewMachineForm({ name: machine.name, ip: machine.ip, port: machine.port || '' }); setShowMachineModal(true); };
+            
+            const handleSaveMachine = () => {
+                if (!newMachineForm.name || !newMachineForm.ip || !newMachineForm.port) { addNotification('请填写完整的机器信息 (名称, IP, 端口)', 'warning'); return; }
+                if (editingNode) {
+                    setMachines(prev => prev.map(m => m.id === editingNode.id ? { ...m, name: newMachineForm.name, ip: newMachineForm.ip, port: newMachineForm.port } : m));
+                    addNotification('节点信息已更新', 'success');
+                } else {
+                    const newMachine = { id: `m${Date.now()}`, name: newMachineForm.name, ip: newMachineForm.ip, port: newMachineForm.port, status: 'idle', currentProject: null, health: 'good' };
+                    setMachines([...machines, newMachine]);
+                    addNotification('新节点添加成功', 'success');
+                }
+                setShowMachineModal(false); setNewMachineForm({ name: '', ip: '', port: '' }); setEditingNode(null);
+            };
+
+            const promptDeleteNode = (machine, e) => { e.stopPropagation(); if (machine.status === 'running' || machine.status === 'booting') { addNotification('无法删除运行中的节点，请先终止进程', 'warning'); return; } setNodeToDelete(machine); };
+            const confirmDeleteNode = () => { if (nodeToDelete) { setMachines(prev => prev.filter(m => m.id !== nodeToDelete.id)); addNotification(`节点 ${nodeToDelete.name} 已被删除`, 'success'); setNodeToDelete(null); } };
+
+            const restartNode = (machine, e) => {
+                e.stopPropagation();
+                if (machine.status !== 'running') return;
+                
+                const projId = machine.currentProject;
+                addNotification(`正在重启 ${machine.name} 上的项目...`, 'info');
+                
+                setMachines(prev => prev.map(m => m.id === machine.id ? { ...m, status: 'booting' } : m));
+                
+                setTimeout(() => {
+                    setMachines(prev => prev.map(m => m.id === machine.id ? { ...m, status: 'running' } : m));
+                    addNotification(`${machine.name} 项目重启完成`, 'success');
+                }, 2000);
+            };
+
+            const handleFileSelect = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                
+                let sizeStr = (file.size / (1024 * 1024) > 1024) ? `${(file.size / (1024 * 1024 * 1024)).toFixed(2)} GB` : `${(file.size / (1024 * 1024)).toFixed(1)} MB`;
+                
+                const fullName = file.name;
+                const lastDotIndex = fullName.lastIndexOf('.');
+                const fileNameWithoutExt = lastDotIndex !== -1 ? fullName.substring(0, lastDotIndex) : fullName;
+                const extension = lastDotIndex !== -1 ? fullName.substring(lastDotIndex).toLowerCase() : '';
+
+                let detectedType = 'Other';
+                if (extension === '.vpb') detectedType = 'VRED';
+                else if (extension === '.wire') detectedType = 'Alias';
+
+                setNewProjectForm(prev => ({ 
+                    ...prev, 
+                    size: sizeStr, 
+                    type: detectedType, 
+                    fileName: fullName,
+                    name: fileNameWithoutExt 
+                }));
+            };
+
+            const handleThumbnailSelect = (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onloadend = () => {
+                        setNewProjectForm(prev => ({ ...prev, thumbnail: reader.result }));
+                    };
+                    reader.readAsDataURL(file);
+                }
+            };
+
+            const clearFile = () => { setNewProjectForm(prev => ({ ...prev, size: '', type: '', fileName: '', name: '', tags: '' })); };
+            const handleAddProject = () => {
+                if (!newProjectForm.size) { addNotification('请上传有效的项目文件', 'warning'); return; }
+                
+                const tagsArray = newProjectForm.tags ? newProjectForm.tags.split(',').map(t => t.trim()).filter(t => t) : [];
+                const currentDate = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+
+                const newProject = { 
+                    id: Date.now(), 
+                    name: newProjectForm.name, 
+                    type: newProjectForm.type || 'VRED', 
+                    size: newProjectForm.size, 
+                    thumbnail: newProjectForm.thumbnail, // Will be null (use default) or data URI
+                    date: currentDate,
+                    tags: tagsArray
+                };
+                setProjects([newProject, ...projects]); setShowProjectModal(false); setNewProjectForm({ name: '', type: '', size: '', thumbnail: null, fileName: '', tags: '' }); addNotification('新项目资源上传成功', 'success');
+            };
+
+            const deleteProject = (id) => {
+                setProjects(prev => prev.filter(p => p.id !== id));
+                if (selectedProject?.id === id) setSelectedProject(null);
+                addNotification('项目已从资源库删除', 'success');
+            };
+
+            const commitLaunches = () => {
+                const machineIds = Object.keys(pendingLaunches);
+                if (machineIds.length === 0) return;
+
+                setMachines(prev => prev.map(m => {
+                    if (pendingLaunches[m.id]) {
+                        return { ...m, status: 'booting', currentProject: pendingLaunches[m.id].id };
+                    }
+                    return m;
+                }));
+
+                addNotification(`正在启动 ${machineIds.length} 个计划任务...`, 'info');
+                
+                setTimeout(() => {
+                    setMachines(prev => prev.map(m => {
+                        if (pendingLaunches[m.id]) {
+                            return { ...m, status: 'running' };
+                        }
+                        return m;
+                    }));
+                    setPendingLaunches({}); 
+                    setSelectedProject(null); 
+                    addNotification('所有计划任务已启动完成', 'success');
+                }, 2000);
+            };
+
+            const killProcess = (targetIds) => {
+                const idsToKill = Array.isArray(targetIds) ? targetIds : [targetIds];
+                if (idsToKill.length === 0) return;
+                setMachines(prev => prev.map(m => idsToKill.includes(m.id) ? { ...m, status: 'idle', currentProject: null } : m));
+                
+                setActiveScripts(prev => {
+                    const next = { ...prev };
+                    idsToKill.forEach(id => delete next[id]);
+                    return next;
+                });
+
+                if (!Array.isArray(targetIds) && (activeMachineId === targetIds || streamingMachineId === targetIds)) { setActiveMachineId(null); setStreamingMachineId(null); }
+                if (isBatchMode) setSelectedBatchIds(new Set());
+                setIsConfirmingKill(false); setShowGlobalKillModal(false); setKillCandidate(null); 
+                setPendingLaunches(prev => {
+                    const next = {...prev};
+                    idsToKill.forEach(id => delete next[id]);
+                    return next;
+                });
+                addNotification(`已终止 ${idsToKill.length} 个节点的进程`, 'warning');
+            };
+
+            const handleGlobalKillClick = () => { if (machines.filter(m => m.status === 'running').length === 0) { addNotification('当前没有运行中的进程', 'info'); return; } setShowGlobalKillModal(true); };
+            const confirmGlobalKill = () => { killProcess(machines.filter(m => m.status === 'running').map(m => m.id)); };
+            
+            const goBack = () => { setActiveMachineId(null); setStreamingMachineId(null); setIsBatchMode(false); setSelectedBatchIds(new Set()); setIsConfirmingKill(false); setStreamParams(prev => ({ ...prev, isTracking: false, schemeCompareActive: false, realtimeRefActive: false })); setIsScriptBatchMode(false); setSelectedScriptIds(new Set()); };
+            const updateStreamParam = (key, value) => setStreamParams(prev => ({ ...prev, [key]: value }));
+            
+            const handleOneTimeTracking = () => {
+                if (!streamParams.hmdIp || !streamParams.hmdPort) { addNotification('请先输入 HMD 节点的 IP 和端口', 'warning'); return; }
+                addNotification('已执行一次性视角同步', 'success');
+            };
+
+            const handleAutoTracking = (enable) => {
+                if (enable && (!streamParams.hmdIp || !streamParams.hmdPort)) { addNotification('请先输入 HMD 节点的 IP 和端口', 'warning'); return; }
+                updateStreamParam('isTracking', enable);
+                addNotification(enable ? `自动视角追踪已开启 (间隔: ${streamParams.trackingInterval}s)` : '自动视角追踪已停止', enable ? 'success' : 'info');
+            };
+
+            const handleScriptClick = (tool) => {
+                setSelectedScriptIds(prev => {
+                    const newSet = new Set(prev);
+                    if (newSet.has(tool.id)) newSet.delete(tool.id);
+                    else newSet.add(tool.id);
+                    return newSet;
+                });
+            };
+
+            const executeBatchScripts = () => {
+                const scripts = MR_TOOLS.filter(t => selectedScriptIds.has(t.id));
+                if (scripts.length === 0) return;
+                
+                let targetCount = isBatchMode && selectedBatchIds.size > 0 ? selectedBatchIds.size : activeMachineId ? 1 : 0;
+                
+                if (targetCount === 0) {
+                    addNotification('没有选中的目标节点', 'warning');
+                    return;
+                }
+                
+                const targets = isBatchMode && selectedBatchIds.size > 0 ? Array.from(selectedBatchIds) : activeMachineId ? [activeMachineId] : [];
+                const scriptNames = scripts.map(s => s.name);
+
+                setActiveScripts(prev => {
+                    const next = { ...prev };
+                    targets.forEach(mid => {
+                        if (!next[mid]) next[mid] = new Set();
+                        scriptNames.forEach(name => next[mid].add(name));
+                    });
+                    return next;
+                });
+                
+                addNotification(`正在向 ${targetCount} 个节点注入 ${scripts.length} 个脚本...`, 'info');
+                setTimeout(() => {
+                    addNotification(`批量注入成功: ${scripts.map(s => s.name).join(', ')}`, 'success');
+                    setIsScriptBatchMode(false);
+                    setSelectedScriptIds(new Set());
+                }, 1200);
+            };
+
+            const resetScripts = () => {
+                let targetCount = isBatchMode && selectedBatchIds.size > 0 ? selectedBatchIds.size : activeMachineId ? 1 : 0;
+                
+                if (targetCount === 0) {
+                    addNotification('没有选中的目标节点', 'warning');
+                    return;
+                }
+
+                const targets = isBatchMode && selectedBatchIds.size > 0 ? Array.from(selectedBatchIds) : activeMachineId ? [activeMachineId] : [];
+
+                setActiveScripts(prev => {
+                    const next = { ...prev };
+                    targets.forEach(mid => {
+                        delete next[mid]; 
+                    });
+                    return next;
+                });
+
+                addNotification(`已重置 ${targetCount} 个节点的脚本配置`, 'success');
+            };
+
+            const handleStandardDisplay = () => {
+                updateStreamParam('displayMode', 'standard'); 
+                addNotification('正在退出 MR 模式，切换回标准显示...', 'info');
+            };
+
+            const handleEnterXR = () => {
+                setStreamParams(prev => ({ 
+                    ...prev, 
+                    displayMode: 'immersive',
+                    immersiveType: 'xr' // Default
+                }));
+                addNotification('正在启动 XR 沉浸模式...', 'info');
+            };
+
+            const handleToggleMode = () => {
+                if (streamParams.displayMode !== 'immersive') return;
+                const newType = streamParams.immersiveType === 'xr' ? 'mr' : 'xr';
+                setStreamParams(prev => ({ ...prev, immersiveType: newType }));
+                if (newType === 'xr') addNotification('已切换至 VR 模式', 'info');
+                else addNotification('已切换至 MR 透视模式', 'info');
+            };
+
+            const currentMachine = machines.find(m => m.id === activeMachineId);
+            const streamingMachine = machines.find(m => m.id === streamingMachineId);
+            const streamingProject = streamingMachine ? projects.find(p => p.id === streamingMachine.currentProject) : null;
+            const isBatchControlMode = isBatchMode && !selectedProject;
+            
+            const isBatchRunningSelection = useMemo(() => {
+                if (selectedBatchIds.size === 0) return false;
+                const firstId = Array.from(selectedBatchIds)[0];
+                const m = machines.find(mach => mach.id === firstId);
+                return m?.status === 'running'; 
+            }, [selectedBatchIds, machines]);
+
+            const showBatchControl = isBatchControlMode && selectedBatchIds.size > 0 && isBatchRunningSelection;
+            const showSingleControl = !isBatchMode && activeMachineId && !streamingMachineId;
+            const showStreamingView = !!streamingMachineId;
+            
+            const runningMachines = useMemo(() => machines.filter(m => m.status === 'running'), [machines]);
+            const pendingCount = Object.keys(pendingLaunches).length;
+
+            const filteredAndSortedProjects = useMemo(() => {
+                let result = projects.filter(p => p.name.toLowerCase().includes(searchQuery.toLowerCase()));
+                
+                // Tag Filter
+                if (selectedFilterTags.size > 0) {
+                    result = result.filter(p => {
+                        if (!p.tags) return false;
+                        return p.tags.some(tag => selectedFilterTags.has(tag));
+                    });
+                }
+
+                result.sort((a, b) => {
+                    let valA, valB;
+                    if (sortBy === 'name') {
+                        valA = a.name.toLowerCase();
+                        valB = b.name.toLowerCase();
+                    } else if (sortBy === 'type') {
+                        valA = a.type.toLowerCase();
+                        valB = b.type.toLowerCase();
+                    } else {
+                        // date/default (using id as proxy for date)
+                        valA = a.id;
+                        valB = b.id;
+                    }
+
+                    if (valA < valB) return sortOrder === 'asc' ? -1 : 1;
+                    if (valA > valB) return sortOrder === 'asc' ? 1 : -1;
+                    return 0;
+                });
+                
+                return result;
+            }, [projects, searchQuery, sortBy, sortOrder, selectedFilterTags]);
+
+            // Helper to get icon component
+            const getToolIcon = (name) => {
+                const tool = MR_TOOLS.find(t => t.name === name);
+                return tool ? tool.icon : Activity;
+            };
+
+            // Handle tag selection for filtering
+            const toggleFilterTag = (tag) => {
+                const newTags = new Set(selectedFilterTags);
+                if (newTags.has(tag)) newTags.delete(tag);
+                else newTags.add(tag);
+                setSelectedFilterTags(newTags);
+            };
+
+            const MonitorWall = () => (
+                <div className="flex-1 flex flex-col bg-gray-50 animate-in fade-in duration-500 overflow-hidden">
+                    {/* UPDATED: Changed padding to p-6 to match Project List header */}
+                    <div className="p-6 border-b border-gray-200 flex justify-between items-center bg-white shrink-0">
+                        {/* New Navigation Group */}
+                        <div className="flex items-center gap-6">
+                            <button onClick={() => setShowMonitorWall(false)} className="text-xl font-bold text-gray-400 hover:text-gray-600 transition-colors flex items-center gap-2">
+                                <LayoutDashboard size={20} />
+                                项目资源库
+                            </button>
+                            <div className="w-[1px] h-6 bg-gray-300"></div>
+                            {/* UPDATED: Aligned text size and icon size */}
+                            <button onClick={() => setShowMonitorWall(true)} className="text-2xl font-bold text-gray-800 transition-colors flex items-center gap-2">
+                                <Activity size={24} className="text-[#39C5BB]" />
+                                全局监控墙
+                            </button>
+                            <span className="px-2 py-0.5 rounded text-xs bg-[#39C5BB]/10 text-[#39C5BB] font-mono border border-[#39C5BB]/20 ml-2">LIVE FEED</span>
+                        </div>
+
+                        <div className="flex items-center gap-4">
+                            <div className="flex items-center gap-4 text-sm text-gray-500 mr-4 border-r border-gray-200 pr-6">
+                                <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>{runningMachines.length} 运行中</div>
+                                <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-gray-300"></div>{machines.length - runningMachines.length} 空闲/离线</div>
+                            </div>
+                            
+                            <button 
+                                onClick={handleGlobalKillClick}
+                                className="flex items-center gap-2 px-4 py-2 bg-red-50 text-red-600 border border-red-200 rounded-lg hover:bg-red-600 hover:text-white hover:shadow-md transition-all text-sm font-bold group"
+                            >
+                                <Power size={16} className="group-hover:scale-110 transition-transform"/> 关闭所有进程
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div className="flex-1 p-8 overflow-y-auto custom-scrollbar monitor-grid-bg">
+                        {runningMachines.length === 0 ? (
+                            <div className="h-full flex flex-col items-center justify-center text-gray-400">
+                                <Monitor size={64} className="mb-4 opacity-20" />
+                                <p className="text-xl font-medium text-gray-600">当前没有运行中的项目</p>
+                                <p className="text-sm mt-2">请从左侧列表启动节点</p>
+                            </div>
+                        ) : (
+                            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-6"> 
+                                {runningMachines.map(machine => {
+                                    const proj = projects.find(p => p.id === machine.currentProject);
+                                    return (
+                                        <div key={machine.id} className="bg-white rounded-xl overflow-hidden border border-gray-200 hover:border-[#39C5BB] transition-all group shadow-sm hover:shadow-lg relative flex flex-col">
+                                            <div 
+                                                onClick={() => { setStreamingMachineId(machine.id); setShowMonitorWall(false); }}
+                                                className="aspect-[4/3] bg-gray-100 relative cursor-pointer shrink-0 w-full" 
+                                            >
+                                                <ProjectThumbnail project={proj} className="w-full h-full opacity-90 group-hover:opacity-100 transition-opacity" />
+                                                <div className="absolute top-3 left-3"><span className={`px-2 py-1 rounded-md text-xs font-bold text-white shadow-sm backdrop-blur-md ${proj?.type === 'VRED' ? 'bg-orange-500/80' : 'bg-blue-500/80'}`}>{proj?.type}</span></div>
+                                                <div className="absolute top-2 right-2 flex gap-1">
+                                                    <span className="bg-red-500/90 text-white text-[10px] font-bold px-1.5 py-0.5 rounded flex items-center gap-1 animate-pulse"><div className="w-1.5 h-1.5 bg-white rounded-full"></div>REC</span>
+                                                </div>
+                                                <div className="absolute bottom-2 left-2 right-2 flex justify-between items-end">
+                                                    <div className="bg-black/60 backdrop-blur-sm px-2 py-1 rounded text-xs font-mono text-white">FPS: 59.9</div>
+                                                </div>
+                                                <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/10 backdrop-blur-[1px]">
+                                                    <div className="bg-[#39C5BB] text-white px-4 py-2 rounded-lg font-bold flex items-center gap-2 transform scale-95 group-hover:scale-100 transition-transform shadow-lg">
+                                                        <Eye size={18} /> 进入控制
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            
+                                            <div className="p-4 flex items-center justify-between bg-white relative z-10 border-t border-gray-50 shrink-0">
+                                                <div className="flex-1 min-w-0 mr-2"> 
+                                                    <div className="flex items-center gap-2 mb-1">
+                                                        <h3 className="font-bold text-gray-800 truncate" title={machine.name}>{machine.name}</h3>
+                                                    </div>
+                                                    <p className="text-xs text-gray-400 font-mono truncate">{machine.ip}</p>
+                                                    <p className="text-xs text-gray-500 truncate mt-0.5" title={proj?.name}>{proj?.name}</p>
+                                                </div>
+                                                
+                                                <div className="flex flex-col items-end gap-1 shrink-0">
+                                                    <label className="relative inline-flex items-center cursor-pointer" title="点击停止进程">
+                                                        <input 
+                                                            type="checkbox" 
+                                                            className="sr-only peer" 
+                                                            checked={true} 
+                                                            onChange={() => setKillCandidate(machine)} 
+                                                        />
+                                                        <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#39C5BB] hover:peer-checked:bg-[#2dbdb3]"></div>
+                                                    </label>
+                                                    <span className="text-[10px] text-green-500 font-bold tracking-wide">运行中</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+
+            // Conditional Rendering for Login
+            if (!isLoggedIn) {
+                return (
+                    <div className="flex items-center justify-center min-h-screen bg-gray-100 font-sans select-none relative">
+                            <GlobalStyles />
+                        {/* ... Login Notifications ... */}
+                        <LoginScreen handleLogin={handleLogin} loginForm={loginForm} setLoginForm={setLoginForm} />
+                    </div>
+                );
+            }
+
+            return (
+                <div className="flex items-center justify-center min-h-screen bg-gray-100 p-4 font-sans select-none relative">
+                    <GlobalStyles />
+                    <div className="fixed top-4 right-4 z-[100] flex flex-col gap-2">
+                        {notifications.map(n => (
+                            <div key={n.id} className={`px-4 py-3 rounded-lg shadow-lg flex items-center gap-2 animate-in slide-in-from-right fade-in ${n.type === 'success' ? 'bg-green-500 text-white' : (n.type === 'warning' ? 'bg-orange-500 text-white' : 'bg-gray-800 text-white')}`}>
+                                {n.type === 'success' && <CheckCircle size={16}/>}
+                                {n.type === 'warning' && <AlertTriangle size={16}/>}
+                                {n.type === 'info' && <Activity size={16}/>}
+                                <span className="text-sm font-medium">{n.message}</span>
+                            </div>
+                        ))}
+                    </div>
+
+                    {/* Hidden input for replace file functionality */}
+                    <input 
+                        type="file" 
+                        ref={replaceInputRef} 
+                        className="hidden" 
+                        onChange={handleReplaceFileChange} 
+                        accept=".vpb,.wire,.sb" 
+                    />
+
+                    <div className="w-[98vw] h-[95vh] bg-white shadow-2xl rounded-2xl overflow-hidden flex flex-col relative border border-gray-200 z-10 transition-all duration-300">
+                        {showStreamingView ? (
+                            <div className="absolute inset-0 z-30 bg-gray-900 flex flex-col animate-in fade-in duration-300">
+                                {/* ... Streaming Header ... */}
+                                <div className="h-16 flex items-center justify-between px-6 bg-gray-900 border-b border-gray-800 text-white shrink-0">
+                                    <div className="flex items-center gap-4">
+                                        <button onClick={goBack} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 transition-colors text-sm"><ArrowLeft size={16} />退出预览</button>
+                                        <div className="h-6 w-[1px] bg-gray-700"></div>
+                                        <div><h2 className="text-lg font-bold flex items-center gap-2"><Activity size={18} className="text-[#39C5BB] animate-pulse" />实时串流: {streamingMachine.name}</h2><p className="text-xs text-gray-400">Project: {streamingProject?.name}</p></div>
+                                    </div>
+                                    <div className="flex gap-4 text-xs font-mono text-gray-500">
+                                        {/* ... Status badges ... */}
+                                        {streamParams.isTracking && <span className="text-[#39C5BB] flex items-center gap-1"><Glasses size={12}/> HMD TRACKING</span>}
+                                        {streamParams.schemeCompareActive && <span className="text-[#39C5BB] flex items-center gap-1"><SplitSquareHorizontal size={12}/> COMPARING</span>}
+                                        {streamParams.realtimeRefActive && <span className="text-[#39C5BB] flex items-center gap-1"><ImageIcon size={12}/> REF ACTIVE</span>}
+                                        {streamParams.displayMode === 'immersive' && streamParams.immersiveType === 'xr' && (
+                                            <span className="text-[#39C5BB] flex items-center gap-1 bg-[#39C5BB]/10 px-2 py-0.5 rounded border border-[#39C5BB]/20"><Glasses size={12}/> XR ACTIVE</span>
+                                        )}
+                                        {streamParams.displayMode === 'immersive' && streamParams.immersiveType === 'mr' && (
+                                            <span className="text-[#39C5BB] flex items-center gap-1 bg-[#39C5BB]/10 px-2 py-0.5 rounded border border-[#39C5BB]/20"><Headset size={12}/> MR ACTIVE</span>
+                                        )}
+                                    </div>
+                                </div>
+                                {/* ... Streaming Content ... */}
+                                <div className="flex-1 flex overflow-hidden">
+                                    <div className="flex-1 bg-black relative flex items-center justify-center overflow-hidden">
+                                            <ProjectThumbnail project={streamingProject} className="w-full h-full opacity-80" />
+                                            {streamParams.showCalibration && <div className="absolute inset-0 pointer-events-none" style={{ backgroundImage: 'linear-gradient(rgba(57, 197, 187, 0.3) 1px, transparent 1px), linear-gradient(90deg, rgba(57, 197, 187, 0.3) 1px, transparent 1px)', backgroundSize: '50px 50px' }}></div>}
+                                            {streamParams.schemeCompareActive && <div className="absolute inset-0 flex animate-in fade-in"><div className="w-1/2 h-full border-r-2 border-white/50 relative"><div className="absolute bottom-4 left-4 text-white font-bold text-shadow bg-black/30 px-2 rounded">方案 A</div></div><div className="w-1/2 h-full relative"><div className="absolute bottom-4 right-4 text-white font-bold text-shadow bg-black/30 px-2 rounded">方案 B (Node: {streamParams.schemeIp})</div></div></div>}
+                                    </div>
+                                    <div className="w-80 bg-gray-900 border-l border-gray-800 flex flex-col p-6 overflow-y-auto custom-scrollbar">
+                                        {/* ... Streaming Controls ... */}
+                                        
+                                        {/* 1. HMD View Tracking */}
+                                        <div className="mb-6 p-4 bg-gray-800/50 rounded-xl border border-gray-700">
+                                            <h3 className="text-sm font-bold text-gray-300 mb-3 flex items-center gap-2"><Glasses size={16} className="text-[#39C5BB]"/>HMD 视角追踪</h3>
+                                            <div className="space-y-3">
+                                                <div className="grid grid-cols-3 gap-2">
+                                                    <div className="col-span-2">
+                                                        <label className="block text-[10px] text-gray-500 mb-1">HMD IP</label>
+                                                        <input type="text" placeholder="192.168.x.x" value={streamParams.hmdIp} onChange={(e) => updateStreamParam('hmdIp', e.target.value)} className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-xs text-white focus:border-[#39C5BB] outline-none" />
+                                                    </div>
+                                                    <div>
+                                                        <label className="block text-[10px] text-gray-500 mb-1">Port</label>
+                                                        <input type="text" placeholder="8888" value={streamParams.hmdPort} onChange={(e) => updateStreamParam('hmdPort', e.target.value)} className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-xs text-white focus:border-[#39C5BB] outline-none" />
+                                                    </div>
+                                                </div>
+                                                <div>
+                                                    <label className="block text-[10px] text-gray-500 mb-1">追踪间隔 (s)</label>
+                                                    <input type="number" placeholder="1.0" value={streamParams.trackingInterval} onChange={(e) => updateStreamParam('trackingInterval', e.target.value)} className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-xs text-white focus:border-[#39C5BB] outline-none" />
+                                                </div>
+                                                
+                                                <button onClick={handleOneTimeTracking} className="w-full py-2 rounded text-xs font-bold bg-gray-700 text-white hover:bg-gray-600 transition-colors border border-gray-600">一次性追踪</button>
+                                                
+                                                <div className="flex items-center justify-between mt-1">
+                                                    <span className="text-xs text-gray-400">自动追踪:</span>
+                                                    <div className="flex rounded-lg overflow-hidden border border-gray-700">
+                                                        <button 
+                                                            onClick={() => handleAutoTracking(true)} 
+                                                            className={`px-3 py-1.5 text-xs font-bold transition-colors ${streamParams.isTracking ? 'bg-[#39C5BB] text-white' : 'bg-gray-800 text-gray-500 hover:bg-gray-700'}`}
+                                                        >
+                                                            开启
+                                                        </button>
+                                                        <div className="w-[1px] bg-gray-700"></div>
+                                                        <button 
+                                                            onClick={() => handleAutoTracking(false)} 
+                                                            className={`px-3 py-1.5 text-xs font-bold transition-colors ${!streamParams.isTracking ? 'bg-gray-700 text-white' : 'bg-gray-800 text-gray-500 hover:bg-gray-700'}`}
+                                                        >
+                                                            停止
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* 2. Scheme Compare */}
+                                        <div className="mb-6 p-4 bg-gray-800/50 rounded-xl border border-gray-700">
+                                            <h3 className="text-sm font-bold text-gray-300 mb-3 flex items-center gap-2"><SplitSquareHorizontal size={16} className="text-[#39C5BB]"/>方案对比</h3>
+                                            <div className="space-y-3">
+                                                <div className="grid grid-cols-3 gap-2"><div className="col-span-2"><label className="block text-[10px] text-gray-500 mb-1">Node IP</label><input type="text" placeholder="192.168.x.x" value={streamParams.schemeIp} onChange={(e) => updateStreamParam('schemeIp', e.target.value)} className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-xs text-white focus:border-[#39C5BB] outline-none" /></div><div><label className="block text-[10px] text-gray-500 mb-1">Port</label><input type="text" placeholder="8888" value={streamParams.schemePort} onChange={(e) => updateStreamParam('schemePort', e.target.value)} className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-xs text-white focus:border-[#39C5BB] outline-none" /></div></div>
+                                                
+                                                <div className="flex rounded-lg overflow-hidden border border-gray-700 w-full">
+                                                    <button 
+                                                        onClick={() => updateStreamParam('schemeCompareActive', true)} 
+                                                        className={`flex-1 py-2 text-xs font-bold transition-colors ${streamParams.schemeCompareActive ? 'bg-[#39C5BB] text-white' : 'bg-gray-800 text-gray-500 hover:bg-gray-700'}`}
+                                                    >
+                                                        开启对比
+                                                    </button>
+                                                    <div className="w-[1px] bg-gray-700"></div>
+                                                    <button 
+                                                        onClick={() => updateStreamParam('schemeCompareActive', false)} 
+                                                        className={`flex-1 py-2 text-xs font-bold transition-colors ${!streamParams.schemeCompareActive ? 'bg-gray-700 text-white' : 'bg-gray-800 text-gray-500 hover:bg-gray-700'}`}
+                                                    >
+                                                        关闭对比
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* 3. Realtime Reference */}
+                                        <div className="mb-6 p-4 bg-gray-800/50 rounded-xl border border-gray-700">
+                                            <h3 className="text-sm font-bold text-gray-300 mb-3 flex items-center gap-2"><ImageIcon size={16} className="text-[#39C5BB]"/>实时参照</h3>
+                                            <div className="space-y-3">
+                                                <div>
+                                                    <label className="block text-[10px] text-gray-500 mb-1">参照图片目录</label>
+                                                    <div className="flex gap-2">
+                                                        <input type="text" placeholder="C:/Reference/..." value={streamParams.liveRefFolder} onChange={(e) => updateStreamParam('liveRefFolder', e.target.value)} className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-xs text-white focus:border-[#39C5BB] outline-none" />
+                                                        <button className="px-2 bg-gray-700 hover:bg-gray-600 rounded text-white border border-gray-600"><FolderOpen size={14}/></button>
+                                                    </div>
+                                                </div>
+                                                
+                                                <div className="flex rounded-lg overflow-hidden border border-gray-700 w-full">
+                                                    <button 
+                                                        onClick={() => updateStreamParam('realtimeRefActive', true)} 
+                                                        className={`flex-1 py-2 text-xs font-bold transition-colors ${streamParams.realtimeRefActive ? 'bg-[#39C5BB] text-white' : 'bg-gray-800 text-gray-500 hover:bg-gray-700'}`}
+                                                    >
+                                                        开启参照
+                                                    </button>
+                                                    <div className="w-[1px] bg-gray-700"></div>
+                                                    <button 
+                                                        onClick={() => updateStreamParam('realtimeRefActive', false)} 
+                                                        className={`flex-1 py-2 text-xs font-bold transition-colors ${!streamParams.realtimeRefActive ? 'bg-gray-700 text-white' : 'bg-gray-800 text-gray-500 hover:bg-gray-700'}`}
+                                                    >
+                                                        关闭参照
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <div className="mt-auto pt-4 border-t border-gray-800 space-y-3">
+                                            <h3 className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">显示模式</h3>
+                                            <div className="grid grid-cols-2 gap-2">
+                                                <button 
+                                                    onClick={handleStandardDisplay} 
+                                                    className={`py-3 rounded-lg font-bold text-sm flex items-center justify-center gap-2 transition-all ${streamParams.displayMode === 'standard' ? `text-white shadow-lg` : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white'}`}
+                                                    style={{ backgroundColor: streamParams.displayMode === 'standard' ? THEME_COLOR : '' }}
+                                                >
+                                                    <Monitor size={18} /> 标准显示
+                                                </button>
+                                                
+                                                <button 
+                                                    onClick={handleEnterXR} 
+                                                    className={`py-3 rounded-lg font-bold text-sm flex items-center justify-center gap-2 transition-all ${streamParams.displayMode === 'immersive' ? `text-white shadow-lg` : 'bg-gray-800 border border-gray-700 text-gray-400 hover:bg-gray-700 hover:text-white'}`}
+                                                    style={{ backgroundColor: streamParams.displayMode === 'immersive' ? THEME_COLOR : '' }}
+                                                >
+                                                    <Glasses size={18} /> OpenXR
+                                                </button>
+                                            </div>
+                                            <button 
+                                                onClick={handleToggleMode} 
+                                                disabled={streamParams.displayMode !== 'immersive'}
+                                                className={`w-full py-3 rounded-lg font-bold text-sm flex items-center justify-center gap-2 transition-all ${streamParams.displayMode === 'immersive' ? `bg-purple-600 text-white hover:bg-purple-500 shadow-lg cursor-pointer` : 'bg-gray-800/50 border border-gray-700 text-gray-600 cursor-not-allowed'}`}
+                                            >
+                                                {streamParams.displayMode !== 'immersive' 
+                                                    ? <><Headset size={18} /> 切换模式 (需先进入XR)</> 
+                                                    : (streamParams.immersiveType === 'xr' 
+                                                        ? <><Headset size={18} /> 切换为 MR</> 
+                                                        : <><Glasses size={18} /> 切换为 VR</>
+                                                    )
+                                                }
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        ) : (
+                            <>
+                                <header className="h-16 border-b border-gray-100 flex items-center justify-between px-8 bg-white z-20 shrink-0">
+                                    <div className="flex items-center gap-3"><div className="w-8 h-8 rounded-lg flex items-center justify-center text-white shadow-lg shadow-[#39C5BB]/30" style={{ backgroundColor: THEME_COLOR }}><Box size={20} strokeWidth={3} /></div><h1 className="text-xl font-bold text-gray-800 tracking-tight">WhatTech <span style={{ color: THEME_COLOR }}>MR</span></h1></div>
+                                    <div className="flex items-center gap-3">
+                                        <div className="text-right mr-2 hidden sm:block">
+                                            <div className="text-sm font-bold text-gray-700">{currentUser?.name}</div>
+                                            <div className="text-[10px] text-gray-400 font-mono">ID: 8902</div>
+                                        </div>
+                                        <div className="w-9 h-9 rounded-full bg-gray-200 border border-gray-200 flex items-center justify-center text-gray-500 font-bold">
+                                            {currentUser?.name?.charAt(0)}
+                                        </div>
+                                        <button onClick={handleLogout} className="p-2 text-gray-400 hover:bg-gray-100 rounded-lg transition-colors ml-2" title="退出登录"><LogOut size={18} /></button>
+                                    </div>
+                                </header>
+                                <main className="flex-1 flex overflow-hidden">
+                                    
+                                    {showMonitorWall ? (
+                                        <MonitorWall />
+                                    ) : (showBatchControl || showSingleControl) ? (
+                                        <div className="flex-1 flex flex-col animate-in fade-in zoom-in duration-300 bg-white relative">
+                                            <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-gray-50/50 shrink-0"><div className="flex items-center gap-4"><button onClick={goBack} className="flex items-center gap-2 px-3 py-2 rounded-lg text-gray-600 hover:bg-gray-200 transition-colors font-medium text-sm"><ArrowLeft size={18} />返回资源库</button><div className="h-6 w-[1px] bg-gray-300"></div><div><h2 className="text-2xl font-bold text-gray-800 flex items-center gap-3"><span className="w-3 h-8 rounded-full" style={{ backgroundColor: THEME_COLOR }}></span>{showBatchControl ? 'MR 工具面板 (批量)' : 'MR 工具面板'}</h2><p className="text-gray-500 mt-1 text-xs">{showBatchControl ? `已选中 ${selectedBatchIds.size} 台机器进行同步控制` : `已连接: ${currentMachine?.name} (${currentMachine?.ip})`}</p></div></div></div>
+                                            <div className="flex-1 p-8 overflow-y-auto custom-scrollbar">
+                                                <div className="flex justify-between items-center mb-4">
+                                                    <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wider">MR 功能脚本 {showBatchControl && '(批量注入)'}</h3>
+                                                    {/* RESET BUTTON ADDED */}
+                                                    <button 
+                                                        onClick={resetScripts}
+                                                        className="text-xs px-3 py-1.5 rounded-lg border border-red-200 text-red-500 bg-red-50 hover:bg-red-100 hover:border-red-300 transition-all font-bold flex items-center gap-2"
+                                                    >
+                                                        <RotateCcw size={14} /> 清除工具注入
+                                                    </button>
+                                                </div>
+
+                                                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-6 mb-8">
+                                                    {MR_TOOLS.map(tool => {
+                                                        const isSelected = selectedScriptIds.has(tool.id);
+                                                        return (
+                                                            <button 
+                                                                key={tool.id} 
+                                                                onClick={() => handleScriptClick(tool)} 
+                                                                className={`flex flex-col items-center p-6 bg-white border rounded-2xl shadow-sm hover:shadow-lg transition-all group relative ${isSelected ? `border-[${THEME_COLOR}] ring-1 ring-[${THEME_COLOR}] bg-[#39C5BB]/5` : 'border-gray-200 hover:border-[#39C5BB] hover:-translate-y-1'}`}
+                                                            >
+                                                                {/* Selection Checkmark */}
+                                                                <div className={`absolute top-3 right-3 w-5 h-5 rounded-full border flex items-center justify-center transition-colors ${isSelected ? `bg-[${THEME_COLOR}] border-transparent` : 'border-gray-300 bg-white'}`}>
+                                                                    {isSelected && <CheckSquare size={12} className="text-white" />}
+                                                                </div>
+                                                                
+                                                                <div className={`w-16 h-16 rounded-2xl flex items-center justify-center mb-4 transition-colors ${isSelected ? 'bg-white' : 'bg-gray-50 group-hover:bg-[#39C5BB]/10'}`}>
+                                                                    <tool.icon size={32} className={`${isSelected ? `text-[${THEME_COLOR}]` : 'text-gray-600 group-hover:text-[#39C5BB]'} transition-colors`} />
+                                                                </div>
+                                                                <span className={`font-bold mb-1 ${isSelected ? `text-[${THEME_COLOR}]` : 'text-gray-700'}`}>{tool.name}</span>
+                                                                <span className="text-xs text-center text-gray-400">{tool.description}</span>
+                                                            </button>
+                                                        )
+                                                    })}
+                                                </div>
+
+                                                {/* Confirm Injection Button - Shows when any script selected */}
+                                                {selectedScriptIds.size > 0 && (
+                                                    <div className="mb-10 animate-in fade-in slide-in-from-bottom-2">
+                                                        <button 
+                                                            onClick={executeBatchScripts}
+                                                            className="w-full py-4 rounded-xl text-white font-bold shadow-lg flex items-center justify-center gap-2 hover:opacity-90 transition-opacity hover:-translate-y-0.5"
+                                                            style={{ backgroundColor: THEME_COLOR }}
+                                                        >
+                                                            <Play size={20} fill="currentColor"/> 
+                                                            确认注入 {selectedScriptIds.size} 个脚本
+                                                        </button>
+                                                    </div>
+                                                )}
+
+                                                <div className="border-t border-gray-100 pt-8"><h3 className="text-sm font-bold text-red-400 uppercase tracking-wider mb-4">危险操作区</h3><div className="bg-red-50 border border-red-100 rounded-xl p-6 flex items-center justify-between"><div><h4 className="font-bold text-red-800">{showBatchControl ? '批量终止进程' : '终止进程'}</h4><p className="text-sm text-red-600/70">{showBatchControl ? `将强制关闭选中的 ${selectedBatchIds.size} 台机器的所有进程` : '将强制关闭 VRED/Alias 进程并断开MR连接'}</p></div>{isConfirmingKill ? (<div className="flex items-center gap-3"><span className="text-sm text-red-500 font-bold animate-pulse">确定要关闭吗?</span><button onClick={() => killProcess(showBatchControl ? Array.from(selectedBatchIds) : activeMachineId)} className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg font-bold shadow-lg transition-all">确定关闭</button><button onClick={() => setIsConfirmingKill(false)} className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg font-bold transition-all">取消</button></div>) : (<button onClick={() => setIsConfirmingKill(true)} className="px-6 py-3 bg-red-500 hover:bg-red-600 text-white rounded-lg font-bold shadow-lg shadow-red-500/30 transition-all flex items-center gap-2"><Square size={18} fill="currentColor" />强制关闭</button>)}</div></div>
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <div className="flex-1 flex flex-col overflow-hidden bg-white relative">
+                                            {/* UPDATED: Changed padding from p-8 to p-6 to match Monitor Wall */}
+                                            <div className="p-6 pb-4 shrink-0">
+                                                {/* --- 顶部导航与搜索栏区域 --- */}
+                                                <div className="flex items-center justify-between mb-6">
+                                                    {/* 左侧：页面切换导航 */}
+                                                    <div className="flex items-center gap-6">
+                                                        {/* UPDATED: Aligned text size and icon size */}
+                                                        <button onClick={() => setShowMonitorWall(false)} className="text-2xl font-bold text-gray-800 transition-colors flex items-center gap-2 cursor-default">
+                                                            <LayoutDashboard size={24} className="text-[#39C5BB]" />
+                                                            项目资源库
+                                                        </button>
+                                                        <div className="w-[1px] h-6 bg-gray-300"></div>
+                                                        <button onClick={() => setShowMonitorWall(true)} className="text-xl font-bold text-gray-400 hover:text-gray-600 transition-colors flex items-center gap-2">
+                                                            <Activity size={20} />
+                                                            全局监控墙
+                                                        </button>
+                                                    </div>
+
+                                                    {/* 右侧：搜索栏 (更宽、更现代) */}
+                                                    <div className="relative group w-80">
+                                                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-[#39C5BB] transition-colors" size={18} />
+                                                        <input 
+                                                            type="text" 
+                                                            placeholder="搜索 VRED / Alias 资产..." 
+                                                            value={searchQuery} 
+                                                            onChange={(e) => setSearchQuery(e.target.value)} 
+                                                            className="w-full pl-10 pr-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#39C5BB]/50 focus:bg-white transition-all" 
+                                                        />
+                                                    </div>
+                                                </div>
+
+                                                {/* --- 工具栏区域 (整合了排序、筛选、视图和上传) --- */}
+                                                <div className="flex justify-between items-center bg-white">
+                                                    <p className="text-gray-500 text-sm flex items-center gap-2">
+                                                        <span className="w-1.5 h-1.5 rounded-full bg-gray-300"></span>
+                                                        共 {projects.length} 个项目资产，选中即可分配
+                                                    </p>
+                                                    
+                                                    <div className="flex gap-4 items-center">
+                                                        {/* 整合工具条：排序 | 筛选 | 视图 */}
+                                                        <div className="flex items-center bg-gray-50 border border-gray-200 rounded-xl p-1 shadow-sm">
+                                                            
+                                                            {/* 排序组合 - Updated to 3 separate buttons */}
+                                                            <div className="flex items-center px-2 border-r border-gray-200 mr-1 gap-1">
+                                                                <span className="text-[10px] font-bold text-gray-400 uppercase mr-1">排序:</span>
+                                                                <button 
+                                                                    onClick={() => { if(sortBy==='date'){setSortOrder(sortOrder==='asc'?'desc':'asc')}else{setSortBy('date');setSortOrder('desc')} }} 
+                                                                    className={`px-2 py-1 rounded text-xs font-bold transition-colors flex items-center gap-1 ${sortBy === 'date' ? 'bg-gray-100 text-gray-800' : 'text-gray-400 hover:text-gray-600'}`}
+                                                                >
+                                                                    日期 {sortBy === 'date' && (sortOrder === 'asc' ? <ArrowUp size={10}/> : <ArrowDown size={10}/>)}
+                                                                </button>
+                                                                <button 
+                                                                    onClick={() => { if(sortBy==='name'){setSortOrder(sortOrder==='asc'?'desc':'asc')}else{setSortBy('name');setSortOrder('asc')} }} 
+                                                                    className={`px-2 py-1 rounded text-xs font-bold transition-colors flex items-center gap-1 ${sortBy === 'name' ? 'bg-gray-100 text-gray-800' : 'text-gray-400 hover:text-gray-600'}`}
+                                                                >
+                                                                    名称 {sortBy === 'name' && (sortOrder === 'asc' ? <ArrowUp size={10}/> : <ArrowDown size={10}/>)}
+                                                                </button>
+                                                                <button 
+                                                                    onClick={() => { if(sortBy==='type'){setSortOrder(sortOrder==='asc'?'desc':'asc')}else{setSortBy('type');setSortOrder('asc')} }} 
+                                                                    className={`px-2 py-1 rounded text-xs font-bold transition-colors flex items-center gap-1 ${sortBy === 'type' ? 'bg-gray-100 text-gray-800' : 'text-gray-400 hover:text-gray-600'}`}
+                                                                >
+                                                                    类型 {sortBy === 'type' && (sortOrder === 'asc' ? <ArrowUp size={10}/> : <ArrowDown size={10}/>)}
+                                                                </button>
+                                                            </div>
+
+                                                            {/* 筛选按钮 */}
+                                                            <button 
+                                                                onClick={() => setShowTagFilter(!showTagFilter)}
+                                                                className={`p-1.5 px-2.5 rounded-lg transition-all flex items-center gap-1.5 text-xs font-bold mx-0.5 ${showTagFilter || selectedFilterTags.size > 0 ? 'bg-[#39C5BB] text-white shadow-sm' : 'text-gray-500 hover:bg-white hover:shadow-sm'}`}
+                                                                title="标签筛选"
+                                                            >
+                                                                <Filter size={14} /> 筛选
+                                                            </button>
+
+                                                            {/* 视图切换按钮 */}
+                                                            <button 
+                                                                onClick={() => setProjectViewMode(projectViewMode === 'grid' ? 'list' : 'grid')}
+                                                                className="p-1.5 rounded-lg text-gray-500 hover:bg-white hover:shadow-sm transition-all ml-1"
+                                                                title={projectViewMode === 'grid' ? '切换到列表视图' : '切换到网格视图'}
+                                                            >
+                                                                {projectViewMode === 'grid' ? <List size={16}/> : <Grid size={16}/>}
+                                                            </button>
+                                                        </div>
+
+                                                        {/* 主操作按钮：上传 */}
+                                                        <button 
+                                                            onClick={() => setShowProjectModal(true)} 
+                                                            className="flex items-center gap-2 px-5 py-2.5 text-white rounded-xl text-sm font-bold shadow-lg shadow-[#39C5BB]/20 hover:shadow-[#39C5BB]/40 hover:-translate-y-0.5 transition-all active:scale-[0.98]"
+                                                            style={{ backgroundColor: THEME_COLOR }}
+                                                        >
+                                                            <FilePlus size={18} />
+                                                            上传新项目
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                                
+                                                {/* --- 标签筛选栏 (条件渲染) --- */}
+                                                {(showTagFilter || selectedFilterTags.size > 0) && (
+                                                    <div className="mt-4 pt-3 border-t border-gray-100 flex gap-2 overflow-x-auto pb-1 custom-scrollbar animate-in slide-in-from-top-1 fade-in">
+                                                        <span className="text-xs text-gray-400 flex items-center mr-2"><Tag size={12} className="mr-1"/> 标签:</span>
+                                                        {allAvailableTags.map(tag => (
+                                                            <button
+                                                                key={tag}
+                                                                onClick={() => toggleFilterTag(tag)}
+                                                                className={`px-3 py-1 rounded-md text-xs font-medium transition-all whitespace-nowrap border ${selectedFilterTags.has(tag) ? 'bg-[#39C5BB]/10 text-[#39C5BB] border-[#39C5BB]' : 'bg-white text-gray-600 border-gray-200 hover:border-[#39C5BB]/50'}`}
+                                                            >
+                                                                {tag}
+                                                            </button>
+                                                        ))}
+                                                        {selectedFilterTags.size > 0 && (
+                                                            <button 
+                                                                onClick={() => setSelectedFilterTags(new Set())}
+                                                                className="px-3 py-1 rounded-md text-xs text-red-500 hover:bg-red-50 transition-colors whitespace-nowrap ml-auto"
+                                                            >
+                                                                清除筛选
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                )}
+                                            </div>
+
+                                            <div className="flex-1 overflow-y-auto p-8 pt-2 custom-scrollbar">
+                                                {projectViewMode === 'grid' ? (
+                                                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-6 pb-8">
+                                                        {filteredAndSortedProjects.map(project => {
+                                                            const status = getProjectStatus(project.id);
+                                                            return (
+                                                                <div 
+                                                                    key={project.id} 
+                                                                    onClick={() => handleProjectClick(project)} 
+                                                                    className={`group relative bg-white rounded-2xl overflow-hidden cursor-pointer transition-all duration-300 ${selectedProject?.id === project.id ? `ring-4 ring-[#39C5BB] ring-inset shadow-xl z-10` : 'hover:shadow-xl hover:-translate-y-1 ring-1 ring-gray-100'}`}
+                                                                >
+                                                                    <div className="aspect-[4/3] overflow-hidden bg-gray-100 relative">
+                                                                        <ProjectThumbnail project={project} className="w-full h-full transition-transform duration-700 group-hover:scale-105" />
+                                                                        <div className={`absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-60 group-hover:opacity-80 transition-opacity`}></div>
+                                                                        <div className="absolute top-3 right-3 flex items-center gap-2 z-20">
+                                                                            <button onClick={(e) => handleReplaceClick(e, project)} className="p-1.5 bg-black/40 hover:bg-[#39C5BB] rounded-lg text-white/80 hover:text-white backdrop-blur-md transition-colors opacity-0 group-hover:opacity-100" title="替换项目文件"><Upload size={14} /></button>
+                                                                            <button onClick={(e) => { e.stopPropagation(); deleteProject(project.id); }} className="p-1.5 bg-black/40 hover:bg-red-500 rounded-lg text-white/80 hover:text-white backdrop-blur-md transition-colors opacity-0 group-hover:opacity-100" title="删除项目"><Trash2 size={14} /></button>
+                                                                        </div>
+                                                                        <div className="absolute top-3 left-3"><span className={`px-2 py-1 rounded-md text-xs font-bold text-white shadow-sm backdrop-blur-md ${project.type === 'VRED' ? 'bg-orange-500' : 'bg-blue-500'}`}>{project.type}</span></div>
+                                                                        <div className="absolute bottom-3 left-3 right-3 flex justify-between items-end text-white text-xs opacity-80">
+                                                                            <div className="flex gap-1 items-center bg-black/30 px-1.5 py-0.5 rounded backdrop-blur-sm"><Calendar size={10} /> {project.date || 'N/A'}</div>
+                                                                        </div>
+                                                                        {selectedProject?.id === project.id && (
+                                                                            <div className="absolute inset-0 bg-[#39C5BB]/90 backdrop-blur-sm flex flex-col items-center justify-center text-white animate-in fade-in duration-200">
+                                                                                <div className="bg-white text-[#39C5BB] rounded-full p-2 mb-2 shadow-lg"><Link size={32} /></div>
+                                                                                <span className="font-bold text-lg tracking-wide">已选中项目</span>
+                                                                                <span className="text-xs opacity-90 mt-1 mb-4">请点击右侧节点绑定</span>
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+                                                                    <div className="p-4">
+                                                                        <div className="flex justify-between items-start mb-2 group-hover:text-[#39C5BB]">
+                                                                            {renamingId === project.id ? (
+                                                                                <input ref={renameInputRef} type="text" className="font-bold text-gray-800 text-md leading-tight w-full border-b border-[#39C5BB] outline-none bg-transparent" value={renameValue} onClick={(e) => e.stopPropagation()} onChange={(e) => setRenameValue(e.target.value)} onKeyDown={(e) => handleRenameKeyDown(e, project.id)} onBlur={() => saveRename(project.id)} />
+                                                                            ) : (
+                                                                                <div className="flex items-center gap-2 w-full">
+                                                                                    <h3 className="font-bold text-gray-800 text-md leading-tight line-clamp-2 flex-1">{project.name}</h3>
+                                                                                    <button onClick={(e) => startRenaming(project, e)} className="text-gray-400 hover:text-[#39C5BB] opacity-0 group-hover:opacity-100 transition-opacity p-1" title="重命名"><Edit2 size={14} /></button>
+                                                                                </div>
+                                                                            )}
+                                                                        </div>
+                                                                        <div className="flex flex-wrap gap-1 mb-3 items-center group/tags min-h-[20px]">
+                                                                            {editingTagsId === project.id ? (
+                                                                                <input ref={tagsInputRef} type="text" className="w-full text-[10px] bg-gray-50 border-b border-[#39C5BB] outline-none text-gray-600" value={tagsInputValue} onClick={(e) => e.stopPropagation()} onChange={(e) => setTagsInputValue(e.target.value)} onKeyDown={(e) => handleTagsKeyDown(e, project.id)} onBlur={() => saveTags(project.id)} placeholder="输入标签，用逗号分隔" />
+                                                                            ) : (
+                                                                                <>
+                                                                                    {project.tags && project.tags.length > 0 ? ( project.tags.map(tag => (<span key={tag} className="text-[10px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded">{tag}</span>)) ) : (<span className="text-[10px] text-gray-300 italic">无标签</span>)}
+                                                                                    <button onClick={(e) => startEditingTags(project, e)} className="opacity-0 group-hover/tags:opacity-100 text-gray-300 hover:text-[#39C5BB] transition-opacity p-0.5 ml-1" title="编辑标签"><Edit2 size={10} /></button>
+                                                                                </>
+                                                                            )}
+                                                                        </div>
+                                                                        <div className="flex items-center justify-between text-xs text-gray-400 font-mono pt-3 border-t border-gray-100">
+                                                                            <div className="flex items-center gap-1"><HardDrive size={12} />{project.size}</div>
+                                                                            <div className="flex items-center gap-1">
+                                                                                <div className={`w-1.5 h-1.5 rounded-full ${status.bg} ${status.isActive ? 'animate-pulse' : ''}`}></div>
+                                                                                <span className={`${status.color} font-bold`}>{status.label}</span>
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                ) : (
+                                                    <div className="space-y-2 pb-8">
+                                                        {filteredAndSortedProjects.map(project => {
+                                                            const status = getProjectStatus(project.id);
+                                                            return (
+                                                                <div key={project.id} onClick={() => handleProjectClick(project)} className={`flex items-center p-3 rounded-xl border transition-all cursor-pointer group ${selectedProject?.id === project.id ? `border-[${THEME_COLOR}] bg-[#39C5BB]/5 ring-1 ring-[${THEME_COLOR}]` : 'border-gray-100 bg-white hover:border-gray-300 hover:shadow-sm'}`}>
+                                                                    <ProjectThumbnail project={project} className="w-16 h-12 rounded-lg mr-4 bg-gray-200" />
+                                                                    <div className="flex-1 min-w-0 mr-4">
+                                                                        {renamingId === project.id ? (
+                                                                            <input ref={renameInputRef} type="text" className="font-bold text-gray-800 text-sm w-full border-b border-[#39C5BB] outline-none bg-transparent" value={renameValue} onClick={(e) => e.stopPropagation()} onChange={(e) => setRenameValue(e.target.value)} onKeyDown={(e) => handleRenameKeyDown(e, project.id)} onBlur={() => saveRename(project.id)} />
+                                                                        ) : (
+                                                                            <div className="flex items-center gap-2">
+                                                                                <h3 className="font-bold text-gray-800 text-sm truncate">{project.name}</h3>
+                                                                                <button onClick={(e) => startRenaming(project, e)} className="text-gray-400 hover:text-[#39C5BB] opacity-0 group-hover:opacity-100 transition-opacity p-1"><Edit2 size={12} /></button>
+                                                                            </div>
+                                                                        )}
+                                                                        <div className="flex items-center gap-2 mt-1 group/tags">
+                                                                            <div className="text-[10px] text-gray-400 flex items-center gap-1"><Calendar size={10} /> {project.date || 'N/A'}</div>
+                                                                            {editingTagsId === project.id ? (
+                                                                                <input ref={tagsInputRef} type="text" className="text-[10px] bg-gray-50 border-b border-[#39C5BB] outline-none text-gray-600 w-32" value={tagsInputValue} onClick={(e) => e.stopPropagation()} onChange={(e) => setTagsInputValue(e.target.value)} onKeyDown={(e) => handleTagsKeyDown(e, project.id)} onBlur={() => saveTags(project.id)} />
+                                                                            ) : (
+                                                                                <>
+                                                                                    {project.tags && project.tags.map(tag => (<span key={tag} className="text-[9px] bg-gray-100 text-gray-500 px-1 py-0.5 rounded">{tag}</span>))}
+                                                                                    <button onClick={(e) => startEditingTags(project, e)} className="opacity-0 group-hover/tags:opacity-100 text-gray-300 hover:text-[#39C5BB] transition-opacity p-0.5"><Edit2 size={10} /></button>
+                                                                                </>
+                                                                            )}
+                                                                        </div>
+                                                                    </div>
+                                                                    <div className="flex items-center gap-4 text-xs text-gray-500">
+                                                                        <span className={`px-2 py-0.5 rounded-md font-bold text-white ${project.type === 'VRED' ? 'bg-orange-500' : 'bg-blue-500'}`}>{project.type}</span>
+                                                                        <span className="font-mono w-16 text-right">{project.size}</span>
+                                                                        <div className="w-20 text-right flex items-center justify-end gap-1">
+                                                                            <div className={`w-1.5 h-1.5 rounded-full ${status.bg} ${status.isActive ? 'animate-pulse' : ''}`}></div>
+                                                                            <span className={`${status.color} font-bold`}>{status.label}</span>
+                                                                        </div>
+                                                                        <div className="flex items-center gap-1">
+                                                                            <button onClick={(e) => handleReplaceClick(e, project)} className="p-1.5 text-gray-400 hover:text-[#39C5BB] hover:bg-[#39C5BB]/10 rounded-lg transition-colors" title="替换文件"><Upload size={14} /></button>
+                                                                            <button onClick={(e) => { e.stopPropagation(); deleteProject(project.id); }} className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors" title="删除"><Trash2 size={14} /></button>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    <aside className="w-[320px] lg:w-[30%] max-w-[480px] bg-gray-50 border-l border-gray-200 flex flex-col relative shrink-0">
+                                        <div className="p-6 pb-4 shrink-0 border-b border-gray-100">
+                                            <div className="flex justify-between items-center mb-6">
+                                                <div className="flex-1">
+                                                    <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2">
+                                                        <Monitor size={20} className="text-gray-400" />
+                                                        节点列表
+                                                    </h2>
+                                                    <p className="text-xs text-gray-400 mt-1">
+                                                        {isBatchMode ? `批量模式: 已选 ${selectedBatchIds.size} 个节点` : '选择项目以进行绑定，或管理现有节点'}
+                                                    </p>
+                                                </div>
+                                            </div>
+
+                                            <div className="grid grid-cols-2 gap-3">
+                                                {/* Contextual Row */}
+                                                {isBatchMode && (
+                                                    <>
+                                                        <button onClick={selectAllIdleNodes} className="flex items-center justify-center gap-2 px-3 py-2.5 bg-white border border-gray-200 rounded-lg hover:border-[#39C5BB] hover:text-[#39C5BB] transition-colors shadow-sm text-xs font-bold text-gray-600" title="全选空闲节点">
+                                                            <div className="w-3.5 h-3.5 border-2 border-current rounded-sm"></div> 全选空闲
+                                                        </button>
+                                                        <button onClick={selectAllRunningNodes} className="flex items-center justify-center gap-2 px-3 py-2.5 bg-white border border-gray-200 rounded-lg hover:border-[#39C5BB] hover:text-[#39C5BB] transition-colors shadow-sm text-xs font-bold text-gray-600" title="全选运行中节点">
+                                                            <Layers2 size={16} /> 全选运行
+                                                        </button>
+                                                    </>
+                                                )}
+
+                                                {/* Persistent Control Row */}
+                                                <button onClick={toggleBatchMode} className={`flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg transition-all shadow-sm text-xs font-bold ${isBatchMode ? `bg-gray-800 text-white` : 'bg-white border border-gray-200 text-gray-600 hover:border-[#39C5BB] hover:text-[#39C5BB]'}`} title="批量控制模式">
+                                                    {isBatchMode ? <CheckSquare size={16} /> : <Copy size={16} />} {isBatchMode ? '退出批量' : '批量模式'}
+                                                </button>
+
+                                                <button onClick={handleGlobalKillClick} className="flex items-center justify-center gap-2 px-3 py-2.5 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100 hover:border-red-300 hover:text-red-700 text-red-600 transition-colors shadow-sm text-xs font-bold" title="一键停止所有进程">
+                                                    <Power size={16} /> 一键停止
+                                                </button>
+
+                                                {/* Footer Row - REORDERED BUTTONS HERE */}
+                                                <button onClick={() => setShowClearNodesModal(true)} className="flex items-center justify-center gap-2 px-3 py-2.5 bg-white border border-gray-200 rounded-lg hover:bg-orange-50 hover:border-orange-500 hover:text-orange-500 transition-colors shadow-sm text-xs font-bold text-gray-600" title="清空所有节点列表">
+                                                    <Trash2 size={16} /> 清空节点
+                                                </button>
+
+                                                <button onClick={openAddModal} className="flex items-center justify-center gap-2 px-3 py-2.5 bg-white border border-gray-200 rounded-lg hover:border-[#39C5BB] hover:text-[#39C5BB] transition-colors shadow-sm text-xs font-bold text-gray-600" title="添加新节点">
+                                                    <Plus size={16} /> 添加节点
+                                                </button>
+                                            </div>
+                                        </div>
+
+                                        <div className="flex-1 overflow-y-auto p-6 space-y-4 custom-scrollbar pb-24">
+                                            {machines.map(machine => {
+                                                const project = projects.find(p => p.id === machine.currentProject);
+                                                const pendingProject = pendingLaunches[machine.id]; 
+                                                const scripts = activeScripts[machine.id]; 
+                                                const hasScripts = scripts && scripts.size > 0;
+                                                
+                                                const isRunning = machine.status === 'running';
+                                                const isOffline = machine.status === 'offline';
+                                                const isBooting = machine.status === 'booting';
+                                                const isIdle = machine.status === 'idle';
+                                                const isSelectedInBatch = isBatchMode && selectedBatchIds.has(machine.id);
+                                                const isActiveInSingle = !isBatchMode && activeMachineId === machine.id;
+                                                
+                                                let isClickable = !isOffline;
+                                                let borderClass = 'border-white';
+                                                let ringClass = '';
+                                                let bgClass = 'bg-white';
+                                                
+                                                if (isActiveInSingle) {
+                                                    borderClass = `border-[${THEME_COLOR}]`;
+                                                    ringClass = `ring-1 ring-[${THEME_COLOR}]`;
+                                                }
+                                                if (isSelectedInBatch) {
+                                                    borderClass = `border-[${THEME_COLOR}]`;
+                                                    bgClass = 'bg-blue-50';
+                                                }
+                                                if (pendingProject && !isBooting && !isRunning) {
+                                                    borderClass = 'border-yellow-400 border-dashed';
+                                                    bgClass = 'bg-yellow-50';
+                                                }
+                                                
+                                                if (isRunning && !isBatchMode) isClickable = false;
+
+                                                return (
+                                                    <div 
+                                                        key={machine.id} 
+                                                        onClick={() => handleMachineClick(machine)} 
+                                                        className={`relative p-3 rounded-xl border-2 transition-all duration-200 group shadow-sm hover:shadow-md flex gap-3 ${borderClass} ${ringClass} ${bgClass} ${!isClickable && isBatchMode ? 'opacity-40 cursor-not-allowed grayscale' : ''} ${isOffline ? 'opacity-60 grayscale cursor-not-allowed' : ''} ${isClickable ? 'cursor-pointer' : ''}`}
+                                                        style={{ borderColor: (isActiveInSingle || isSelectedInBatch) ? THEME_COLOR : ((pendingProject && !isBooting && !isRunning) ? '#FBBF24' : 'transparent') }}
+                                                    >
+                                                        {/* Left Side: Project Info */}
+                                                        <div 
+                                                            className={`flex gap-3 ${isRunning ? 'cursor-pointer group/thumb' : ''}`}
+                                                            onClick={(e) => {
+                                                                if (isRunning) {
+                                                                    e.stopPropagation();
+                                                                    setStreamingMachineId(machine.id);
+                                                                    setActiveMachineId(null);
+                                                                }
+                                                            }}
+                                                        >
+                                                            {/* Scripts Column (Left of Image) - ONLY SHOW IF SCRIPTS EXIST */}
+                                                            {hasScripts && (
+                                                                <div className="flex flex-col gap-1 pt-1 w-6 items-center">
+                                                                    {Array.from(scripts).slice(0, 3).map((script, idx) => {
+                                                                        const Icon = getToolIcon(script);
+                                                                        return (
+                                                                            <div key={idx} className="w-6 h-6 rounded-md bg-[#39C5BB]/10 text-[#39C5BB] border border-[#39C5BB]/20 flex items-center justify-center shadow-sm" title={script}>
+                                                                                    <Icon size={14} />
+                                                                            </div>
+                                                                        );
+                                                                    })}
+                                                                    {scripts.size > 3 && (
+                                                                        <div className="w-6 h-6 rounded-md bg-gray-50 text-gray-400 border border-gray-200 flex items-center justify-center text-[9px] font-bold" title={`还有 ${scripts.size - 3} 个脚本`}>
+                                                                                +{scripts.size - 3}
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            )}
+
+                                                            {/* Thumbnail Container (Enlarged) */}
+                                                            <div className={`w-36 h-24 rounded-lg overflow-hidden relative flex items-center justify-center transition-colors shrink-0 ${isRunning ? 'bg-black' : 'bg-gray-100'}`}>
+                                                                {(isRunning || isBooting) && project ? (
+                                                                    <>
+                                                                        <ProjectThumbnail project={project} className="w-full h-full opacity-80 group-hover/thumb:opacity-60 transition-opacity" />
+                                                                        <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover/thumb:opacity-100 transition-opacity">
+                                                                            <Play size={24} className="text-white fill-current" />
+                                                                        </div>
+                                                                        <div className="absolute top-1 left-1 bg-black/60 text-white text-[9px] px-1 rounded backdrop-blur-sm">{project.type}</div>
+                                                                        {/* Project Name Overlay */}
+                                                                        <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 to-transparent p-2 pt-6">
+                                                                            <div className="text-[10px] font-bold text-white leading-tight truncate">{project.name}</div>
+                                                                        </div>
+                                                                    </>
+                                                                ) : (
+                                                                    <div className="flex flex-col items-center justify-center text-gray-400 gap-1">
+                                                                        {isOffline ? <Power size={24} /> : <Monitor size={24} />}
+                                                                        <span className="text-[10px] font-bold uppercase">{isOffline ? 'OFFLINE' : 'IDLE'}</span>
+                                                                    </div>
+                                                                )}
+
+                                                                {/* NEW: Pending Overlay on Image Side */}
+                                                                {pendingProject && !isBooting && !isRunning && (
+                                                                    <div className="absolute inset-0 z-10 bg-yellow-50 flex flex-col items-center justify-center border-2 border-yellow-400 border-dashed rounded-lg animate-in fade-in">
+                                                                        <Link size={18} className="text-yellow-500 mb-1" />
+                                                                        <span className="text-[10px] font-bold text-yellow-700 truncate max-w-[90%] px-1">{pendingProject.name}</span>
+                                                                        <span className="text-[9px] text-yellow-600/80">待启动...</span>
+                                                                    </div>
+                                                                )}
+                                                                
+                                                                {/* ADD SCRIPT BUTTON - MOVED HERE */}
+                                                                <button 
+                                                                    onClick={(e) => { 
+                                                                        e.stopPropagation(); 
+                                                                        setActiveMachineId(machine.id); 
+                                                                        setStreamingMachineId(null); 
+                                                                        setShowMonitorWall(false); 
+                                                                        setIsBatchMode(false);
+                                                                    }} 
+                                                                    className={`absolute bottom-1 right-1 p-1 rounded-md z-20 transition-colors ${isActiveInSingle ? `bg-[${THEME_COLOR}] text-white` : 'bg-black/40 text-white/70 hover:bg-[#39C5BB] hover:text-white'}`}
+                                                                    title="添加脚本工具"
+                                                                >
+                                                                    <Wrench size={12} />
+                                                                </button>
+                                                                
+                                                                {isBatchMode && isClickable && (
+                                                                    <div className={`absolute inset-0 bg-white/50 backdrop-blur-[1px] flex items-center justify-center transition-opacity ${isSelectedInBatch ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+                                                                        <div className={`w-8 h-8 rounded-full flex items-center justify-center shadow-lg transform transition-transform ${isSelectedInBatch ? `bg-[${THEME_COLOR}] scale-110` : 'bg-white scale-100'}`}>
+                                                                            {isSelectedInBatch ? <CheckSquare size={18} className="text-white" /> : <div className="w-4 h-4 border-2 border-gray-300 rounded-sm"></div>}
+                                                                        </div>
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        </div>
+
+                                                        {/* Right Side: Node Info & Actions */}
+                                                        <div className="flex-1 min-w-0 flex flex-col justify-between py-0.5 border-l border-gray-100 pl-3">
+                                                            <div>
+                                                                <div className="flex justify-between items-start mb-1">
+                                                                    <h3 className="font-bold text-gray-800 text-sm truncate pr-2" title={machine.name}>{machine.name}</h3>
+                                                                    {/* Status Dot */}
+                                                                    {pendingProject && !isBooting && !isRunning ? (
+                                                                        <div className="shrink-0 w-2 h-2 rounded-full bg-yellow-400 animate-pulse" title="等待启动"></div>
+                                                                    ) : (
+                                                                        <div className={`shrink-0 w-2 h-2 rounded-full ${isOffline ? 'bg-gray-300' : (isIdle ? 'bg-slate-300' : `bg-green-500 shadow-sm shadow-green-200 animate-pulse`)}`} title={isIdle ? '空闲' : (isRunning ? '运行中' : (isOffline ? '离线' : '启动中'))}></div>
+                                                                    )}
+                                                                </div>
+                                                                <div className="text-xs text-gray-400 font-mono tracking-tight flex items-center gap-1">
+                                                                    <Server size={10} />
+                                                                    {machine.ip}<span className="text-gray-300">:</span>{machine.port}
+                                                                </div>
+                                                            </div>
+
+                                                            <div className="flex items-center justify-end gap-1.5 mt-2">
+                                                                {!isBatchMode && (
+                                                                    <>
+                                                                        {isRunning ? (
+                                                                            <>
+                                                                                <button onClick={(e) => restartNode(machine, e)} className="p-1.5 bg-blue-50 text-blue-500 rounded hover:bg-blue-100 transition-colors" title="重启项目"><RotateCcw size={14} /></button>
+                                                                                <button onClick={(e) => { e.stopPropagation(); setKillCandidate(machine); }} className="p-1.5 bg-red-50 text-red-500 rounded hover:bg-red-100 transition-colors" title="停止进程"><Square size={14} fill="currentColor" /></button>
+                                                                            </>
+                                                                        ) : (
+                                                                            !isBooting && (
+                                                                                <>
+                                                                                    <button onClick={(e) => openEditModal(machine, e)} className="p-1.5 hover:bg-gray-100 text-gray-400 hover:text-gray-600 rounded transition-colors" title="编辑"><Edit2 size={14} /></button>
+                                                                                    <button onClick={(e) => promptDeleteNode(machine, e)} className="p-1.5 hover:bg-red-50 text-gray-400 hover:text-red-500 rounded transition-colors" title="删除"><Trash2 size={14} /></button>
+                                                                                </>
+                                                                            )
+                                                                        )}
+                                                                    </>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                        
+                                        {pendingCount > 0 && (
+                                            <div className="absolute bottom-6 left-6 right-6 z-20 animate-in slide-in-from-bottom-4 fade-in">
+                                                <button onClick={commitLaunches} className="w-full py-4 rounded-xl shadow-xl flex items-center justify-center gap-3 text-white font-bold text-lg hover:scale-[1.02] active:scale-[0.98] transition-all" style={{ backgroundColor: THEME_COLOR }}>
+                                                    <Rocket size={24} className="animate-pulse" />
+                                                    执行启动计划 ({pendingCount} 个节点)
+                                                </button>
+                                            </div>
+                                        )}
+                                    </aside>
+                                </main>
+                            </>
+                        )}
+                    </div>
+                    {/* Modals */}
+                    {killCandidate && ( <div className="absolute inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center animate-in fade-in"><div className="bg-white p-8 rounded-2xl shadow-2xl w-[400px] border border-red-100 relative overflow-hidden"><div className="absolute top-0 left-0 w-full h-2 bg-red-500"></div><div className="flex flex-col items-center text-center mb-6"><div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-4 text-red-500"><AlertTriangle size={32} /></div><h3 className="text-xl font-bold text-gray-800">终止进程确认</h3><p className="text-gray-500 mt-2 text-sm">您确定要强制关闭 <span className="font-bold text-gray-800">{killCandidate.name}</span> 的进程吗？<br /><span className="text-red-500 font-bold text-xs">未保存的数据将会丢失。</span></p></div><div className="flex gap-3"><button onClick={() => setKillCandidate(null)} className="flex-1 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg font-bold transition-colors">取消</button><button onClick={() => killProcess(killCandidate.id)} className="flex-1 py-3 bg-red-500 hover:bg-red-600 text-white rounded-lg font-bold shadow-lg shadow-red-500/30 transition-all flex items-center justify-center gap-2"><Power size={18} />确认终止</button></div></div></div> )}
+                    {showGlobalKillModal && ( <div className="absolute inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center animate-in fade-in"><div className="bg-white p-8 rounded-2xl shadow-2xl w-[400px] border border-red-100 relative overflow-hidden"><div className="absolute top-0 left-0 w-full h-2 bg-red-500"></div><div className="flex flex-col items-center text-center mb-6"><div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-4 text-red-500"><AlertTriangle size={32} /></div><h3 className="text-xl font-bold text-gray-800">紧急停止确认</h3><p className="text-gray-500 mt-2 text-sm">您即将强制关闭所有运行中的机器进程。<br /><span className="text-red-500 font-bold">所有未保存的数据将会丢失。</span></p></div><div className="flex gap-3"><button onClick={() => setShowGlobalKillModal(false)} className="flex-1 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg font-bold transition-colors">取消</button><button onClick={confirmGlobalKill} className="flex-1 py-3 bg-red-500 hover:bg-red-600 text-white rounded-lg font-bold shadow-lg shadow-red-500/30 transition-all flex items-center justify-center gap-2"><Power size={18} />确认全部停止</button></div></div></div> )}
+                    {showClearNodesModal && ( <div className="absolute inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center animate-in fade-in"><div className="bg-white p-8 rounded-2xl shadow-2xl w-[400px] border border-orange-200 relative overflow-hidden"><div className="absolute top-0 left-0 w-full h-2 bg-orange-500"></div><div className="flex flex-col items-center text-center mb-6"><div className="w-16 h-16 bg-orange-100 rounded-full flex items-center justify-center mb-4 text-orange-500"><Trash2 size={32} /></div><h3 className="text-xl font-bold text-gray-800">清空列表确认</h3><p className="text-gray-500 mt-2 text-sm">您确定要清空所有计算节点吗？<br /><span className="text-orange-600 font-bold text-xs">此操作不可撤销，运行中的节点也会被移除。</span></p></div><div className="flex gap-3"><button onClick={() => setShowClearNodesModal(false)} className="flex-1 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg font-bold transition-colors">取消</button><button onClick={confirmClearAllNodes} className="flex-1 py-3 bg-orange-500 hover:bg-orange-600 text-white rounded-lg font-bold shadow-lg shadow-orange-500/30 transition-all flex items-center justify-center gap-2"><Trash2 size={18} />确认清空</button></div></div></div> )}
+                    {showMachineModal && ( <div className="absolute inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center animate-in fade-in"><div className="bg-white p-8 rounded-2xl shadow-2xl w-96 border border-gray-100 transform transition-all scale-100"><h3 className="text-xl font-bold mb-4 flex items-center gap-2 text-gray-800"><Server size={24} style={{ color: THEME_COLOR }} />{editingNode ? '编辑计算节点' : '添加新计算节点'}</h3><div className="space-y-4"><div><label className="block text-sm font-medium text-gray-700 mb-1">机器名称</label><input type="text" value={newMachineForm.name} onChange={e => setNewMachineForm({...newMachineForm, name: e.target.value})} className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#39C5BB] transition-all" placeholder="例如: Render Node 05" /></div><div><label className="block text-sm font-medium text-gray-700 mb-1">IP 地址</label><input type="text" value={newMachineForm.ip} onChange={e => setNewMachineForm({...newMachineForm, ip: e.target.value})} className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#39C5BB] transition-all" placeholder="192.168.1.XXX" /></div><div><label className="block text-sm font-medium text-gray-700 mb-1">端口 (Port)</label><input type="text" value={newMachineForm.port} onChange={e => setNewMachineForm({...newMachineForm, port: e.target.value})} className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#39C5BB] transition-all" placeholder="例如: 8888" /></div><div className="flex gap-3 pt-4"><button onClick={() => setShowMachineModal(false)} className="flex-1 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg font-medium transition-colors">取消</button><button onClick={handleSaveMachine} className="flex-1 py-2 text-white rounded-lg font-medium transition-colors shadow-lg hover:shadow-xl hover:-translate-y-0.5" style={{ backgroundColor: THEME_COLOR }}>{editingNode ? '保存修改' : '确认添加'}</button></div></div></div></div> )}
+                    {showProjectModal && ( <div className="absolute inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center animate-in fade-in"><div className="bg-white p-8 rounded-2xl shadow-2xl w-[500px] border border-gray-100 transform transition-all scale-100"><h3 className="text-xl font-bold mb-4 flex items-center gap-2 text-gray-800"><FilePlus size={24} style={{ color: THEME_COLOR }} />上传项目资源</h3><div className="space-y-4"><div><label className="block text-sm font-medium text-gray-700 mb-1">项目文件 (支持 .vpb, .wire)</label>{!newProjectForm.fileName ? (<div className="flex items-center justify-center w-full"><label className="flex flex-col items-center justify-center w-full h-32 border-2 border-gray-300 border-dashed rounded-lg cursor-pointer bg-gray-50 hover:bg-gray-100 transition-colors"><div className="flex flex-col items-center justify-center pt-5 pb-6"><Upload className="w-8 h-8 mb-3 text-gray-400" /><p className="mb-2 text-sm text-gray-500"><span className="font-semibold">点击上传</span> 或拖拽文件</p><p className="text-xs text-gray-400">自动识别 VRED (.vpb) 或 Alias (.wire)</p></div><input type="file" className="hidden" onChange={handleFileSelect} accept=".vpb,.wire,.sb" /></label></div>) : (<div className="w-full p-4 border border-[#39C5BB] bg-[#39C5BB]/5 rounded-lg flex items-center justify-between"><div className="flex items-center gap-3"><div className="p-2 bg-white rounded-md shadow-sm text-[#39C5BB]"><FileText size={20} /></div><div><div className="text-sm font-bold text-gray-800 truncate max-w-[200px]">{newProjectForm.fileName}</div><div className="flex gap-2 text-xs text-gray-500"><span className="font-mono">{newProjectForm.size}</span><span>•</span><span className="font-bold text-[#39C5BB]">{newProjectForm.type || '未知格式'}</span></div></div></div><button onClick={clearFile} className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-full transition-colors" title="移除文件"><Trash2 size={18} /></button></div>)}</div><div><label className="block text-sm font-medium text-gray-700 mb-1">项目封面 (JPG/PNG)</label><div className="relative"><input type="file" accept="image/png, image/jpeg" onChange={handleThumbnailSelect} className="hidden" id="thumb-upload" /><label htmlFor="thumb-upload" className={`w-full flex items-center justify-center gap-2 px-4 py-3 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-50 transition-all ${newProjectForm.thumbnail ? 'border-[#39C5BB] bg-[#39C5BB]/5' : ''}`}>{newProjectForm.thumbnail ? (<><img src={newProjectForm.thumbnail} alt="Preview" className="w-8 h-8 rounded object-cover border border-gray-300"/><span className="text-sm text-gray-600">已选择封面图 (点击更换)</span></>) : (<><ImageIcon size={20} className="text-gray-400" /><span className="text-sm text-gray-500">点击上传封面图片</span></>)}</label></div></div><div><label className="block text-sm font-medium text-gray-700 mb-1">项目标签 (选填)</label><div className="relative"><div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-400"><Tag size={16} /></div><input type="text" value={newProjectForm.tags} onChange={(e) => setNewProjectForm({...newProjectForm, tags: e.target.value})} className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#39C5BB] transition-all text-sm" placeholder="输入标签，用逗号分隔 (例如: Concept, SUV)" /></div></div><div className="flex gap-3 pt-4"><button onClick={() => setShowProjectModal(false)} className="flex-1 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg font-medium transition-colors">取消</button><button onClick={handleAddProject} className="flex-1 py-2 text-white rounded-lg font-medium transition-colors shadow-lg flex items-center justify-center gap-2 hover:shadow-xl hover:-translate-y-0.5" style={{ backgroundColor: THEME_COLOR }}><Save size={18} />保存项目</button></div></div></div></div> )}
+                    {nodeToDelete && ( <div className="absolute inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center animate-in fade-in"><div className="bg-white p-8 rounded-2xl shadow-2xl w-[400px] border border-red-100 relative overflow-hidden"><div className="absolute top-0 left-0 w-full h-2 bg-red-500"></div><div className="flex flex-col items-center text-center mb-6"><div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-4 text-red-500"><AlertTriangle size={32} /></div><h3 className="text-xl font-bold text-gray-800">删除节点确认</h3><p className="text-gray-500 mt-2 text-sm">您确定要删除节点 <span className="font-bold text-gray-800">{nodeToDelete.name}</span> 吗？<br />此操作无法撤销。</p></div><div className="flex gap-3"><button onClick={() => setNodeToDelete(null)} className="flex-1 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg font-bold transition-colors">取消</button><button onClick={confirmDeleteNode} className="flex-1 py-3 bg-red-500 hover:bg-red-600 text-white rounded-lg font-bold shadow-lg shadow-red-500/30 transition-all flex items-center justify-center gap-2"><Trash2 size={18} />确认删除</button></div></div></div> )}
+                </div>
+            );
+        };
+
+        const root = createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>

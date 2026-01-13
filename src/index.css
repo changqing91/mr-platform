@@ -1,0 +1,45 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer utilities {
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 6px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background-color: #D1D5DB;
+    border-radius: 20px;
+  }
+  .custom-scrollbar:hover::-webkit-scrollbar-thumb {
+    background-color: #9CA3AF;
+  }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.fade-in {
+  animation: fadeIn 0.3s ease-out;
+}
+
+.monitor-grid-bg {
+  background-color: #ffffff;
+  background-image: linear-gradient(#f3f4f6 1px, transparent 1px),
+    linear-gradient(90deg, #f3f4f6 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+body {
+  user-select: none;
+  background-color: #f3f4f6;
+  margin: 0;
+}
+
+input {
+  user-select: text;
+}
