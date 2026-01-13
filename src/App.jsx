@@ -12,9 +12,12 @@ import { INITIAL_PROJECTS, INITIAL_MACHINES, MR_TOOLS, THEME_COLOR } from './con
 
 const App = () => {
     // --- State: Auth ---
-    const [isLoggedIn, setIsLoggedIn] = useState(false);
+    const [isLoggedIn, setIsLoggedIn] = useState(() => localStorage.getItem('isLoggedIn') === 'true');
     const [loginForm, setLoginForm] = useState({ username: '', password: '' });
-    const [currentUser, setCurrentUser] = useState(null);
+    const [currentUser, setCurrentUser] = useState(() => {
+        const saved = localStorage.getItem('currentUser');
+        return saved ? JSON.parse(saved) : null;
+    });
 
     // --- State: Data ---
     const [projects, setProjects] = useState(INITIAL_PROJECTS);
@@ -74,8 +77,11 @@ const App = () => {
     const handleLogin = (e) => {
         e.preventDefault();
         if (loginForm.username && loginForm.password) {
+            const user = { name: loginForm.username, id: '8902' };
             setIsLoggedIn(true);
-            setCurrentUser({ name: loginForm.username, id: '8902' });
+            setCurrentUser(user);
+            localStorage.setItem('isLoggedIn', 'true');
+            localStorage.setItem('currentUser', JSON.stringify(user));
             addNotification('登录成功', 'success');
         }
     };
@@ -84,6 +90,8 @@ const App = () => {
         setIsLoggedIn(false);
         setCurrentUser(null);
         setLoginForm({ username: '', password: '' });
+        localStorage.removeItem('isLoggedIn');
+        localStorage.removeItem('currentUser');
     };
 
     // --- Handlers: Projects ---
@@ -211,6 +219,7 @@ const App = () => {
                 }
             });
             setPendingLaunches(newPending);
+            setSelectedBatchIds(new Set());
             addNotification(`已为 ${selectedBatchIds.size} 个节点预设项目: ${project.name}`, 'info');
         } else if (activeMachineId && !isBatchMode) {
              // Single mode assignment
@@ -261,11 +270,21 @@ const App = () => {
             setSelectedBatchIds(newSet);
         } else {
             // Single Mode Selection
-            setActiveMachineId(machine.id);
-            
-            // Auto-assign active project if one is selected
-            if (activeProject && !runningMachines[machine.id] && !bootingMachines.has(machine.id)) {
-                setPendingLaunches(prev => ({ ...prev, [machine.id]: activeProject }));
+            if (activeMachineId === machine.id) {
+                setActiveMachineId(null);
+                // Also clear pending launch for this machine if it was set
+                setPendingLaunches(prev => {
+                    const next = { ...prev };
+                    delete next[machine.id];
+                    return next;
+                });
+            } else {
+                setActiveMachineId(machine.id);
+                
+                // Auto-assign active project if one is selected
+                if (activeProject && !runningMachines[machine.id] && !bootingMachines.has(machine.id)) {
+                    setPendingLaunches(prev => ({ ...prev, [machine.id]: activeProject }));
+                }
             }
         }
     };
