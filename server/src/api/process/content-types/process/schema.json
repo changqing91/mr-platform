@@ -1,0 +1,39 @@
+{
+  "kind": "collectionType",
+  "collectionName": "processes",
+  "info": {
+    "singularName": "process",
+    "pluralName": "processes",
+    "displayName": "Process",
+    "description": ""
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "attributes": {
+    "pid": {
+      "type": "string"
+    },
+    "status": {
+      "type": "enumeration",
+      "enum": ["starting", "running", "stopped", "error", "terminated"],
+      "default": "starting"
+    },
+    "startTime": {
+      "type": "datetime"
+    },
+    "endTime": {
+      "type": "datetime"
+    },
+    "machine": {
+      "type": "relation",
+      "relation": "oneToOne",
+      "target": "api::machine.machine"
+    },
+    "project": {
+      "type": "relation",
+      "relation": "oneToOne",
+      "target": "api::project.project"
+    }
+  }
+}

@@ -1,0 +1,47 @@
+{
+  "kind": "collectionType",
+  "collectionName": "projects",
+  "info": {
+    "singularName": "project",
+    "pluralName": "projects",
+    "displayName": "Project",
+    "description": ""
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "name": {
+      "type": "string"
+    },
+    "type": {
+      "type": "string",
+      "default": "VRED"
+    },
+    "thumbnail": {
+      "type": "text"
+    },
+    "size": {
+      "type": "string"
+    },
+    "date": {
+      "type": "date"
+    },
+    "tags": {
+      "type": "json"
+    },
+    "fileName": {
+      "type": "string"
+    },
+    "filePath": {
+      "type": "string"
+    },
+    "machines": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::machine.machine",
+      "mappedBy": "current_project"
+    }
+  }
+}

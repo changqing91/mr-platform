@@ -1,0 +1,41 @@
+{
+  "kind": "collectionType",
+  "collectionName": "machines",
+  "info": {
+    "singularName": "machine",
+    "pluralName": "machines",
+    "displayName": "Machine",
+    "description": ""
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "name": {
+      "type": "string"
+    },
+    "ip": {
+      "type": "string"
+    },
+    "port": {
+      "type": "integer"
+    },
+    "status": {
+      "type": "enumeration",
+      "enum": ["idle", "running", "offline"],
+      "default": "idle"
+    },
+    "health": {
+      "type": "enumeration",
+      "enum": ["good", "bad"],
+      "default": "good"
+    },
+    "current_project": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::project.project",
+      "inversedBy": "machines"
+    }
+  }
+}
