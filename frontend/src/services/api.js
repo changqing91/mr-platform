@@ -101,16 +101,16 @@ export const api = {
             });
             return unwrap(res);
         },
-        update: async (id, data) => {
-            const res = await fetch(`${API_URL}/machines/${id}`, {
+        update: async (documentId, data) => {
+            const res = await fetch(`${API_URL}/machines/${documentId}`, {
                 method: 'PUT',
                 headers: getAuthHeaders(),
                 body: JSON.stringify({ data })
             });
             return unwrap(res);
         },
-        delete: async (id) => {
-            const res = await fetch(`${API_URL}/machines/${id}`, {
+        delete: async (documentId) => {
+            const res = await fetch(`${API_URL}/machines/${documentId}`, {
                 method: 'DELETE',
                 headers: getAuthHeaders()
             });
@@ -124,6 +124,23 @@ export const api = {
             });
             return unwrap(res);
         },
+        create: async (data) => {
+            const res = await fetch(`${API_URL}/processes`, {
+                method: 'POST',
+                headers: getAuthHeaders(),
+                body: JSON.stringify({ data })
+            });
+            return unwrap(res);
+        },
+        update: async (documentId, data) => {
+            const res = await fetch(`${API_URL}/processes/${documentId}`, {
+                method: 'PUT',
+                headers: getAuthHeaders(),
+                body: JSON.stringify({ data })
+            });
+            return unwrap(res);
+        },
+        // Custom endpoints
         launch: async (machineId, projectId) => {
             const res = await fetch(`${API_URL}/processes/launch`, {
                 method: 'POST',
@@ -138,7 +155,14 @@ export const api = {
                 headers: getAuthHeaders(),
                 body: JSON.stringify({ machineId })
             });
-            return unwrap(res);
+            return res.json();
+        },
+        killAll: async () => {
+            const res = await fetch(`${API_URL}/processes/kill-all`, {
+                method: 'POST',
+                headers: getAuthHeaders()
+            });
+            return res.json();
         },
         batchKill: async (machineIds) => {
             const res = await fetch(`${API_URL}/processes/batch-kill`, {
@@ -146,14 +170,7 @@ export const api = {
                 headers: getAuthHeaders(),
                 body: JSON.stringify({ machineIds })
             });
-            return unwrap(res);
-        },
-        killAll: async () => {
-            const res = await fetch(`${API_URL}/processes/kill-all`, {
-                method: 'POST',
-                headers: getAuthHeaders()
-            });
-            return unwrap(res);
+            return res.json();
         },
         executePython: async (ip, port, code) => {
             const res = await fetch(`${API_URL}/processes/execute-python`, {
@@ -163,5 +180,24 @@ export const api = {
             });
             return unwrap(res);
         }
+    },
+    upload: async (file) => {
+        const formData = new FormData();
+        formData.append('files', file);
+
+        const token = localStorage.getItem('jwt');
+        const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
+
+        const res = await fetch(`${API_URL}/upload`, {
+            method: 'POST',
+            headers: headers,
+            body: formData
+        });
+
+        if (!res.ok) {
+            const error = await res.json();
+            throw new Error(error.error?.message || 'Upload Failed');
+        }
+        return res.json();
     }
 };

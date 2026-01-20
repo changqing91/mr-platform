@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import LoginScreen from './components/LoginScreen';
-import { THEME_COLOR } from './constants';
+import { THEME_COLOR, MR_TOOLS } from './constants';
+import { RADIAL_MENU_CORE, TOOL_IMPLEMENTATIONS } from './utils/vredPy';
 import { api } from './services/api';
 import { uploadFile, TUSD_PATH_PREFIX } from './services/upload';
 
@@ -338,14 +339,21 @@ const App = () => {
         if (fileInputRef.current) fileInputRef.current.value = '';
     };
 
-    const handleThumbnailSelect = (e) => {
+    const handleThumbnailSelect = async (e) => {
         const file = e.target.files[0];
         if (file) {
-            const reader = new FileReader();
-            reader.onloadend = () => {
-                setNewProjectForm({ ...newProjectForm, thumbnail: reader.result });
-            };
-            reader.readAsDataURL(file);
+            try {
+                addNotification('正在上传封面图...', 'info');
+                const uploadedFiles = await api.upload(file);
+                if (uploadedFiles && uploadedFiles.length > 0) {
+                    const url = uploadedFiles[0].url;
+                    setNewProjectForm({ ...newProjectForm, thumbnail: url });
+                    addNotification('封面图上传成功', 'success');
+                }
+            } catch (e) {
+                console.error(e);
+                addNotification('封面图上传失败', 'error');
+            }
         }
     };
 
@@ -361,7 +369,7 @@ const App = () => {
         
         try {
             if (editingNode) {
-                const updated = await api.machines.update(editingNode.id, newMachineForm);
+                const updated = await api.machines.update(editingNode.documentId, newMachineForm);
                 setMachines(machines.map(m => m.id === editingNode.id ? { ...m, ...updated, currentProject: m.currentProject } : m));
                 addNotification(`节点 "${newMachineForm.name}" 更新成功`, 'success');
             } else {
@@ -513,9 +521,27 @@ const App = () => {
         setShowMonitorWall(false);
         setIsBatchMode(false);
         setShowScriptTools(true);
+
+        // Inject Radial Menu Core (Async)
+        api.processes.executePython(machine.ip, machine.port, RADIAL_MENU_CORE)
+            .then(() => console.log('Radial Menu Core Injected'))
+            .catch(e => console.error('Radial Menu Core Injection Failed', e));
     };
 
     const handleInjectScripts = (scriptIds) => {
+        // Prepare Python Code
+        let pythonCode = "";
+        scriptIds.forEach(id => {
+            const impl = TOOL_IMPLEMENTATIONS[id];
+            if (impl) {
+                pythonCode += impl + "\n";
+                const tool = MR_TOOLS.find(t => t.id === id);
+                if (tool) {
+                     pythonCode += `if 'radial_menu_instance' in globals(): radial_menu_instance.add_tool("${id}", "${tool.name}", tool_${id})\n`;
+                }
+            }
+        });
+
         if (isBatchMode && selectedBatchIds.size > 0) {
             // Batch injection
             setMachineScripts(prev => {
@@ -527,6 +553,14 @@ const App = () => {
                 });
                 return next;
             });
+
+            // Execute on all selected machines
+            const targets = machines.filter(m => selectedBatchIds.has(m.id));
+            targets.forEach(m => {
+                 api.processes.executePython(m.ip, m.port, pythonCode)
+                    .catch(e => console.error(`Failed to inject on ${m.name}`, e));
+            });
+
             addNotification(`已向 ${selectedBatchIds.size} 台机器注入 ${scriptIds.length} 个脚本`, 'success');
         } else if (activeMachineId) {
             // Single injection
@@ -535,6 +569,14 @@ const App = () => {
                 scriptIds.forEach(s => current.add(s));
                 return { ...prev, [activeMachineId]: current };
             });
+
+            // Execute
+            const machine = machines.find(m => m.id === activeMachineId);
+            if (machine) {
+                api.processes.executePython(machine.ip, machine.port, pythonCode)
+                   .catch(e => console.error(`Failed to inject on ${machine.name}`, e));
+            }
+
             addNotification(`脚本注入成功`, 'success');
         }
     };

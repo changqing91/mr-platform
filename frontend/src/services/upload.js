@@ -1,7 +1,7 @@
 import * as tus from 'tus-js-client';
 
-export const TUSD_ENDPOINT = 'http://192.168.1.82:9000/files';
-export const TUSD_PATH_PREFIX = '\\\\192.168.1.82\\upload\\';
+export const TUSD_ENDPOINT = import.meta.env.VITE_TUSD_ENDPOINT;
+export const TUSD_PATH_PREFIX = import.meta.env.VITE_TUSD_PATH_PREFIX;
 
 export const uploadFile = (file, onProgress) => {
     return new Promise((resolve, reject) => {
