@@ -26,6 +26,7 @@ const App = () => {
     // --- State: Auth ---
     const [isLoggedIn, setIsLoggedIn] = useState(() => !!localStorage.getItem('jwt'));
     const [loginForm, setLoginForm] = useState({ username: '', password: '' });
+    const [loginError, setLoginError] = useState(null);
     const [currentUser, setCurrentUser] = useState(() => {
         const saved = localStorage.getItem('currentUser');
         return saved ? JSON.parse(saved) : null;
@@ -165,6 +166,7 @@ const App = () => {
     // --- Handlers: Auth ---
     const handleLogin = async (e) => {
         e.preventDefault();
+        setLoginError(null);
         if (loginForm.username && loginForm.password) {
             try {
                 const { jwt, user } = await api.auth.login(loginForm.username, loginForm.password);
@@ -178,6 +180,7 @@ const App = () => {
                 addNotification('登录成功', 'success');
             } catch (e) {
                 console.error(e);
+                setLoginError(e.message || '登录失败，请检查账号密码');
                 addNotification(e.message || '登录失败，请检查账号密码', 'error');
             }
         }
@@ -795,7 +798,7 @@ const App = () => {
     const pendingCount = Object.keys(pendingLaunches).length;
 
     if (!isLoggedIn) {
-        return <LoginScreen handleLogin={handleLogin} loginForm={loginForm} setLoginForm={setLoginForm} />;
+        return <LoginScreen handleLogin={handleLogin} loginForm={loginForm} setLoginForm={setLoginForm} loginError={loginError} />;
     }
 
     return (

@@ -1,8 +1,8 @@
 import React from 'react';
-import { Box, User, Lock, ArrowLeft } from 'lucide-react';
+import { Box, User, Lock, ArrowLeft, AlertTriangle } from 'lucide-react';
 import { THEME_COLOR } from '../constants';
 
-const LoginScreen = ({ handleLogin, loginForm, setLoginForm }) => (
+const LoginScreen = ({ handleLogin, loginForm, setLoginForm, loginError }) => (
     <div className="absolute inset-0 z-50 bg-white flex items-center justify-center animate-in fade-in duration-500">
         <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl overflow-hidden relative border border-gray-100">
             <div className="h-2 w-full absolute top-0" style={{ backgroundColor: THEME_COLOR }}></div>
@@ -16,6 +16,12 @@ const LoginScreen = ({ handleLogin, loginForm, setLoginForm }) => (
                 </div>
                 
                 <form onSubmit={handleLogin} className="space-y-6">
+                    {loginError && (
+                        <div className="bg-red-50 text-red-600 px-4 py-3 rounded-xl text-sm flex items-center gap-2 animate-in fade-in slide-in-from-top-2">
+                            <AlertTriangle size={16} />
+                            {loginError}
+                        </div>
+                    )}
                     <div>
                         <label className="block text-sm font-bold text-gray-700 mb-2 ml-1">账号</label>
                         <div className="relative">
