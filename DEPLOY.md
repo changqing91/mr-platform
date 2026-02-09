@@ -15,6 +15,29 @@ chmod +x deploy.sh
 ./deploy.sh
 ```
 
+## 自动部署（GitHub Actions 自托管 Runner）
+
+在服务器上安装自托管 Runner，并在仓库中添加工作流文件后，推送到 main 分支会自动执行部署脚本。
+
+服务器步骤（Ubuntu）：
+```bash
+mkdir -p ~/actions-runner && cd ~/actions-runner
+curl -o actions-runner-linux-x64-2.320.0.tar.gz -L https://github.com/actions/runner/releases/download/v2.320.0/actions-runner-linux-x64-2.320.0.tar.gz
+tar xzf actions-runner-linux-x64-2.320.0.tar.gz
+./config.sh --url https://github.com/changqing91/mr-platform --token <REPO_RUNNER_TOKEN>
+sudo ./svc.sh install
+sudo ./svc.sh start
+```
+
+在 GitHub 仓库设置 Secrets：
+- APP_KEYS、API_TOKEN_SALT、ADMIN_JWT_SECRET、TRANSFER_TOKEN_SALT、JWT_SECRET、ENCRYPTION_KEY
+
+工作流文件位置：
+- `.github/workflows/deploy.yml`（已包含在仓库中）
+
+触发条件：
+- 推送到 `main` 分支自动运行并执行 `mr-platform/deploy.sh`
+
 ## 分模块部署
 
 仅部署前端：
