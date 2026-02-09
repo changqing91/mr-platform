@@ -1,0 +1,37 @@
+name: Deploy
+on:
+  push:
+    branches:
+      - main
+jobs:
+  deploy:
+    runs-on: self-hosted
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Deploy
+        working-directory: mr-platform
+        env:
+          FRONTEND_IMAGE: mr-frontend:arm64
+          SERVER_IMAGE: mr-server:arm64
+          TUSD_IMAGE: tusproject/tusd:latest
+          NETWORK: mr-net
+          VITE_TUSD_ENDPOINT: /files
+          VITE_TUSD_PATH_PREFIX: /mnt/upload/
+          TUSD_PORT: 9000
+          TUSD_HOOK_PORT: 3001
+          TUSD_UPLOAD_DIR: /data/uploads
+          TUSD_BASE_PATH: /files
+          UPLOADS_HOST_DIR: /mnt/upload
+          STRAPI_UPLOADS_HOST_DIR: /mnt/upload
+          APP_KEYS: ${{ secrets.APP_KEYS }}
+          API_TOKEN_SALT: ${{ secrets.API_TOKEN_SALT }}
+          ADMIN_JWT_SECRET: ${{ secrets.ADMIN_JWT_SECRET }}
+          TRANSFER_TOKEN_SALT: ${{ secrets.TRANSFER_TOKEN_SALT }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY }}
+        run: |
+          chmod +x deploy.sh
+          ./deploy.sh
