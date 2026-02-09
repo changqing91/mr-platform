@@ -15,18 +15,19 @@ const ScriptToolsPanel = ({
     const [isConfirmingKill, setIsConfirmingKill] = useState(false);
 
     const handleScriptClick = (tool) => {
-        const newSet = new Set(selectedScriptIds);
-        if (newSet.has(tool.id)) {
-            newSet.delete(tool.id);
-        } else {
-            newSet.add(tool.id);
+        if (selectedScriptIds.has(tool.id)) {
+            setSelectedScriptIds(new Set());
+            return;
         }
-        setSelectedScriptIds(newSet);
+        setSelectedScriptIds(new Set([tool.id]));
     };
 
     const handleExecute = () => {
-        onInject(Array.from(selectedScriptIds));
-        setSelectedScriptIds(new Set());
+        const [selectedId] = Array.from(selectedScriptIds);
+        if (selectedId) {
+            onInject([selectedId]);
+            setSelectedScriptIds(new Set());
+        }
     };
 
     return (

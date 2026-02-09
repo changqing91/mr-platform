@@ -72,21 +72,21 @@ module.exports = {
       // 2. Create Default User (admin / Password123!)
       if (authenticatedRole) {
         const userCount = await strapi.db.query('plugin::users-permissions.user').count({
-          where: { email: 'admin@mr.com' }
+          where: { email: 'admin@what-tech.cn' }
         });
 
         if (userCount === 0) {
           await strapi.entityService.create('plugin::users-permissions.user', {
             data: {
               username: 'admin',
-              email: 'admin@mr.com',
+              email: 'admin@what-tech.cn',
               password: 'Password123!',
               confirmed: true,
               blocked: false,
               role: authenticatedRole.id
             }
           });
-          strapi.log.info('Created default user: admin@mr.com / Password123!');
+          strapi.log.info('Created default user: admin@what-tech.cn / Password123!');
         }
       }
 

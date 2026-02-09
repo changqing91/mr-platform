@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import LoginScreen from './components/LoginScreen';
 import { THEME_COLOR, MR_TOOLS } from './constants';
-import { RADIAL_MENU_CORE, TOOL_IMPLEMENTATIONS } from './utils/vredPy';
+import { TOOL_IMPLEMENTATIONS } from './utils/vredPy';
 import { api } from './services/api';
 import { uploadFile, TUSD_PATH_PREFIX } from './services/upload';
 
@@ -525,10 +525,6 @@ const App = () => {
         setIsBatchMode(false);
         setShowScriptTools(true);
 
-        // Inject Radial Menu Core (Async)
-        api.processes.executePython(machine.ip, machine.port, RADIAL_MENU_CORE)
-            .then(() => console.log('Radial Menu Core Injected'))
-            .catch(e => console.error('Radial Menu Core Injection Failed', e));
     };
 
     const handleInjectScripts = (scriptIds) => {
@@ -538,10 +534,6 @@ const App = () => {
             const impl = TOOL_IMPLEMENTATIONS[id];
             if (impl) {
                 pythonCode += impl + "\n";
-                const tool = MR_TOOLS.find(t => t.id === id);
-                if (tool) {
-                     pythonCode += `if 'radial_menu_instance' in globals(): radial_menu_instance.add_tool("${id}", "${tool.name}", tool_${id})\n`;
-                }
             }
         });
 
