@@ -21,6 +21,7 @@ if ! mkdir -p "$UPLOADS_HOST_DIR" >/dev/null 2>&1; then
   UPLOADS_HOST_DIR="$ROOT/.data/uploads"
   mkdir -p "$UPLOADS_HOST_DIR"
 fi
+chmod -R 0777 "$UPLOADS_HOST_DIR" >/dev/null 2>&1 || true
 
 docker rm -f tusd tusd-hook >/dev/null 2>&1 || true
 

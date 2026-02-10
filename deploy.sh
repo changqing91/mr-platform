@@ -37,6 +37,7 @@ if ! mkdir -p "$UPLOADS_HOST_DIR" >/dev/null 2>&1 || ! mkdir -p "$STRAPI_UPLOADS
   STRAPI_UPLOADS_HOST_DIR="$ROOT/.data/strapi-uploads"
   mkdir -p "$UPLOADS_HOST_DIR" "$STRAPI_UPLOADS_HOST_DIR"
 fi
+chmod -R 0777 "$UPLOADS_HOST_DIR" >/dev/null 2>&1 || true
 
 docker rm -f tusd tusd-hook >/dev/null 2>&1 || true
 docker rm -f server >/dev/null 2>&1 || true
