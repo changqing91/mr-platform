@@ -1,3 +1,7 @@
+global vred_tool_registry
+if 'vred_tool_registry' not in globals():
+    vred_tool_registry = {}
+
 class TurntableTool:
     def __init__(self):
         self.isEnabled = False
@@ -29,6 +33,7 @@ class TurntableTool:
         self.rightAction = multiButtonPadTurntable.createControllerAction("right-padupright-pressed")
         self.centerAction = multiButtonPadTurntable.createControllerAction("right-padcenter-pressed")
         self.timer.connect(self.updateRotation)
+        self.registry_key = "tool_turntable"
         self.enable()
     def _resolve_target(self):
         try:
@@ -88,10 +93,43 @@ class TurntableTool:
             self.nodeRefReady = False
     def enable(self):
         self.isEnabled = True
+        try:
+            for k, obj in list(vred_tool_registry.items()):
+                if obj is not self and hasattr(obj, 'disable'):
+                    try:
+                        obj.disable()
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        vred_tool_registry[self.registry_key] = self
         vrDeviceService.setActiveInteractionGroup("TurntableGroup")
         self.leftAction.signal().triggered.connect(self.start_clockwise)
         self.rightAction.signal().triggered.connect(self.start_counterclockwise)
         self.centerAction.signal().triggered.connect(self.stop_rotation)
+    def disable(self):
+        self.isEnabled = False
+        try:
+            if vred_tool_registry.get(self.registry_key) is self:
+                del vred_tool_registry[self.registry_key]
+        except Exception:
+            pass
+        try:
+            self.leftAction.signal().triggered.disconnect(self.start_clockwise)
+        except Exception:
+            pass
+        try:
+            self.rightAction.signal().triggered.disconnect(self.start_counterclockwise)
+        except Exception:
+            pass
+        try:
+            self.centerAction.signal().triggered.disconnect(self.stop_rotation)
+        except Exception:
+            pass
+        try:
+            self.timer.setActive(0)
+        except Exception:
+            pass
     def start_clockwise(self):
         self.direction = 1
         self.start_rotation()

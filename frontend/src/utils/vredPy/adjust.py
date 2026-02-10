@@ -1,6 +1,45 @@
+import os
 import math
 def roundup(x):
     return int(math.ceil(x / 15.0)) * 15
+
+global vred_tool_registry
+if 'vred_tool_registry' not in globals():
+    vred_tool_registry = {}
+
+adjustControllerFound = False
+try:
+    allAdjustNodes = getAllNodes()
+    for node in allAdjustNodes:
+        nodeName = node.getName()
+        if nodeName == "VRController_Move" or nodeName == "VRControllerMove":
+            adjustControllerFound = True
+            break
+except Exception:
+    adjustControllerFound = False
+
+if not adjustControllerFound:
+    try:
+        base_dir = None
+        try:
+            base_dir = os.path.join(os.environ['USERPROFILE'], 'Documents')
+        except Exception:
+            try:
+                base_dir = os.path.join(os.environ['HOME'], 'Documents')
+            except Exception:
+                base_dir = None
+        if base_dir:
+            filepath = os.path.join(base_dir, 'Autodesk', 'Automotive', 'VRED')
+            filename = os.path.join(filepath, 'VRControllerMove.osb')
+            if os.path.exists(filename):
+                node = loadGeometry(filename)
+                try:
+                    node.setName("VRControllerMove")
+                except Exception:
+                    pass
+                adjustControllerFound = True
+    except Exception:
+        adjustControllerFound = False
 
 class AdjustTool:
     def __init__(self):
@@ -42,6 +81,9 @@ class AdjustTool:
         self.upAction = multiButtonPadAdjust.createControllerAction("right-padup-pressed")
         self.rightDownAction = multiButtonPadAdjust.createControllerAction("right-paddownright-pressed")
         self.centerAction = multiButtonPadAdjust.createControllerAction("right-padcenter-pressed")
+        self.registry_key = "tool_adjust"
+        self.newRightCon = None
+        self.AdjustControllerConstraint = None
         self.enable()
     def getMovable(self, node):
         while not node.isNull():
@@ -163,6 +205,16 @@ class AdjustTool:
         self.snapping = not self.snapping
     def enable(self):
         self.isEnabled = True
+        try:
+            for k, obj in list(vred_tool_registry.items()):
+                if obj is not self and hasattr(obj, 'disable'):
+                    try:
+                        obj.disable()
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        vred_tool_registry[self.registry_key] = self
         vrDeviceService.setActiveInteractionGroup("AdjustGroup")
         self.leftDownAction.signal().triggered.connect(self.constX)
         self.upAction.signal().triggered.connect(self.constY)
@@ -174,6 +226,104 @@ class AdjustTool:
         execute.signal().triggered.connect(self.stopMove)
         self.timer.setActive(1)
         self.timer.connect(self.constraintCheckFunction)
+        if adjustControllerFound:
+            try:
+                try:
+                    self.newRightCon = findNode("VRController_Move")
+                except Exception:
+                    self.newRightCon = None
+                if not self.newRightCon:
+                    try:
+                        self.newRightCon = findNode("VRControllerMove")
+                    except Exception:
+                        self.newRightCon = None
+            except Exception:
+                self.newRightCon = None
+            if self.newRightCon:
+                try:
+                    self.rightController.setVisible(0)
+                except Exception:
+                    pass
+                try:
+                    self.newRightCon.setActive(1)
+                except Exception:
+                    pass
+                try:
+                    controllerPos = getTransformNodeTranslation(self.rightController.getNode(), 1)
+                    setTransformNodeTranslation(self.newRightCon, controllerPos.x(), controllerPos.y(), controllerPos.z(), True)
+                except Exception:
+                    pass
+                try:
+                    self.AdjustControllerConstraint = vrConstraintService.createParentConstraint([self.rightController.getNode()], self.newRightCon, False)
+                except Exception:
+                    self.AdjustControllerConstraint = None
+        else:
+            try:
+                self.rightController.setVisible(1)
+            except Exception:
+                pass
+    def disable(self):
+        try:
+            self.isEnabled = False
+            self.startMoveFlag = False
+        except Exception:
+            pass
+        try:
+            if vred_tool_registry.get(self.registry_key) is self:
+                del vred_tool_registry[self.registry_key]
+        except Exception:
+            pass
+        try:
+            act = self.pointer.getControllerAction("start")
+            act.signal().triggered.disconnect(self.startMove)
+        except Exception:
+            pass
+        try:
+            act2 = self.pointer.getControllerAction("execute")
+            act2.signal().triggered.disconnect(self.stopMove)
+        except Exception:
+            pass
+        try:
+            self.leftDownAction.signal().triggered.disconnect(self.constX)
+        except Exception:
+            pass
+        try:
+            self.upAction.signal().triggered.disconnect(self.constY)
+        except Exception:
+            pass
+        try:
+            self.rightDownAction.signal().triggered.disconnect(self.constZ)
+        except Exception:
+            pass
+        try:
+            self.centerAction.signal().triggered.disconnect(self.constCenter)
+        except Exception:
+            pass
+        try:
+            self.timer.setActive(0)
+        except Exception:
+            pass
+        try:
+            if hasattr(self, 'constraint') and self.constraint:
+                vrConstraintService.deleteConstraint(self.constraint)
+                self.constraint = None
+        except Exception:
+            pass
+        try:
+            self.rightController.setVisible(1)
+        except Exception:
+            pass
+        try:
+            if self.newRightCon:
+                self.newRightCon.setActive(0)
+        except Exception:
+            pass
+        try:
+            if self.AdjustControllerConstraint:
+                vrConstraintService.deleteConstraint(self.AdjustControllerConstraint)
+                self.AdjustControllerConstraint = None
+        except Exception:
+            pass
 
 adjust = AdjustTool()
 print("executed")

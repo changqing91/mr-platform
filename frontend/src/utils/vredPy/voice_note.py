@@ -5,6 +5,9 @@ except Exception:
     qt_binding = None
 
 if qt_binding:
+    global vred_tool_registry
+    if 'vred_tool_registry' not in globals():
+        vred_tool_registry = {}
     import os
     import datetime
     import tempfile
@@ -398,6 +401,7 @@ if qt_binding:
             self.pointer.addSupportedInteractionGroup("NotesGroup")
             self.triggerRightPressed = self.multi.createControllerAction("right-trigger-pressed")
             self.timer = vrTimer()
+            self.registry_key = "tool_voice_note"
             self.enable()
         def distanceFunc(self):
             hover_node = None
@@ -448,9 +452,38 @@ if qt_binding:
             else:
                 start_recording(pos)
         def enable(self):
+            try:
+                for k, obj in list(vred_tool_registry.items()):
+                    if obj is not self and hasattr(obj, 'disable'):
+                        try:
+                            obj.disable()
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+            vred_tool_registry[self.registry_key] = self
             vrDeviceService.setActiveInteractionGroup("NotesGroup")
             self.triggerRightPressed.signal().triggered.connect(self.on_trigger)
             self.timer.setActive(1)
             self.timer.connect(self.distanceFunc)
+        def disable(self):
+            try:
+                if vred_tool_registry.get(self.registry_key) is self:
+                    del vred_tool_registry[self.registry_key]
+            except Exception:
+                pass
+            try:
+                self.triggerRightPressed.signal().triggered.disconnect(self.on_trigger)
+            except Exception:
+                pass
+            try:
+                self.timer.setActive(0)
+            except Exception:
+                pass
+            try:
+                if state.get('is_recording'):
+                    stop_recording()
+            except Exception:
+                pass
     VoiceNotes()
     print("executed")

@@ -1,63 +1,108 @@
+global vred_tool_registry
+if 'vred_tool_registry' not in globals():
+    vred_tool_registry = {}
+
 class MeasureTool:
     def __init__(self):
         self.isEnabled = False
-        self.active = False
-        self.leftController = vrDeviceService.getVRDevice("left-controller")
-        self.rightController = vrDeviceService.getVRDevice("right-controller")
-        self.leftController.setVisualizationMode(Visualization_ControllerAndHand)
-        self.rightController.setVisualizationMode(Visualization_ControllerAndHand)
-        padCenter = vrdVirtualTouchpadButton('padcenter', 0.0, 0.5, 0.0, 360.0)
-        self.rightController.addVirtualButton(padCenter, 'touchpad')
-        multiButtonPadMeasure = vrDeviceService.createInteraction("MultiButtonPadMeasure")
-        multiButtonPadMeasure.setSupportedInteractionGroups(["MeasureGroup"])
-        teleport = vrDeviceService.getInteraction("Teleport")
-        teleport.addSupportedInteractionGroup("MeasureGroup")
-        teleport.setControllerActionMapping("prepare", "left-touchpad-touched")
-        teleport.setControllerActionMapping("abort", "left-touchpad-untouched")
-        teleport.setControllerActionMapping("execute", "left-touchpad-pressed")
-        self.pointer = vrDeviceService.getInteraction("Pointer")
-        self.pointer.addSupportedInteractionGroup("MeasureGroup")
-        self.centerAction = multiButtonPadMeasure.createControllerAction("right-padcenter-pressed")
+        self.on = False
+        self.point1Selected = False
+        self.node1 = None
+        self.node2 = None
+        self.point1 = None
+        self.point2 = None
+        self.pointer = None
+        self.executeAction = None
+        self.registry_key = "tool_measure"
         self.enable()
     def enable(self):
         self.isEnabled = True
-        vrDeviceService.setActiveInteractionGroup("MeasureGroup")
-        self.centerAction.signal().triggered.connect(self.toggle)
-        self.start_measure()
-    def start_measure(self):
-        if self.active:
-            return
-        self.active = True
         try:
-            import vrMeasurementService
-            vrMeasurementService.startMeasurement(vrMeasurementService.PointToPoint)
+            for k, obj in list(vred_tool_registry.items()):
+                if obj is not self and hasattr(obj, 'disable'):
+                    try:
+                        obj.disable()
+                    except Exception:
+                        pass
         except Exception:
+            pass
+        vred_tool_registry[self.registry_key] = self
+        self.switchOn()
+    def switchOn(self):
+        if not self.on:
+            self.point1Selected = False
             try:
-                vrMeasurement.startMeasurement(0)
+                self.pointer = vrDeviceService.getInteraction("Pointer")
+                self.executeAction = self.pointer.getControllerAction("execute")
+                self.executeAction.signal().triggered.connect(self.selectPoint)
+                self.on = True
+            except Exception:
+                self.on = False
+    def switchOff(self):
+        if self.on:
+            try:
+                if self.executeAction:
+                    self.executeAction.signal().triggered.disconnect(self.selectPoint)
             except Exception:
                 pass
-    def stop_measure(self):
-        if not self.active:
-            return
-        self.active = False
+            self.on = False
+    def selectPoint(self, action, device):
         try:
-            import vrMeasurementService
-            if hasattr(vrMeasurementService, "stopMeasurement"):
-                vrMeasurementService.stopMeasurement()
-            elif hasattr(vrMeasurementService, "endMeasurement"):
-                vrMeasurementService.endMeasurement()
+            hit = device.pick()
         except Exception:
+            hit = None
+        if not hit or not hit.hasHit():
+            return
+        try:
+            if hit.getNode().getName() == "VRMenuPanel":
+                return
+        except Exception:
+            pass
+        if not self.point1Selected:
+            self.point1Selected = True
             try:
-                if hasattr(vrMeasurement, "stopMeasurement"):
-                    vrMeasurement.stopMeasurement()
-                elif hasattr(vrMeasurement, "endMeasurement"):
-                    vrMeasurement.endMeasurement()
+                self.node1 = hit.getNode()
+                self.point1 = hit.getPoint()
             except Exception:
-                pass
-    def toggle(self):
-        if self.active:
-            self.stop_measure()
+                self.node1 = None
+                self.point1 = None
+            self.removeMeasurement()
         else:
-            self.start_measure()
+            self.point1Selected = False
+            try:
+                self.node2 = hit.getNode()
+                self.point2 = hit.getPoint()
+            except Exception:
+                self.node2 = None
+                self.point2 = None
+            self.createMeasurement()
+    def createMeasurement(self):
+        try:
+            vrSessionService.sendPython("createPointPointMeasurement({},{},{},{})".format(
+                vrSessionService.toPythonString(self.node1),
+                vrSessionService.toPythonString(self.point1),
+                vrSessionService.toPythonString(self.node2),
+                vrSessionService.toPythonString(self.point2)))
+        except Exception:
+            try:
+                createPointPointMeasurement(self.node1, self.point1, self.node2, self.point2)
+            except Exception:
+                pass
+    def removeMeasurement(self):
+        try:
+            vrSessionService.sendPython("removeSelectedMeasurement()")
+        except Exception:
+            try:
+                removeSelectedMeasurement()
+            except Exception:
+                pass
+    def disable(self):
+        self.isEnabled = False
+        try:
+            if vred_tool_registry.get(self.registry_key) is self:
+                del vred_tool_registry[self.registry_key]
+        except Exception:
+            pass
+        self.switchOff()
 
 MeasureTool()

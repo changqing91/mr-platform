@@ -1,5 +1,9 @@
 import random
 
+global vred_tool_registry
+if 'vred_tool_registry' not in globals():
+    vred_tool_registry = {}
+
 notesControllerFound = False
 mainCustomFuncGroup = False
 
@@ -120,6 +124,7 @@ class Notes:
         self.deleteNoteIsActive = False
         self.changeView = False
 
+        self.registry_key = "tool_draw_note"
         self.enable()
 
     def distanceFunc(self):
@@ -146,6 +151,16 @@ class Notes:
         global notesControllerFound
         self.isEnabled = True
 
+        try:
+            for k, obj in list(vred_tool_registry.items()):
+                if obj is not self and hasattr(obj, 'disable'):
+                    try:
+                        obj.disable()
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        vred_tool_registry[self.registry_key] = self
         vrDeviceService.setActiveInteractionGroup("NotesGroup")
 
         self.leftUpperActionNotes.signal().triggered.connect(self.sizeDown)
@@ -184,6 +199,60 @@ class Notes:
         else:
             self.iconsNotesRay()
             self.onRayNotesMapping()
+    def disable(self):
+        self.isEnabled = False
+        try:
+            if vred_tool_registry.get(self.registry_key) is self:
+                del vred_tool_registry[self.registry_key]
+        except Exception:
+            pass
+        try:
+            self.leftUpperActionNotes.signal().triggered.disconnect(self.sizeDown)
+        except Exception:
+            pass
+        try:
+            self.upActionNotes.signal().triggered.disconnect(self.ChangeNote)
+        except Exception:
+            pass
+        try:
+            self.downActionNotes.signal().triggered.disconnect(self.deleteNote)
+        except Exception:
+            pass
+        try:
+            self.rightUpperActionNotes.signal().triggered.disconnect(self.sizeUp)
+        except Exception:
+            pass
+        try:
+            self.centerActionNotes.signal().triggered.disconnect(self.changeNoteView)
+        except Exception:
+            pass
+        try:
+            self.triggerRightPressed.signal().triggered.disconnect(self.trigger_right_pressed)
+        except Exception:
+            pass
+        try:
+            self.timer.setActive(0)
+        except Exception:
+            pass
+        try:
+            self.neutralNotes()
+        except Exception:
+            pass
+        try:
+            if hasattr(self, 'NoteControllerConstraint') and self.NoteControllerConstraint:
+                vrConstraintService.deleteConstraint(self.NoteControllerConstraint)
+                self.NoteControllerConstraint = None
+        except Exception:
+            pass
+        try:
+            if hasattr(self, 'newRightCon') and self.newRightCon:
+                self.newRightCon.setActive(0)
+        except Exception:
+            pass
+        try:
+            self.rightController.setVisible(1)
+        except Exception:
+            pass
 
     def trigger_right_pressed(self):
         global refObject
