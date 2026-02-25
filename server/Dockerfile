@@ -14,7 +14,7 @@ RUN if [ -f pnpm-lock.yaml ]; then pnpm install --frozen-lockfile; else pnpm ins
 
 COPY . .
 
-RUN pnpm run build
+RUN npm run build
 
 ENV HOST=0.0.0.0
 ENV PORT=1337
