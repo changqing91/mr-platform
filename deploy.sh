@@ -35,7 +35,10 @@ MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:-root}
 MYSQL_DATA_HOST_DIR=${MYSQL_DATA_HOST_DIR:-}
 MYSQL_DATA_VOLUME=${MYSQL_DATA_VOLUME:-mr-mysql}
 
+echo "Building images..."
+echo "  - $FRONTEND_IMAGE"
 docker build -t "$FRONTEND_IMAGE" -f "$ROOT/frontend/Dockerfile" "$ROOT/frontend" --build-arg VITE_TUSD_ENDPOINT="$VITE_TUSD_ENDPOINT" --build-arg VITE_TUSD_PATH_PREFIX="$VITE_TUSD_PATH_PREFIX"
+echo "  - $SERVER_IMAGE"
 docker build -t "$SERVER_IMAGE" -f "$ROOT/server/Dockerfile" "$ROOT/server"
 docker build -t "$TUSD_HOOK_IMAGE" -f "$ROOT/tusd/Dockerfile" "$ROOT/tusd"
 
