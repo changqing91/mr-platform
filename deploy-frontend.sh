@@ -8,7 +8,7 @@ NETWORK=${NETWORK:-mr-net}
 VITE_TUSD_ENDPOINT=${VITE_TUSD_ENDPOINT:-/files}
 VITE_TUSD_PATH_PREFIX=${VITE_TUSD_PATH_PREFIX:-\\\\192.168.1.80\\upload\\}
 
-docker build -t "$FRONTEND_IMAGE" -f "$ROOT/frontend/Dockerfile" "$ROOT/frontend" --build-arg VITE_TUSD_ENDPOINT="$VITE_TUSD_ENDPOINT" --build-arg VITE_TUSD_PATH_PREFIX="$VITE_TUSD_PATH_PREFIX" --build-arg HTTP_PROXY="${HTTP_PROXY:-}" --build-arg HTTPS_PROXY="${HTTPS_PROXY:-}" --build-arg NO_PROXY="${NO_PROXY:-}"
+docker build -t "$FRONTEND_IMAGE" -f "$ROOT/frontend/Dockerfile" "$ROOT/frontend" --build-arg VITE_TUSD_ENDPOINT="$VITE_TUSD_ENDPOINT" --build-arg VITE_TUSD_PATH_PREFIX="$VITE_TUSD_PATH_PREFIX"
 
 docker network inspect "$NETWORK" >/dev/null 2>&1 || docker network create "$NETWORK"
 

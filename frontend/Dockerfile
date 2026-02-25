@@ -13,19 +13,17 @@ ENV HTTP_PROXY=${HTTP_PROXY}
 ENV HTTPS_PROXY=${HTTPS_PROXY}
 ENV NO_PROXY=${NO_PROXY}
 
-COPY package.json package-lock.json* ./
-RUN npm config set registry http://registry.npmmirror.com
-RUN npm config set strict-ssl false
-RUN npm config set fetch-retries 5
-RUN npm config set fetch-retry-mintimeout 20000
-RUN npm config set fetch-retry-maxtimeout 120000
-RUN if [ -n "$HTTP_PROXY" ]; then npm config set proxy "$HTTP_PROXY"; fi
-RUN if [ -n "$HTTPS_PROXY" ]; then npm config set https-proxy "$HTTPS_PROXY"; fi
-RUN if [ -f package-lock.json ]; then sed -i 's#https://registry.npmmirror.com/#http://registry.npmmirror.com/#g' package-lock.json; fi
-RUN npm ci --no-audit --progress=false
+COPY package.json pnpm-lock.yaml* ./
+RUN corepack enable
+RUN corepack prepare pnpm@9.15.4 --activate
+RUN pnpm config set registry http://registry.npmmirror.com
+RUN pnpm config set strict-ssl false
+RUN if [ -n "$HTTP_PROXY" ]; then pnpm config set proxy "$HTTP_PROXY"; fi
+RUN if [ -n "$HTTPS_PROXY" ]; then pnpm config set https-proxy "$HTTPS_PROXY"; fi
+RUN if [ -f pnpm-lock.yaml ]; then pnpm install --frozen-lockfile; else pnpm install --no-frozen-lockfile; fi
 
 COPY . .
-RUN npm run build
+RUN pnpm run build
 
 FROM nginx:stable-alpine AS runtime
 WORKDIR /usr/share/nginx/html

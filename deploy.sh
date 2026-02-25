@@ -37,9 +37,9 @@ MYSQL_DATA_VOLUME=${MYSQL_DATA_VOLUME:-mr-mysql}
 
 echo "Building images..."
 echo "  - $FRONTEND_IMAGE"
-docker build --network=host -t "$FRONTEND_IMAGE" -f "$ROOT/frontend/Dockerfile" "$ROOT/frontend" --build-arg VITE_TUSD_ENDPOINT="$VITE_TUSD_ENDPOINT" --build-arg VITE_TUSD_PATH_PREFIX="$VITE_TUSD_PATH_PREFIX" --build-arg HTTP_PROXY="${HTTP_PROXY:-}" --build-arg HTTPS_PROXY="${HTTPS_PROXY:-}" --build-arg NO_PROXY="${NO_PROXY:-}"
+docker build --network=host -t "$FRONTEND_IMAGE" -f "$ROOT/frontend/Dockerfile" "$ROOT/frontend" --build-arg VITE_TUSD_ENDPOINT="$VITE_TUSD_ENDPOINT" --build-arg VITE_TUSD_PATH_PREFIX="$VITE_TUSD_PATH_PREFIX"
 echo "  - $SERVER_IMAGE"
-docker build --network=host -t "$SERVER_IMAGE" -f "$ROOT/server/Dockerfile" "$ROOT/server" --build-arg HTTP_PROXY="${HTTP_PROXY:-}" --build-arg HTTPS_PROXY="${HTTPS_PROXY:-}" --build-arg NO_PROXY="${NO_PROXY:-}"
+docker build --network=host -t "$SERVER_IMAGE" -f "$ROOT/server/Dockerfile" "$ROOT/server"
 docker build -t "$TUSD_HOOK_IMAGE" -f "$ROOT/tusd/Dockerfile" "$ROOT/tusd"
 
 docker network inspect "$NETWORK" >/dev/null 2>&1 || docker network create "$NETWORK"
