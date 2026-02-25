@@ -8,8 +8,12 @@ ENV VITE_TUSD_ENDPOINT=${VITE_TUSD_ENDPOINT}
 ENV VITE_TUSD_PATH_PREFIX=${VITE_TUSD_PATH_PREFIX}
 
 COPY package.json package-lock.json* ./
-RUN npm config set registry https://registry.npmmirror.com
-RUN npm ci
+RUN npm config set registry http://registry.npmmirror.com
+RUN npm config set strict-ssl false
+RUN npm config set fetch-retries 5
+RUN npm config set fetch-retry-mintimeout 20000
+RUN npm config set fetch-retry-maxtimeout 120000
+RUN npm ci --no-audit --progress=false
 
 COPY . .
 RUN npm run build

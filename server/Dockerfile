@@ -8,8 +8,12 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 COPY package.json package-lock.json* ./
-RUN npm config set registry https://registry.npmmirror.com
-RUN npm install
+RUN npm config set registry http://registry.npmmirror.com
+RUN npm config set strict-ssl false
+RUN npm config set fetch-retries 5
+RUN npm config set fetch-retry-mintimeout 20000
+RUN npm config set fetch-retry-maxtimeout 120000
+RUN npm ci --no-audit --progress=false
 
 COPY . .
 
