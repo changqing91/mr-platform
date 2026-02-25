@@ -39,7 +39,7 @@ else
   MYSQL_DATA_MOUNT="$MYSQL_DATA_VOLUME:/var/lib/mysql"
 fi
 
-docker build -t "$SERVER_IMAGE" -f "$ROOT/server/Dockerfile" "$ROOT/server"
+docker build -t "$SERVER_IMAGE" -f "$ROOT/server/Dockerfile" "$ROOT/server" --build-arg HTTP_PROXY="${HTTP_PROXY:-}" --build-arg HTTPS_PROXY="${HTTPS_PROXY:-}" --build-arg NO_PROXY="${NO_PROXY:-}"
 
 docker network inspect "$NETWORK" >/dev/null 2>&1 || docker network create "$NETWORK"
 
