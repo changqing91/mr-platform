@@ -21,6 +21,7 @@ RUN npm config set fetch-retry-mintimeout 20000
 RUN npm config set fetch-retry-maxtimeout 120000
 RUN if [ -n "$HTTP_PROXY" ]; then npm config set proxy "$HTTP_PROXY"; fi
 RUN if [ -n "$HTTPS_PROXY" ]; then npm config set https-proxy "$HTTPS_PROXY"; fi
+RUN if [ -f package-lock.json ]; then sed -i 's#https://registry.npmmirror.com/#http://registry.npmmirror.com/#g' package-lock.json; fi
 RUN npm ci --no-audit --progress=false
 
 COPY . .
