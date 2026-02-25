@@ -8,6 +8,7 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 COPY package.json package-lock.json* ./
+RUN npm config set registry https://registry.npmmirror.com
 RUN npm install
 
 COPY . .

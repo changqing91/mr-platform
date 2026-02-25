@@ -8,6 +8,7 @@ ENV VITE_TUSD_ENDPOINT=${VITE_TUSD_ENDPOINT}
 ENV VITE_TUSD_PATH_PREFIX=${VITE_TUSD_PATH_PREFIX}
 
 COPY package.json package-lock.json* ./
+RUN npm config set registry https://registry.npmmirror.com
 RUN npm ci
 
 COPY . .
