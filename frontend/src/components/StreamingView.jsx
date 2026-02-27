@@ -1,8 +1,43 @@
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import { ArrowLeft, Activity, Glasses, SplitSquareHorizontal, ImageIcon, Headset, FolderOpen, Monitor } from 'lucide-react';
 import ProjectThumbnail from './ProjectThumbnail';
 import { api } from '../services/api';
 import { api as vredApi } from '../services/vredPython';
+
+// --- Camera smoothing helpers ---
+const parseVec3 = (v) => {
+    if (Array.isArray(v)) return v.map(Number);
+    if (typeof v === 'string') return v.split(/\s+/).map(Number);
+    return [0, 0, 0];
+};
+const lerp = (a, b, t) => a + (b - a) * t;
+const lerpVec3 = (a, b, t) => a.map((v, i) => lerp(v, b[i], t));
+const lerpAngle = (a, b, t) => {
+    // Normalize delta to [-180, 180] to handle wrapping (e.g. 359° → 1°)
+    const d = ((b - a + 180) % 360 + 360) % 360 - 180;
+    return a + d * t;
+};
+const lerpEuler = (a, b, t) => a.map((v, i) => lerpAngle(v, b[i], t));
+
+// 计算两个向量的欧几里得距离
+const vec3Distance = (a, b) => {
+    const dx = a[0] - b[0];
+    const dy = a[1] - b[1];
+    const dz = a[2] - b[2];
+    return Math.sqrt(dx * dx + dy * dy + dz * dz);
+};
+
+// 计算两个欧拉角的差异（考虑角度环绕）
+const eulerDistance = (a, b) => {
+    let sum = 0;
+    for (let i = 0; i < 3; i++) {
+        let diff = Math.abs(a[i] - b[i]);
+        // 处理角度环绕（例如 359° 和 1° 的差异应该是 2°，而不是 358°）
+        if (diff > 180) diff = 360 - diff;
+        sum += diff * diff;
+    }
+    return Math.sqrt(sum);
+};
 
 const StreamingView = ({
     streamingMachineId,
@@ -40,40 +75,120 @@ const StreamingView = ({
     });
 
     const trackingTimerRef = useRef(null);
+    const smoothedCameraRef = useRef(null);
+    const syncLockRef = useRef(false);
 
+    // 组件卸载时清理定时器
+    useEffect(() => {
+        return () => {
+            if (trackingTimerRef.current) {
+                clearInterval(trackingTimerRef.current);
+            }
+        };
+    }, []);
+
+    // 同步 HMD 摄像机到旁观者屏幕，使用 viewpoint 动画实现平滑过渡
     const syncCameraOnce = async () => {
-        if (!machine || !streamParams.hmdIp) return;
+        if (!machine || !streamParams.hmdIp || syncLockRef.current) return;
+        syncLockRef.current = true;
         try {
+            // 1. 从头显机器读取实时摄像机
             vredApi.setBaseUrl(`http://${machine.ip}:${machine.port || 8888}`);
-            const camera = await vredApi.vrCameraService.getActiveCamera(true);
-            if (!camera) return;
-            const translation = await camera.getWorldTranslation();
-            const rotation = await camera.getRotationAsEuler();
+            const sourceCamera = await vredApi.vrCameraService.getActiveCamera(true);
+            if (!sourceCamera) return;
+
+            const rawT = parseVec3(await sourceCamera.getWorldTranslation());
+            const rawR = parseVec3(await sourceCamera.getRotationAsEuler());
+            const rawFov = Number(await sourceCamera.getFov());
+
+            // 2. EMA 平滑，消除头显抖动
+            const alpha = 0.35;
+            const prev = smoothedCameraRef.current;
+            const smoothed = prev
+                ? {
+                      t: lerpVec3(prev.t, rawT, alpha),
+                      r: lerpEuler(prev.r, rawR, alpha),
+                      fov: lerp(prev.fov, rawFov, alpha),
+                  }
+                : { t: rawT, r: rawR, fov: rawFov };
+            smoothedCameraRef.current = smoothed;
+
+            // 3. 阈值检测：只有当变化足够大时才更新旁观者摄像机
+            const positionThreshold = 1;    // 位置变化阈值（单位：mm）
+            const rotationThreshold = 0.5;   // 旋转变化阈值（单位：度）
+            const fovThreshold = 0.1;        // FOV 变化阈值
+
+            if (prev) {
+                const positionDiff = vec3Distance(smoothed.t, prev.t);
+                const rotationDiff = eulerDistance(smoothed.r, prev.r);
+                const fovDiff = Math.abs(smoothed.fov - prev.fov);
+
+                // 如果变化太小，跳过更新，避免静止时抖动
+                if (positionDiff < positionThreshold &&
+                    rotationDiff < rotationThreshold &&
+                    fovDiff < fovThreshold) {
+                    return;
+                }
+            }
+
+            // 4. 在旁观者机器上使用 viewpoint 动画设置摄像机
             vredApi.setBaseUrl(`http://${streamParams.hmdIp}:${streamParams.hmdPort || 8888}`);
-       
-            const activeCamera = await vredApi.vrCameraService.getActiveCamera(true);
-            const cameraTrack = await vredApi.vrCameraService.getOrCreateRenderQueueCameraTrack(activeCamera);
-            const viewpoint = await vredApi.vrCameraService.createViewpoint('OneTimeTrackingViewpoint', cameraTrack);
+            const targetCamera = await vredApi.vrCameraService.getActiveCamera(true);
+            if (!targetCamera) return;
+
+            // 获取或创建摄像机轨道
+            const cameraTrack = await vredApi.vrCameraService.getOrCreateRenderQueueCameraTrack(targetCamera);
+
+            // 每次创建新的 viewpoint
+            const viewpointName = `HMDTrackingViewpoint_${Date.now()}`;
+            const viewpoint = await vredApi.vrCameraService.createViewpoint(viewpointName, cameraTrack);
+
+            // 设置过渡时间（单位：秒）
+            const transitionDuration = Math.max(0.5, Number.parseFloat(streamParams.trackingInterval) * 0.8);
             await viewpoint.setViewpointTransition(true);
-            await viewpoint.setViewpointTransitionDuration(2);
-            await viewpoint.setTranslation(translation);
-            await viewpoint.setRotationAsEuler(rotation);
+            await viewpoint.setViewpointTransitionDuration(transitionDuration);
+
+            // 设置 viewpoint 的位置和旋转
+            await viewpoint.setTranslation(smoothed.t);
+            await viewpoint.setRotationAsEuler(smoothed.r);
+
+            // 激活 viewpoint，触发平滑过渡动画
             await viewpoint.activate(false, true);
-            // await vredApi.vrNodeService.removeNodes([viewpoint]);
+
+            // 设置 FOV
+            await targetCamera.setFov(smoothed.fov);
+
+            // 激活后删除 viewpoint，避免累积
+            await vredApi.vrCameraService.deleteViewpoint(viewpoint);
         } catch (e) {
             console.error('Failed to sync HMD camera:', e);
+        } finally {
+            syncLockRef.current = false;
         }
     };
 
     const handleAutoTracking = (enabled) => {
         updateStreamParam('isTracking', enabled);
+
+        // 清理现有的定时器
         if (trackingTimerRef.current) {
             clearInterval(trackingTimerRef.current);
             trackingTimerRef.current = null;
         }
-        if (!enabled) return;
+
+        if (!enabled) {
+            // 停止追踪时清理状态
+            smoothedCameraRef.current = null;
+            return;
+        }
+
+        // 启动追踪：定期读取 HMD 数据并更新摄像机
         const intervalMs = Math.max(2, Number.parseFloat(streamParams.trackingInterval)) * 1000;
+
+        // 立即执行一次同步
         syncCameraOnce();
+
+        // 定期同步（VRED 会根据摄像机的 viewpoint transition 设置自动处理平滑过渡）
         trackingTimerRef.current = setInterval(syncCameraOnce, intervalMs);
     };
 

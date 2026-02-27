@@ -206,14 +206,11 @@ class TurntableTool:
         except Exception:
             pass
         self._prepare_node_ref()
-        self.ignoreStopOnce = True
+        self.ignoreStopOnce = False
         self.timer.setActive(1)
     def stop_rotation(self, action=None, device=None):
         print("[Turntable] stop rotation", action, device)
-        if self.ignoreStopOnce:
-            print("[Turntable] stop ignored once")
-            self.ignoreStopOnce = False
-            return
+        self.ignoreStopOnce = False
         self.timer.setActive(0)
     def updateRotation(self):
         if not self.node:
