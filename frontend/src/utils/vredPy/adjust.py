@@ -1,7 +1,5 @@
 import os
 import math
-def roundup(x):
-    return int(math.ceil(x / 15.0)) * 15
 
 global vred_tool_registry
 if 'vred_tool_registry' not in globals():
@@ -46,45 +44,57 @@ class AdjustTool:
         self.isEnabled = False
         self.node = None
         self.startMoveFlag = False
-        self.snapping = False
-        self.constXPressed = False
-        self.constYPressed = False
-        self.constZPressed = False
+        self.nodeRefReady = False
         self.timer = vrTimer()
+        self.timerConnected = False
+        # 摇杆状态: 'none', 'forward', 'backward', 'left', 'right'
+        self.stickState = 'none'
+        self.moveSpeed = 5.0       # 前进后退速度 (mm/帧)
+        self.rotateSpeed = 1.0     # 旋转速度 (度/帧)
+
         self.leftController = vrDeviceService.getVRDevice("left-controller")
         self.rightController = vrDeviceService.getVRDevice("right-controller")
         self.leftController.setVisualizationMode(Visualization_ControllerAndHand)
         self.rightController.setVisualizationMode(Visualization_ControllerAndHand)
         vrImmersiveInteractionService.setDefaultInteractionsActive(1)
-        padCenter = vrdVirtualTouchpadButton('padcenter', 0.0, 0.5, 0.0, 360.0)
-        padUpperLeft = vrdVirtualTouchpadButton('padupleft', 0.5, 1.0, 270.0, 330.0)
-        padLowerLeft = vrdVirtualTouchpadButton('paddownleft', 0.5, 1.0, 210.0, 270.0)
+
+        # 摇杆四个方向
         padUp = vrdVirtualTouchpadButton('padup', 0.5, 1.0, 330.0, 30.0)
-        padLowerRight = vrdVirtualTouchpadButton('paddownright', 0.5, 1.0, 90.0, 150.0)
         padDown = vrdVirtualTouchpadButton('paddown', 0.5, 1.0, 150.0, 210.0)
-        self.rightController.addVirtualButton(padCenter, 'touchpad')
-        self.rightController.addVirtualButton(padUpperLeft, 'touchpad')
-        self.rightController.addVirtualButton(padLowerLeft, 'touchpad')
+        padLeft = vrdVirtualTouchpadButton('padleft', 0.5, 1.0, 210.0, 330.0)
+        padRight = vrdVirtualTouchpadButton('padright', 0.5, 1.0, 30.0, 150.0)
         self.rightController.addVirtualButton(padUp, 'touchpad')
-        self.rightController.addVirtualButton(padLowerRight, 'touchpad')
         self.rightController.addVirtualButton(padDown, 'touchpad')
+        self.rightController.addVirtualButton(padLeft, 'touchpad')
+        self.rightController.addVirtualButton(padRight, 'touchpad')
+
         multiButtonPadAdjust = vrDeviceService.createInteraction("MultiButtonPadAdjust")
         multiButtonPadAdjust.setSupportedInteractionGroups(["AdjustGroup"])
+
         teleport = vrDeviceService.getInteraction("Teleport")
         teleport.addSupportedInteractionGroup("AdjustGroup")
         teleport.setControllerActionMapping("prepare", "left-touchpad-touched")
         teleport.setControllerActionMapping("abort", "left-touchpad-untouched")
         teleport.setControllerActionMapping("execute", "left-touchpad-pressed")
+
         self.pointer = vrDeviceService.getInteraction("Pointer")
         self.pointer.addSupportedInteractionGroup("AdjustGroup")
-        self.leftDownAction = multiButtonPadAdjust.createControllerAction("right-paddownleft-pressed")
-        self.upAction = multiButtonPadAdjust.createControllerAction("right-padup-pressed")
-        self.rightDownAction = multiButtonPadAdjust.createControllerAction("right-paddownright-pressed")
-        self.centerAction = multiButtonPadAdjust.createControllerAction("right-padcenter-pressed")
+
+        # 摇杆方向 pressed/released
+        self.upPressed = multiButtonPadAdjust.createControllerAction("right-padup-pressed")
+        self.upReleased = multiButtonPadAdjust.createControllerAction("right-padup-released")
+        self.downPressed = multiButtonPadAdjust.createControllerAction("right-paddown-pressed")
+        self.downReleased = multiButtonPadAdjust.createControllerAction("right-paddown-released")
+        self.leftPressed = multiButtonPadAdjust.createControllerAction("right-padleft-pressed")
+        self.leftReleased = multiButtonPadAdjust.createControllerAction("right-padleft-released")
+        self.rightPressed = multiButtonPadAdjust.createControllerAction("right-padright-pressed")
+        self.rightReleased = multiButtonPadAdjust.createControllerAction("right-padright-released")
+
         self.registry_key = "tool_adjust"
         self.newRightCon = None
         self.AdjustControllerConstraint = None
         self.enable()
+
     def getMovable(self, node):
         while not node.isNull():
             if hasNodeTag(node, 'Movable'):
@@ -93,116 +103,128 @@ class AdjustTool:
                 break
             node = node.getParent()
         return node
-    def constraintCheckFunction(self):
-        if self.startMoveFlag and self.node and not self.node.isNull():
-            self.currentNodePos = getTransformNodeTranslation(self.node, 1)
-            self.currentNodeRot = getTransformNodeRotation(self.node)
-            if self.constXPressed and self.constYPressed:
-                t = "%f,%f,%f" % (self.currentNodePos.x(), self.currentNodePos.y(), self.originalNodePos.z())
-                vrSessionService.sendPython('setTransformNodeTranslation(nodeRef, ' + t + ', True)')
-                r = "%f,%f,%f" % (self.originalNodeRot.x(), self.originalNodeRot.y(), self.originalNodeRot.z())
-                vrSessionService.sendPython('setTransformNodeRotation(nodeRef, ' + r + ')')
-                setTransformNodeTranslation(self.node, self.currentNodePos.x(), self.currentNodePos.y(), self.originalNodePos.z(), 1)
-                setTransformNodeRotation(self.node, self.originalNodeRot.x(), self.originalNodeRot.y(), self.originalNodeRot.z())
-            elif self.constYPressed and self.constZPressed:
-                t = "%f,%f,%f" % (self.originalNodePos.x(), self.currentNodePos.y(), self.currentNodePos.z())
-                vrSessionService.sendPython('setTransformNodeTranslation(nodeRef, ' + t + ', True)')
-                r = "%f,%f,%f" % (self.originalNodeRot.x(), self.originalNodeRot.y(), self.originalNodeRot.z())
-                vrSessionService.sendPython('setTransformNodeRotation(nodeRef, ' + r + ')')
-                setTransformNodeTranslation(self.node, self.originalNodePos.x(), self.currentNodePos.y(), self.currentNodePos.z(), 1)
-                setTransformNodeRotation(self.node, self.originalNodeRot.x(), self.originalNodeRot.y(), self.originalNodeRot.z())
-            elif self.constXPressed and self.constZPressed:
-                t = "%f,%f,%f" % (self.currentNodePos.x(), self.originalNodePos.y(), self.currentNodePos.z())
-                vrSessionService.sendPython('setTransformNodeTranslation(nodeRef, ' + t + ', True)')
-                r = "%f,%f,%f" % (self.originalNodeRot.x(), self.originalNodeRot.y(), self.originalNodeRot.z())
-                vrSessionService.sendPython('setTransformNodeRotation(nodeRef, ' + r + ')')
-                setTransformNodeTranslation(self.node, self.currentNodePos.x(), self.originalNodePos.y(), self.currentNodePos.z(), 1)
-                setTransformNodeRotation(self.node, self.originalNodeRot.x(), self.originalNodeRot.y(), self.originalNodeRot.z())
-            elif self.constXPressed:
-                t = "%f,%f,%f" % (self.currentNodePos.x(), self.originalNodePos.y(), self.originalNodePos.z())
-                vrSessionService.sendPython('setTransformNodeTranslation(nodeRef, ' + t + ', True)')
-                r = "%f,%f,%f" % (self.originalNodeRot.x(), self.originalNodeRot.y(), self.originalNodeRot.z())
-                vrSessionService.sendPython('setTransformNodeRotation(nodeRef, ' + r + ')')
-                setTransformNodeTranslation(self.node, self.currentNodePos.x(), self.originalNodePos.y(), self.originalNodePos.z(), 1)
-                setTransformNodeRotation(self.node, self.originalNodeRot.x(), self.originalNodeRot.y(), self.originalNodeRot.z())
-            elif self.constYPressed:
-                t = "%f,%f,%f" % (self.originalNodePos.x(), self.currentNodePos.y(), self.originalNodePos.z())
-                vrSessionService.sendPython('setTransformNodeTranslation(nodeRef, ' + t + ', True)')
-                r = "%f,%f,%f" % (self.originalNodeRot.x(), self.originalNodeRot.y(), self.originalNodeRot.z())
-                vrSessionService.sendPython('setTransformNodeRotation(nodeRef, ' + r + ')')
-                setTransformNodeTranslation(self.node, self.originalNodePos.x(), self.currentNodePos.y(), self.originalNodePos.z(), 1)
-                setTransformNodeRotation(self.node, self.originalNodeRot.x(), self.originalNodeRot.y(), self.originalNodeRot.z())
-            elif self.constZPressed:
-                t = "%f,%f,%f" % (self.originalNodePos.x(), self.originalNodePos.y(), self.currentNodePos.z())
-                vrSessionService.sendPython('setTransformNodeTranslation(nodeRef, ' + t + ', True)')
-                r = "%f,%f,%f" % (self.originalNodeRot.x(), self.originalNodeRot.y(), self.originalNodeRot.z())
-                vrSessionService.sendPython('setTransformNodeRotation(nodeRef, ' + r + ')')
-                setTransformNodeTranslation(self.node, self.originalNodePos.x(), self.originalNodePos.y(), self.currentNodePos.z(), 1)
-                setTransformNodeRotation(self.node, self.originalNodeRot.x(), self.originalNodeRot.y(), self.originalNodeRot.z())
-            elif self.snapping:
-                self.currentNodeRot = getTransformNodeRotation(self.node)
-                x = roundup(self.currentNodeRot.x())
-                y = roundup(self.currentNodeRot.y())
-                z = roundup(self.currentNodeRot.z())
-                r = "%f,%f,%f" % (x, y, z)
-                vrSessionService.sendPython('setTransformNodeRotation(nodeRef, ' + r + ')')
-                setTransformNodeRotation(self.node, x, y, z)
-                t = "%f,%f,%f" % (self.currentNodePos.x(), self.currentNodePos.y(), self.currentNodePos.z())
-                vrSessionService.sendPython('setTransformNodeTranslation(nodeRef, ' + t + ', True)')
-            else:
-                t = "%f,%f,%f" % (self.currentNodePos.x(), self.currentNodePos.y(), self.currentNodePos.z())
-                vrSessionService.sendPython('setTransformNodeTranslation(nodeRef, ' + t + ', True)')
-                r = "%f,%f,%f" % (self.currentNodeRot.x(), self.currentNodeRot.y(), self.currentNodeRot.z())
-                vrSessionService.sendPython('setTransformNodeRotation(nodeRef, ' + r + ')')
-    def startMove(self, action, device):
-        self.node = self.getMovable(device.pick().getNode())
-        if not self.node.isNull():
-            self.originalNodeRot = getTransformNodeRotation(self.node)
-            self.constraint = vrConstraintService.createParentConstraint([device.getNode()], self.node, True)
-            self.originalNodePos = getTransformNodeTranslation(self.node, 1)
-            self.startMoveFlag = True
+
+    def _prepare_node_ref(self):
+        self.nodeRefReady = False
+        try:
             mypath = getUniquePath(self.node)
             nameString = "%s" % mypath
             vrSessionService.sendPython('"' + nameString + '"')
             vrSessionService.sendPython('nodeRef = findUniquePath("' + nameString + '")')
+            self.nodeRefReady = True
+        except Exception:
+            self.nodeRefReady = False
+
+    def _sync_transform(self):
+        if not self.nodeRefReady or not self.node:
+            return
+        try:
+            pos = getTransformNodeTranslation(self.node, 1)
+            rot = getTransformNodeRotation(self.node)
+            t = "%f,%f,%f" % (pos.x(), pos.y(), pos.z())
+            r = "%f,%f,%f" % (rot.x(), rot.y(), rot.z())
+            vrSessionService.sendPython('setTransformNodeTranslation(nodeRef, ' + t + ', True)')
+            vrSessionService.sendPython('setTransformNodeRotation(nodeRef, ' + r + ')')
+        except Exception:
+            pass
+
+    def constraintCheckFunction(self):
+        # trigger 拖拽中：锁 Z 高度，保留 Z 轴旋转 (XY 为地平面，Z 为上下)
+        if self.startMoveFlag and self.node and not self.node.isNull():
+            pos = getTransformNodeTranslation(self.node, 1)
+            rot = getTransformNodeRotation(self.node)
+            setTransformNodeTranslation(self.node, pos.x(), pos.y(), self.originalNodePos.z(), 1)
+            setTransformNodeRotation(self.node, self.originalNodeRot.x(), self.originalNodeRot.y(), rot.z())
+            self._sync_transform()
+            return
+
+        # 摇杆控制：前后平移 / 左右旋转
+        if self.stickState == 'none' or not self.node:
+            return
+        try:
+            if self.node.isNull():
+                return
+        except Exception:
+            return
+
+        rot = getTransformNodeRotation(self.node)
+        pos = getTransformNodeTranslation(self.node, 1)
+
+        if self.stickState == 'forward' or self.stickState == 'backward':
+            # 沿对象当前 Z 轴旋转朝向在 XY 地平面上前进/后退
+            angle_rad = math.radians(rot.z())
+            direction = self.moveSpeed if self.stickState == 'forward' else -self.moveSpeed
+            dx = -math.sin(angle_rad) * direction
+            dy = math.cos(angle_rad) * direction
+            setTransformNodeTranslation(self.node, pos.x() + dx, pos.y() + dy, pos.z(), 1)
+        elif self.stickState == 'left':
+            setTransformNodeRotation(self.node, rot.x(), rot.y(), rot.z() + self.rotateSpeed)
+        elif self.stickState == 'right':
+            setTransformNodeRotation(self.node, rot.x(), rot.y(), rot.z() - self.rotateSpeed)
+
+        self._sync_transform()
+
+    def startMove(self, action, device):
+        self.node = self.getMovable(device.pick().getNode())
+        if not self.node.isNull():
+            self.originalNodeRot = getTransformNodeRotation(self.node)
+            self.originalNodePos = getTransformNodeTranslation(self.node, 1)
+            self.constraint = vrConstraintService.createParentConstraint([device.getNode()], self.node, True)
+            self.startMoveFlag = True
+            self._prepare_node_ref()
+
     def stopMove(self, action, device):
-        if not self.node == None and not self.node.isNull():
-            self.finalNodePos = getTransformNodeTranslation(self.node, 1)
-            self.finalNodeRot = getTransformNodeRotation(self.node)
-            if self.constXPressed and self.constYPressed:
-                setTransformNodeTranslation(self.node, self.currentNodePos.x(), self.currentNodePos.y(), self.originalNodePos.z(), 1)
-                setTransformNodeRotation(self.node, self.originalNodeRot.x(), self.originalNodeRot.y(), self.originalNodeRot.z())
-            elif self.constYPressed and self.constZPressed:
-                setTransformNodeTranslation(self.node, self.originalNodePos.x(), self.currentNodePos.y(), self.currentNodePos.z(), 1)
-                setTransformNodeRotation(self.node, self.originalNodeRot.x(), self.originalNodeRot.y(), self.originalNodeRot.z())
-            elif self.constXPressed and self.constZPressed:
-                setTransformNodeTranslation(self.node, self.currentNodePos.x(), self.originalNodePos.y(), self.currentNodePos.z(), 1)
-                setTransformNodeRotation(self.node, self.originalNodeRot.x(), self.originalNodeRot.y(), self.originalNodeRot.z())
-            elif self.constXPressed:
-                setTransformNodeTranslation(self.node, self.currentNodePos.x(), self.originalNodePos.y(), self.originalNodePos.z(), 1)
-                setTransformNodeRotation(self.node, self.originalNodeRot.x(), self.originalNodeRot.y(), self.originalNodeRot.z())
-            elif self.constYPressed:
-                setTransformNodeTranslation(self.node, self.originalNodePos.x(), self.currentNodePos.y(), self.originalNodePos.z(), 1)
-                setTransformNodeRotation(self.node, self.originalNodeRot.x(), self.originalNodeRot.y(), self.originalNodeRot.z())
-            elif self.constZPressed:
-                setTransformNodeTranslation(self.node, self.originalNodePos.x(), self.originalNodePos.y(), self.currentNodePos.z(), 1)
-                setTransformNodeRotation(self.node, self.originalNodeRot.x(), self.originalNodeRot.y(), self.originalNodeRot.z())
-            elif self.snapping:
-                self.currentNodeRot = getTransformNodeRotation(self.node)
-                x = roundup(self.currentNodeRot.x())
-                y = roundup(self.currentNodeRot.y())
-                z = roundup(self.currentNodeRot.z())
-                setTransformNodeRotation(self.node, x, y, z)
+        if self.node is not None and not self.node.isNull():
+            pos = getTransformNodeTranslation(self.node, 1)
+            rot = getTransformNodeRotation(self.node)
+            setTransformNodeTranslation(self.node, pos.x(), pos.y(), self.originalNodePos.z(), 1)
+            setTransformNodeRotation(self.node, self.originalNodeRot.x(), self.originalNodeRot.y(), rot.z())
             vrConstraintService.deleteConstraint(self.constraint)
             self.startMoveFlag = False
-    def constX(self):
-        self.constXPressed = not self.constXPressed
-    def constY(self):
-        self.constYPressed = not self.constYPressed
-    def constZ(self):
-        self.constZPressed = not self.constZPressed
-    def constCenter(self):
-        self.snapping = not self.snapping
+            self._sync_transform()
+
+    # --- 摇杆事件 ---
+    def on_stick_forward(self, action=None, device=None):
+        self._ensure_node()
+        self.stickState = 'forward'
+    def on_stick_backward(self, action=None, device=None):
+        self._ensure_node()
+        self.stickState = 'backward'
+    def on_stick_left(self, action=None, device=None):
+        self._ensure_node()
+        self.stickState = 'left'
+    def on_stick_right(self, action=None, device=None):
+        self._ensure_node()
+        self.stickState = 'right'
+    def on_stick_release(self, action=None, device=None):
+        self.stickState = 'none'
+
+    def _ensure_node(self):
+        # 摇杆操作时如果还没有目标节点，自动查找
+        if self.node and not self.node.isNull():
+            return
+        try:
+            nodes = getSelectedNodes()
+            if nodes and len(nodes) > 0 and not nodes[0].isNull():
+                self.node = self.getMovable(nodes[0])
+                self._prepare_node_ref()
+                return
+        except Exception:
+            pass
+        try:
+            root = getRootNode()
+            if root and not root.isNull():
+                children = root.getChildren()
+                if children and len(children) > 0:
+                    for child in children:
+                        movable = self.getMovable(child)
+                        if movable and not movable.isNull():
+                            self.node = movable
+                            self._prepare_node_ref()
+                            return
+        except Exception:
+            pass
+
     def enable(self):
         self.isEnabled = True
         try:
@@ -216,16 +238,28 @@ class AdjustTool:
             pass
         vred_tool_registry[self.registry_key] = self
         vrDeviceService.setActiveInteractionGroup("AdjustGroup")
-        self.leftDownAction.signal().triggered.connect(self.constX)
-        self.upAction.signal().triggered.connect(self.constY)
-        self.rightDownAction.signal().triggered.connect(self.constZ)
-        self.centerAction.signal().triggered.connect(self.constCenter)
+
         start = self.pointer.getControllerAction("start")
         start.signal().triggered.connect(self.startMove)
         execute = self.pointer.getControllerAction("execute")
         execute.signal().triggered.connect(self.stopMove)
+
+        # 摇杆信号
+        self.upPressed.signal().triggered.connect(self.on_stick_forward)
+        self.upReleased.signal().triggered.connect(self.on_stick_release)
+        self.downPressed.signal().triggered.connect(self.on_stick_backward)
+        self.downReleased.signal().triggered.connect(self.on_stick_release)
+        self.leftPressed.signal().triggered.connect(self.on_stick_left)
+        self.leftReleased.signal().triggered.connect(self.on_stick_release)
+        self.rightPressed.signal().triggered.connect(self.on_stick_right)
+        self.rightReleased.signal().triggered.connect(self.on_stick_release)
+
+        # timer
+        if not self.timerConnected:
+            self.timer.connect(self.constraintCheckFunction)
+            self.timerConnected = True
         self.timer.setActive(1)
-        self.timer.connect(self.constraintCheckFunction)
+
         if adjustControllerFound:
             try:
                 try:
@@ -262,10 +296,12 @@ class AdjustTool:
                 self.rightController.setVisible(1)
             except Exception:
                 pass
+
     def disable(self):
         try:
             self.isEnabled = False
             self.startMoveFlag = False
+            self.stickState = 'none'
         except Exception:
             pass
         try:
@@ -284,19 +320,35 @@ class AdjustTool:
         except Exception:
             pass
         try:
-            self.leftDownAction.signal().triggered.disconnect(self.constX)
+            self.upPressed.signal().triggered.disconnect(self.on_stick_forward)
         except Exception:
             pass
         try:
-            self.upAction.signal().triggered.disconnect(self.constY)
+            self.upReleased.signal().triggered.disconnect(self.on_stick_release)
         except Exception:
             pass
         try:
-            self.rightDownAction.signal().triggered.disconnect(self.constZ)
+            self.downPressed.signal().triggered.disconnect(self.on_stick_backward)
         except Exception:
             pass
         try:
-            self.centerAction.signal().triggered.disconnect(self.constCenter)
+            self.downReleased.signal().triggered.disconnect(self.on_stick_release)
+        except Exception:
+            pass
+        try:
+            self.leftPressed.signal().triggered.disconnect(self.on_stick_left)
+        except Exception:
+            pass
+        try:
+            self.leftReleased.signal().triggered.disconnect(self.on_stick_release)
+        except Exception:
+            pass
+        try:
+            self.rightPressed.signal().triggered.disconnect(self.on_stick_right)
+        except Exception:
+            pass
+        try:
+            self.rightReleased.signal().triggered.disconnect(self.on_stick_release)
         except Exception:
             pass
         try:

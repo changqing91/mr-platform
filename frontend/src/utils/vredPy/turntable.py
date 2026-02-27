@@ -1,6 +1,42 @@
+import os
+
 global vred_tool_registry
 if 'vred_tool_registry' not in globals():
     vred_tool_registry = {}
+
+rotationControllerFound = False
+try:
+    allRotNodes = getAllNodes()
+    for node in allRotNodes:
+        nodeName = node.getName()
+        if nodeName == "VRController_Rotation" or nodeName == "VRControllerRotation":
+            rotationControllerFound = True
+            break
+except Exception:
+    rotationControllerFound = False
+
+if not rotationControllerFound:
+    try:
+        base_dir = None
+        try:
+            base_dir = os.path.join(os.environ['USERPROFILE'], 'Documents')
+        except Exception:
+            try:
+                base_dir = os.path.join(os.environ['HOME'], 'Documents')
+            except Exception:
+                base_dir = None
+        if base_dir:
+            filepath = os.path.join(base_dir, 'Autodesk', 'Automotive', 'VRED')
+            filename = os.path.join(filepath, 'VRControllerRotation.osb')
+            if os.path.exists(filename):
+                node = loadGeometry(filename)
+                try:
+                    node.setName("VRControllerRotation")
+                except Exception:
+                    pass
+                rotationControllerFound = True
+    except Exception:
+        rotationControllerFound = False
 
 class TurntableTool:
     def __init__(self):
@@ -9,59 +45,55 @@ class TurntableTool:
         self.speed = 1.0
         self.node = None
         self.nodeRefReady = False
+        self.rotating = False
+        self.currentAngle = 0.0
         self.timer = vrTimer()
-        self.ignoreStopOnce = False
-        print("[Turntable] init begin")
+        self.timerConnected = False
+        self.newRightCon = None
+        self.RotationControllerConstraint = None
+
         self.leftController = vrDeviceService.getVRDevice("left-controller")
         self.rightController = vrDeviceService.getVRDevice("right-controller")
-        print("[Turntable] controllers", self.leftController, self.rightController)
         self.leftController.setVisualizationMode(Visualization_ControllerAndHand)
         self.rightController.setVisualizationMode(Visualization_ControllerAndHand)
-        padCenter = vrdVirtualTouchpadButton('padcenter', 0.0, 0.5, 0.0, 360.0)
-        padUpperLeft = vrdVirtualTouchpadButton('padupleft', 0.5, 1.0, 270.0, 330.0)
-        padLowerLeft = vrdVirtualTouchpadButton('paddownleft', 0.5, 1.0, 210.0, 270.0)
-        padUpperRight = vrdVirtualTouchpadButton('padupright', 0.5, 1.0, 30.0, 90.0)
-        padLowerRight = vrdVirtualTouchpadButton('paddownright', 0.5, 1.0, 90.0, 150.0)
-        self.rightController.addVirtualButton(padCenter, 'touchpad')
-        self.rightController.addVirtualButton(padUpperLeft, 'touchpad')
-        self.rightController.addVirtualButton(padLowerLeft, 'touchpad')
-        self.rightController.addVirtualButton(padUpperRight, 'touchpad')
-        self.rightController.addVirtualButton(padLowerRight, 'touchpad')
-        multiButtonPadTurntable = vrDeviceService.createInteraction("MultiButtonPadTurntable")
-        multiButtonPadTurntable.setSupportedInteractionGroups(["TurntableGroup"])
-        self.leftUpperAction = multiButtonPadTurntable.createControllerAction("right-padupleft-pressed")
-        self.leftLowerAction = multiButtonPadTurntable.createControllerAction("right-paddownleft-pressed")
-        self.rightUpperAction = multiButtonPadTurntable.createControllerAction("right-padupright-pressed")
-        self.rightLowerAction = multiButtonPadTurntable.createControllerAction("right-paddownright-pressed")
-        self.centerAction = multiButtonPadTurntable.createControllerAction("right-padcenter-pressed")
-        self.timer.connect(self.updateRotation)
+
+        # touchpad: 左=逆时针, 右=顺时针, 用 touched 而非 pressed
+        padLeft = vrdVirtualTouchpadButton('padleft', 0.3, 1.0, 180.0, 360.0)
+        padRight = vrdVirtualTouchpadButton('padright', 0.3, 1.0, 0.0, 180.0)
+        self.rightController.addVirtualButton(padLeft, 'touchpad')
+        self.rightController.addVirtualButton(padRight, 'touchpad')
+
+        multiButtonPad = vrDeviceService.createInteraction("MultiButtonPadTurntable")
+        multiButtonPad.setSupportedInteractionGroups(["TurntableGroup"])
+
+        # 保留 teleport 在左手
+        teleport = vrDeviceService.getInteraction("Teleport")
+        teleport.addSupportedInteractionGroup("TurntableGroup")
+        teleport.setControllerActionMapping("prepare", "left-touchpad-touched")
+        teleport.setControllerActionMapping("abort", "left-touchpad-untouched")
+        teleport.setControllerActionMapping("execute", "left-touchpad-pressed")
+
+        # 摇杆拨动切换方向 (touched = 摆动即触发)
+        self.leftTouched = multiButtonPad.createControllerAction("right-padleft-touched")
+        self.rightTouched = multiButtonPad.createControllerAction("right-padright-touched")
+
+        # trigger: 按一次启动，再按一次停止
+        self.triggerAction = multiButtonPad.createControllerAction("right-trigger-pressed")
+
         self.registry_key = "tool_turntable"
-        print("[Turntable] init done")
         self.enable()
+
     def _resolve_target(self):
-        print("[Turntable] resolve target begin")
         try:
             nodes = getSelectedNodes()
             if nodes and len(nodes) > 0:
-                print("[Turntable] selected nodes", len(nodes))
-                try:
-                    print("[Turntable] selected node", nodes[0].getName())
-                except Exception:
-                    print("[Turntable] selected node")
                 try:
                     if nodes[0].isNull():
-                        print("[Turntable] selected node is null")
                         return None
                 except Exception:
                     pass
                 movable = self._get_movable(nodes[0])
-                if movable:
-                    return movable
-                try:
-                    print("[Turntable] selected fallback node", nodes[0].getName())
-                except Exception:
-                    print("[Turntable] selected fallback node")
-                return nodes[0]
+                return movable if movable else nodes[0]
         except Exception:
             pass
         try:
@@ -69,46 +101,33 @@ class TurntableTool:
             if root and not root.isNull():
                 children = root.getChildren()
                 if children and len(children) > 0:
-                    print("[Turntable] root children", len(children))
-                    movable_child = self._find_movable_in_list(children)
-                    if movable_child:
-                        return movable_child
+                    movable = self._find_movable_in_list(children)
+                    if movable:
+                        return movable
         except Exception:
             pass
         try:
             nodes = getAllNodes()
             if nodes:
-                print("[Turntable] all nodes", len(nodes))
-                movable_node = self._find_movable_in_list(nodes)
-                if movable_node:
-                    return movable_node
+                movable = self._find_movable_in_list(nodes)
+                if movable:
+                    return movable
         except Exception:
             pass
-        print("[Turntable] resolve target none")
         return None
+
     def _get_movable(self, node):
         try:
             while node and not node.isNull():
-                try:
-                    print("[Turntable] inspect node", node.getName())
-                except Exception:
-                    print("[Turntable] inspect node")
                 if hasNodeTag(node, 'Movable'):
-                    try:
-                        print("[Turntable] movable tag node", node.getName())
-                    except Exception:
-                        print("[Turntable] movable tag node")
                     return node
-                if node.getName() == "Group" or node.getName() == "Transform":
-                    try:
-                        print("[Turntable] fallback group/transform", node.getName())
-                    except Exception:
-                        print("[Turntable] fallback group/transform")
+                if node.getName() in ("Group", "Transform"):
                     return node
                 node = node.getParent()
         except Exception:
             pass
         return None
+
     def _find_movable_in_list(self, nodes):
         try:
             for node in nodes:
@@ -118,20 +137,30 @@ class TurntableTool:
         except Exception:
             pass
         return None
+
     def _prepare_node_ref(self):
         self.nodeRefReady = False
         try:
             mypath = getUniquePath(self.node)
             nameString = "%s" % mypath
-            print("[Turntable] prepare node ref", nameString)
             vrSessionService.sendPython('"' + nameString + '"')
             vrSessionService.sendPython('nodeRef = findUniquePath("' + nameString + '")')
             self.nodeRefReady = True
         except Exception:
             self.nodeRefReady = False
+
+    def _start_timer(self):
+        self.timer.setActive(0)
+        if not self.timerConnected:
+            self.timer.connect(self.updateRotation)
+            self.timerConnected = True
+        self.timer.setActive(1)
+
+    def _stop_timer(self):
+        self.timer.setActive(0)
+
     def enable(self):
         self.isEnabled = True
-        print("[Turntable] enable")
         try:
             for k, obj in list(vred_tool_registry.items()):
                 if obj is not self and hasattr(obj, 'disable'):
@@ -143,94 +172,138 @@ class TurntableTool:
             pass
         vred_tool_registry[self.registry_key] = self
         vrDeviceService.setActiveInteractionGroup("TurntableGroup")
-        self.leftUpperAction.signal().triggered.connect(self.start_clockwise)
-        self.leftLowerAction.signal().triggered.connect(self.start_clockwise)
-        self.rightUpperAction.signal().triggered.connect(self.start_counterclockwise)
-        self.rightLowerAction.signal().triggered.connect(self.start_counterclockwise)
-        self.centerAction.signal().triggered.connect(self.stop_rotation)
-        print("[Turntable] actions connected")
+        self.leftTouched.signal().triggered.connect(self.set_counterclockwise)
+        self.rightTouched.signal().triggered.connect(self.set_clockwise)
+        self.triggerAction.signal().triggered.connect(self.on_trigger_toggle)
+        if rotationControllerFound:
+            try:
+                try:
+                    self.newRightCon = findNode("VRController_Rotation")
+                except Exception:
+                    self.newRightCon = None
+                if not self.newRightCon:
+                    try:
+                        self.newRightCon = findNode("VRControllerRotation")
+                    except Exception:
+                        self.newRightCon = None
+            except Exception:
+                self.newRightCon = None
+            if self.newRightCon:
+                try:
+                    self.rightController.setVisible(0)
+                except Exception:
+                    pass
+                try:
+                    self.newRightCon.setActive(1)
+                except Exception:
+                    pass
+                try:
+                    controllerPos = getTransformNodeTranslation(self.rightController.getNode(), 1)
+                    setTransformNodeTranslation(self.newRightCon, controllerPos.x(), controllerPos.y(), controllerPos.z(), True)
+                except Exception:
+                    pass
+                try:
+                    self.RotationControllerConstraint = vrConstraintService.createParentConstraint([self.rightController.getNode()], self.newRightCon, False)
+                except Exception:
+                    self.RotationControllerConstraint = None
+
     def disable(self):
         self.isEnabled = False
-        print("[Turntable] disable")
+        self.stop_rotation()
         try:
             if vred_tool_registry.get(self.registry_key) is self:
                 del vred_tool_registry[self.registry_key]
         except Exception:
             pass
         try:
-            self.leftUpperAction.signal().triggered.disconnect(self.start_clockwise)
+            self.leftTouched.signal().triggered.disconnect(self.set_counterclockwise)
         except Exception:
             pass
         try:
-            self.leftLowerAction.signal().triggered.disconnect(self.start_clockwise)
+            self.rightTouched.signal().triggered.disconnect(self.set_clockwise)
         except Exception:
             pass
         try:
-            self.rightUpperAction.signal().triggered.disconnect(self.start_counterclockwise)
+            self.triggerAction.signal().triggered.disconnect(self.on_trigger_toggle)
         except Exception:
             pass
         try:
-            self.rightLowerAction.signal().triggered.disconnect(self.start_counterclockwise)
+            self.rightController.setVisible(1)
         except Exception:
             pass
         try:
-            self.centerAction.signal().triggered.disconnect(self.stop_rotation)
+            if self.newRightCon:
+                self.newRightCon.setActive(0)
         except Exception:
             pass
         try:
-            self.timer.setActive(0)
+            if self.RotationControllerConstraint:
+                vrConstraintService.deleteConstraint(self.RotationControllerConstraint)
+                self.RotationControllerConstraint = None
         except Exception:
             pass
-    def start_clockwise(self, action=None, device=None):
+
+    def set_clockwise(self, action=None, device=None):
         self.direction = 1
-        print("[Turntable] start clockwise", action, device)
-        self.start_rotation()
-    def start_counterclockwise(self, action=None, device=None):
+        print("[Turntable] direction: clockwise")
+
+    def set_counterclockwise(self, action=None, device=None):
         self.direction = -1
-        print("[Turntable] start counterclockwise", action, device)
-        self.start_rotation()
+        print("[Turntable] direction: counterclockwise")
+
+    def on_trigger_toggle(self, action=None, device=None):
+        if self.rotating:
+            self.stop_rotation()
+        else:
+            self.start_rotation()
+
     def start_rotation(self):
-        print("[Turntable] start rotation")
         self.node = self._resolve_target()
         if not self.node:
             print("[Turntable] no target node")
             return
         try:
             if self.node.isNull():
-                print("[Turntable] target node is null")
                 return
-            try:
-                print("[Turntable] target node ready", self.node.getName())
-            except Exception:
-                print("[Turntable] target node ready")
         except Exception:
             pass
         self._prepare_node_ref()
-        self.ignoreStopOnce = False
-        self.timer.setActive(1)
-    def stop_rotation(self, action=None, device=None):
-        print("[Turntable] stop rotation", action, device)
-        self.ignoreStopOnce = False
-        self.timer.setActive(0)
+        try:
+            rot = getTransformNodeRotation(self.node)
+            self.currentAngle = rot.z()
+        except Exception:
+            self.currentAngle = 0.0
+        self.rotating = True
+        self._start_timer()
+        print("[Turntable] start rotation, dir:", self.direction)
+
+    def stop_rotation(self):
+        if self.rotating:
+            print("[Turntable] stop rotation")
+        self.rotating = False
+        self._stop_timer()
+
     def updateRotation(self):
-        if not self.node:
-            print("[Turntable] update skipped no node")
+        if not self.rotating or not self.node:
             return
         try:
             if self.node.isNull():
-                self.timer.setActive(0)
-                print("[Turntable] update stopped node null")
+                self.stop_rotation()
                 return
         except Exception:
             pass
-        rot = getTransformNodeRotation(self.node)
-        new_x = rot.x()
-        new_y = rot.y()
-        new_z = rot.z() + (self.speed * self.direction)
-        print("[Turntable] update rotation", new_x, new_y, new_z, "dir", self.direction, "speed", self.speed)
-        setTransformNodeRotation(self.node, new_x, new_y, new_z)
+        self.currentAngle += self.speed * self.direction
+        try:
+            rot = getTransformNodeRotation(self.node)
+            setTransformNodeRotation(self.node, rot.x(), rot.y(), self.currentAngle)
+        except Exception:
+            pass
         if self.nodeRefReady:
-            r = "%f,%f,%f" % (new_x, new_y, new_z)
-            vrSessionService.sendPython('setTransformNodeRotation(nodeRef, ' + r + ')')
+            try:
+                rot = getTransformNodeRotation(self.node)
+                r = "%f,%f,%f" % (rot.x(), rot.y(), self.currentAngle)
+                vrSessionService.sendPython('setTransformNodeRotation(nodeRef, ' + r + ')')
+            except Exception:
+                pass
 
 TurntableTool()
