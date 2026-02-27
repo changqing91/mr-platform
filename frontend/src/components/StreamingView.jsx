@@ -4,20 +4,46 @@ import ProjectThumbnail from './ProjectThumbnail';
 import { api } from '../services/api';
 import { api as vredApi } from '../services/vredPython';
 
-// --- Camera smoothing helpers ---
+// --- Camera helpers ---
 const parseVec3 = (v) => {
     if (Array.isArray(v)) return v.map(Number);
     if (typeof v === 'string') return v.split(/\s+/).map(Number);
     return [0, 0, 0];
 };
-const lerp = (a, b, t) => a + (b - a) * t;
-const lerpVec3 = (a, b, t) => a.map((v, i) => lerp(v, b[i], t));
-const lerpAngle = (a, b, t) => {
-    // Normalize delta to [-180, 180] to handle wrapping (e.g. 359° → 1°)
-    const d = ((b - a + 180) % 360 + 360) % 360 - 180;
-    return a + d * t;
+
+// 解析 QMatrix4x4（4x4 变换矩阵），提取平移和欧拉角
+// QMatrix4x4 返回值为 16 个数字的数组（行优先），即：
+//   [ m11, m12, m13, m14,
+//     m21, m22, m23, m24,
+//     m31, m32, m33, m34,
+//     m41, m42, m43, m44 ]
+const parseWorldTransform = (matrix) => {
+    const m = Array.isArray(matrix) ? matrix.map(Number) : (typeof matrix === 'string' ? matrix.split(/\s+/).map(Number) : []);
+    if (m.length < 16) return { translation: [0, 0, 0], rotation: [0, 0, 0] };
+
+    // 平移：第 4 列 (m14, m24, m34)，索引 3, 7, 11
+    const translation = [m[3], m[7], m[11]];
+
+    // 从旋转矩阵（左上 3x3）提取欧拉角 (XYZ 顺序)
+    // m11=m[0], m12=m[1], m13=m[2]
+    // m21=m[4], m22=m[5], m23=m[6]
+    // m31=m[8], m32=m[9], m33=m[10]
+    const toDeg = 180 / Math.PI;
+    let rx, ry, rz;
+    if (Math.abs(m[8]) < 0.99999) {
+        ry = Math.asin(-m[8]);
+        rx = Math.atan2(m[9], m[10]);
+        rz = Math.atan2(m[4], m[0]);
+    } else {
+        // 万向锁情况
+        ry = m[8] < 0 ? Math.PI / 2 : -Math.PI / 2;
+        rx = Math.atan2(m[1], m[5]);
+        rz = 0;
+    }
+    const rotation = [rx * toDeg, ry * toDeg, rz * toDeg];
+
+    return { translation, rotation };
 };
-const lerpEuler = (a, b, t) => a.map((v, i) => lerpAngle(v, b[i], t));
 
 // 计算两个向量的欧几里得距离
 const vec3Distance = (a, b) => {
@@ -54,6 +80,7 @@ const StreamingView = ({
         hmdIp: '',
         hmdPort: '8888',
         trackingInterval: '2.0',
+        fovMultiplier: '1.3',
         isTracking: false,
         schemeIp: '',
         schemePort: '8888',
@@ -71,11 +98,16 @@ const StreamingView = ({
             const safeValue = Number.isFinite(numericValue) && numericValue >= 2 ? numericValue : 2;
             return { ...prev, [key]: safeValue.toFixed(1) };
         }
+        if (key === 'fovMultiplier') {
+            const numericValue = Number.parseFloat(value);
+            const safeValue = Number.isFinite(numericValue) && numericValue >= 0.5 && numericValue <= 3 ? numericValue : 1.3;
+            return { ...prev, [key]: safeValue.toFixed(1) };
+        }
         return { ...prev, [key]: value };
     });
 
     const trackingTimerRef = useRef(null);
-    const smoothedCameraRef = useRef(null);
+    const lastCameraRef = useRef(null);
     const syncLockRef = useRef(false);
 
     // 组件卸载时清理定时器
@@ -97,31 +129,20 @@ const StreamingView = ({
             const sourceCamera = await vredApi.vrCameraService.getActiveCamera(true);
             if (!sourceCamera) return;
 
-            const rawT = parseVec3(await sourceCamera.getWorldTranslation());
-            const rawR = parseVec3(await sourceCamera.getRotationAsEuler());
-            const rawFov = Number(await sourceCamera.getFov());
+            const worldTransform = await sourceCamera.getWorldTransform();
+            const { translation, rotation } = parseWorldTransform(worldTransform);
+            const fov = Number(await sourceCamera.getFov());
 
-            // 2. EMA 平滑，消除头显抖动
-            const alpha = 0.35;
-            const prev = smoothedCameraRef.current;
-            const smoothed = prev
-                ? {
-                      t: lerpVec3(prev.t, rawT, alpha),
-                      r: lerpEuler(prev.r, rawR, alpha),
-                      fov: lerp(prev.fov, rawFov, alpha),
-                  }
-                : { t: rawT, r: rawR, fov: rawFov };
-            smoothedCameraRef.current = smoothed;
-
-            // 3. 阈值检测：只有当变化足够大时才更新旁观者摄像机
+            // 2. 阈值检测：只有当变化足够大时才更新旁观者摄像机
             const positionThreshold = 1;    // 位置变化阈值（单位：mm）
             const rotationThreshold = 0.5;   // 旋转变化阈值（单位：度）
             const fovThreshold = 0.1;        // FOV 变化阈值
 
+            const prev = lastCameraRef.current;
             if (prev) {
-                const positionDiff = vec3Distance(smoothed.t, prev.t);
-                const rotationDiff = eulerDistance(smoothed.r, prev.r);
-                const fovDiff = Math.abs(smoothed.fov - prev.fov);
+                const positionDiff = vec3Distance(translation, prev.t);
+                const rotationDiff = eulerDistance(rotation, prev.r);
+                const fovDiff = Math.abs(fov - prev.fov);
 
                 // 如果变化太小，跳过更新，避免静止时抖动
                 if (positionDiff < positionThreshold &&
@@ -131,7 +152,10 @@ const StreamingView = ({
                 }
             }
 
-            // 4. 在旁观者机器上使用 viewpoint 动画设置摄像机
+            // 保存当前值作为下次比较的基准
+            lastCameraRef.current = { t: translation, r: rotation, fov };
+
+            // 3. 在旁观者机器上使用 viewpoint 动画设置摄像机
             vredApi.setBaseUrl(`http://${streamParams.hmdIp}:${streamParams.hmdPort || 8888}`);
             const targetCamera = await vredApi.vrCameraService.getActiveCamera(true);
             if (!targetCamera) return;
@@ -148,15 +172,16 @@ const StreamingView = ({
             await viewpoint.setViewpointTransition(true);
             await viewpoint.setViewpointTransitionDuration(transitionDuration);
 
-            // 设置 viewpoint 的位置和旋转
-            await viewpoint.setTranslation(smoothed.t);
-            await viewpoint.setRotationAsEuler(smoothed.r);
+            // 设置 viewpoint 的位置和旋转（直接使用原始值，让 viewpoint 处理插值）
+            await viewpoint.setTranslation(translation);
+            await viewpoint.setRotationAsEuler(rotation);
 
             // 激活 viewpoint，触发平滑过渡动画
             await viewpoint.activate(false, true);
 
-            // 设置 FOV
-            await targetCamera.setFov(smoothed.fov);
+            // 设置 FOV（应用倍数以扩大大屏视野）
+            const fovMultiplier = Number.parseFloat(streamParams.fovMultiplier) || 1.3;
+            await targetCamera.setFov(fov * fovMultiplier);
 
             // 激活后删除 viewpoint，避免累积
             await vredApi.vrCameraService.deleteViewpoint(viewpoint);
@@ -178,7 +203,7 @@ const StreamingView = ({
 
         if (!enabled) {
             // 停止追踪时清理状态
-            smoothedCameraRef.current = null;
+            lastCameraRef.current = null;
             return;
         }
 
@@ -392,6 +417,10 @@ const StreamingView = ({
                             <div>
                                 <label className="block text-[10px] text-gray-500 mb-1">追踪间隔 (s)</label>
                                 <input type="number" min="2" step="0.1" placeholder="2.0" value={streamParams.trackingInterval} onChange={(e) => updateStreamParam('trackingInterval', e.target.value)} className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-xs text-white focus:border-[#39C5BB] outline-none" />
+                            </div>
+                            <div>
+                                <label className="block text-[10px] text-gray-500 mb-1">FOV 倍数 (0.5-3.0)</label>
+                                <input type="number" min="0.5" max="3.0" step="0.1" placeholder="1.3" value={streamParams.fovMultiplier} onChange={(e) => updateStreamParam('fovMultiplier', e.target.value)} className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-xs text-white focus:border-[#39C5BB] outline-none" />
                             </div>
 
                             <div className="flex rounded-lg overflow-hidden border border-gray-700 w-full">
