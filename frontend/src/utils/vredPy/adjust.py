@@ -40,6 +40,14 @@ if not adjustControllerFound:
         adjustControllerFound = False
 
 class AdjustTool:
+    """
+    地平面移动工具 (XY 为地平面, Z 为上下)
+
+    交互方式:
+    - trigger 按住 + 移动控制器: 物体跟随控制器在地平面上移动 (锁 Z, 锁 X/Y 旋转, 保留 Z 旋转)
+    - 摇杆左右拨动: 物体绕 Z 轴旋转 (精细调整朝向)
+    - 摇杆前后拨动: 物体沿摄像机视线方向在地平面上前进/后退 (精细调整位置)
+    """
     def __init__(self):
         self.isEnabled = False
         self.node = None
@@ -47,10 +55,13 @@ class AdjustTool:
         self.nodeRefReady = False
         self.timer = vrTimer()
         self.timerConnected = False
-        # 摇杆状态: 'none', 'forward', 'backward', 'left', 'right'
-        self.stickState = 'none'
-        self.moveSpeed = 5.0       # 前进后退速度 (mm/帧)
-        self.rotateSpeed = 1.0     # 旋转速度 (度/帧)
+        # 摇杆状态
+        self.stickForward = False
+        self.stickBackward = False
+        self.stickLeft = False
+        self.stickRight = False
+        self.moveSpeed = 3.0
+        self.rotateSpeed = 0.8
 
         self.leftController = vrDeviceService.getVRDevice("left-controller")
         self.rightController = vrDeviceService.getVRDevice("right-controller")
@@ -58,7 +69,7 @@ class AdjustTool:
         self.rightController.setVisualizationMode(Visualization_ControllerAndHand)
         vrImmersiveInteractionService.setDefaultInteractionsActive(1)
 
-        # 摇杆四个方向
+        # 摇杆: 上下左右 (用 touched 事件, 拨动即触发)
         padUp = vrdVirtualTouchpadButton('padup', 0.5, 1.0, 330.0, 30.0)
         padDown = vrdVirtualTouchpadButton('paddown', 0.5, 1.0, 150.0, 210.0)
         padLeft = vrdVirtualTouchpadButton('padleft', 0.5, 1.0, 210.0, 330.0)
@@ -68,8 +79,8 @@ class AdjustTool:
         self.rightController.addVirtualButton(padLeft, 'touchpad')
         self.rightController.addVirtualButton(padRight, 'touchpad')
 
-        multiButtonPadAdjust = vrDeviceService.createInteraction("MultiButtonPadAdjust")
-        multiButtonPadAdjust.setSupportedInteractionGroups(["AdjustGroup"])
+        multiButtonPad = vrDeviceService.createInteraction("MultiButtonPadAdjust")
+        multiButtonPad.setSupportedInteractionGroups(["AdjustGroup"])
 
         teleport = vrDeviceService.getInteraction("Teleport")
         teleport.addSupportedInteractionGroup("AdjustGroup")
@@ -80,15 +91,15 @@ class AdjustTool:
         self.pointer = vrDeviceService.getInteraction("Pointer")
         self.pointer.addSupportedInteractionGroup("AdjustGroup")
 
-        # 摇杆方向 pressed/released
-        self.upPressed = multiButtonPadAdjust.createControllerAction("right-padup-pressed")
-        self.upReleased = multiButtonPadAdjust.createControllerAction("right-padup-released")
-        self.downPressed = multiButtonPadAdjust.createControllerAction("right-paddown-pressed")
-        self.downReleased = multiButtonPadAdjust.createControllerAction("right-paddown-released")
-        self.leftPressed = multiButtonPadAdjust.createControllerAction("right-padleft-pressed")
-        self.leftReleased = multiButtonPadAdjust.createControllerAction("right-padleft-released")
-        self.rightPressed = multiButtonPadAdjust.createControllerAction("right-padright-pressed")
-        self.rightReleased = multiButtonPadAdjust.createControllerAction("right-padright-released")
+        # 摇杆 touched/untouched
+        self.padUpTouched = multiButtonPad.createControllerAction("right-padup-touched")
+        self.padUpUntouched = multiButtonPad.createControllerAction("right-padup-untouched")
+        self.padDownTouched = multiButtonPad.createControllerAction("right-paddown-touched")
+        self.padDownUntouched = multiButtonPad.createControllerAction("right-paddown-untouched")
+        self.padLeftTouched = multiButtonPad.createControllerAction("right-padleft-touched")
+        self.padLeftUntouched = multiButtonPad.createControllerAction("right-padleft-untouched")
+        self.padRightTouched = multiButtonPad.createControllerAction("right-padright-touched")
+        self.padRightUntouched = multiButtonPad.createControllerAction("right-padright-untouched")
 
         self.registry_key = "tool_adjust"
         self.newRightCon = None
@@ -128,81 +139,34 @@ class AdjustTool:
         except Exception:
             pass
 
-    def constraintCheckFunction(self):
-        # trigger 拖拽中：锁 Z 高度，保留 Z 轴旋转 (XY 为地平面，Z 为上下)
-        if self.startMoveFlag and self.node and not self.node.isNull():
-            pos = getTransformNodeTranslation(self.node, 1)
-            rot = getTransformNodeRotation(self.node)
-            setTransformNodeTranslation(self.node, pos.x(), pos.y(), self.originalNodePos.z(), 1)
-            setTransformNodeRotation(self.node, self.originalNodeRot.x(), self.originalNodeRot.y(), rot.z())
-            self._sync_transform()
-            return
-
-        # 摇杆控制：前后平移 / 左右旋转
-        if self.stickState == 'none' or not self.node:
-            return
+    def _get_camera_forward_xy(self):
+        """获取摄像机在地平面 (XY) 上的前方向量 (归一化)"""
         try:
-            if self.node.isNull():
-                return
+            cam = vrCameraService.getActiveCamera(True)
+            if not cam:
+                return (0.0, 1.0)
+            camNode = cam.getCameraNode()
+            if not camNode or camNode.isNull():
+                return (0.0, 1.0)
+            camRot = getTransformNodeRotation(camNode)
+            # 摄像机绕 Z 轴的旋转角度决定了在 XY 平面上的朝向
+            angle_rad = math.radians(camRot.z())
+            fx = -math.sin(angle_rad)
+            fy = math.cos(angle_rad)
+            length = math.sqrt(fx * fx + fy * fy)
+            if length < 0.001:
+                return (0.0, 1.0)
+            return (fx / length, fy / length)
         except Exception:
-            return
-
-        rot = getTransformNodeRotation(self.node)
-        pos = getTransformNodeTranslation(self.node, 1)
-
-        if self.stickState == 'forward' or self.stickState == 'backward':
-            # 沿对象当前 Z 轴旋转朝向在 XY 地平面上前进/后退
-            angle_rad = math.radians(rot.z())
-            direction = self.moveSpeed if self.stickState == 'forward' else -self.moveSpeed
-            dx = -math.sin(angle_rad) * direction
-            dy = math.cos(angle_rad) * direction
-            setTransformNodeTranslation(self.node, pos.x() + dx, pos.y() + dy, pos.z(), 1)
-        elif self.stickState == 'left':
-            setTransformNodeRotation(self.node, rot.x(), rot.y(), rot.z() + self.rotateSpeed)
-        elif self.stickState == 'right':
-            setTransformNodeRotation(self.node, rot.x(), rot.y(), rot.z() - self.rotateSpeed)
-
-        self._sync_transform()
-
-    def startMove(self, action, device):
-        self.node = self.getMovable(device.pick().getNode())
-        if not self.node.isNull():
-            self.originalNodeRot = getTransformNodeRotation(self.node)
-            self.originalNodePos = getTransformNodeTranslation(self.node, 1)
-            self.constraint = vrConstraintService.createParentConstraint([device.getNode()], self.node, True)
-            self.startMoveFlag = True
-            self._prepare_node_ref()
-
-    def stopMove(self, action, device):
-        if self.node is not None and not self.node.isNull():
-            pos = getTransformNodeTranslation(self.node, 1)
-            rot = getTransformNodeRotation(self.node)
-            setTransformNodeTranslation(self.node, pos.x(), pos.y(), self.originalNodePos.z(), 1)
-            setTransformNodeRotation(self.node, self.originalNodeRot.x(), self.originalNodeRot.y(), rot.z())
-            vrConstraintService.deleteConstraint(self.constraint)
-            self.startMoveFlag = False
-            self._sync_transform()
-
-    # --- 摇杆事件 ---
-    def on_stick_forward(self, action=None, device=None):
-        self._ensure_node()
-        self.stickState = 'forward'
-    def on_stick_backward(self, action=None, device=None):
-        self._ensure_node()
-        self.stickState = 'backward'
-    def on_stick_left(self, action=None, device=None):
-        self._ensure_node()
-        self.stickState = 'left'
-    def on_stick_right(self, action=None, device=None):
-        self._ensure_node()
-        self.stickState = 'right'
-    def on_stick_release(self, action=None, device=None):
-        self.stickState = 'none'
+            return (0.0, 1.0)
 
     def _ensure_node(self):
-        # 摇杆操作时如果还没有目标节点，自动查找
-        if self.node and not self.node.isNull():
-            return
+        if self.node:
+            try:
+                if not self.node.isNull():
+                    return
+            except Exception:
+                pass
         try:
             nodes = getSelectedNodes()
             if nodes and len(nodes) > 0 and not nodes[0].isNull():
@@ -225,6 +189,92 @@ class AdjustTool:
         except Exception:
             pass
 
+    def updateLoop(self):
+        # 1. trigger 拖拽: 锁 Z 高度, 保留 Z 轴旋转
+        if self.startMoveFlag and self.node and not self.node.isNull():
+            pos = getTransformNodeTranslation(self.node, 1)
+            rot = getTransformNodeRotation(self.node)
+            setTransformNodeTranslation(self.node, pos.x(), pos.y(), self.originalNodePos.z(), 1)
+            setTransformNodeRotation(self.node, self.originalNodeRot.x(), self.originalNodeRot.y(), rot.z())
+            self._sync_transform()
+            return
+
+        # 2. 摇杆: 精细移动和旋转
+        if not self.node:
+            return
+        try:
+            if self.node.isNull():
+                return
+        except Exception:
+            return
+
+        moved = False
+        pos = getTransformNodeTranslation(self.node, 1)
+        rot = getTransformNodeRotation(self.node)
+
+        # 前后: 沿摄像机视线方向在地平面上移动
+        if self.stickForward or self.stickBackward:
+            fx, fy = self._get_camera_forward_xy()
+            direction = self.moveSpeed if self.stickForward else -self.moveSpeed
+            setTransformNodeTranslation(self.node, pos.x() + fx * direction, pos.y() + fy * direction, pos.z(), 1)
+            moved = True
+
+        # 左右: 绕 Z 轴旋转
+        if self.stickLeft:
+            setTransformNodeRotation(self.node, rot.x(), rot.y(), rot.z() + self.rotateSpeed)
+            moved = True
+        elif self.stickRight:
+            setTransformNodeRotation(self.node, rot.x(), rot.y(), rot.z() - self.rotateSpeed)
+            moved = True
+
+        if moved:
+            self._sync_transform()
+
+    def startMove(self, action, device):
+        self.node = self.getMovable(device.pick().getNode())
+        if not self.node.isNull():
+            self.originalNodeRot = getTransformNodeRotation(self.node)
+            self.originalNodePos = getTransformNodeTranslation(self.node, 1)
+            self.constraint = vrConstraintService.createParentConstraint([device.getNode()], self.node, True)
+            self.startMoveFlag = True
+            self._prepare_node_ref()
+
+    def stopMove(self, action, device):
+        if self.node is not None and not self.node.isNull():
+            pos = getTransformNodeTranslation(self.node, 1)
+            rot = getTransformNodeRotation(self.node)
+            setTransformNodeTranslation(self.node, pos.x(), pos.y(), self.originalNodePos.z(), 1)
+            setTransformNodeRotation(self.node, self.originalNodeRot.x(), self.originalNodeRot.y(), rot.z())
+            vrConstraintService.deleteConstraint(self.constraint)
+            self.startMoveFlag = False
+            self._sync_transform()
+
+    # --- 摇杆事件 (touched/untouched) ---
+    def on_up_touched(self, action=None, device=None):
+        self._ensure_node()
+        self.stickForward = True
+        print("[Adjust] stick forward")
+    def on_up_untouched(self, action=None, device=None):
+        self.stickForward = False
+    def on_down_touched(self, action=None, device=None):
+        self._ensure_node()
+        self.stickBackward = True
+        print("[Adjust] stick backward")
+    def on_down_untouched(self, action=None, device=None):
+        self.stickBackward = False
+    def on_left_touched(self, action=None, device=None):
+        self._ensure_node()
+        self.stickLeft = True
+        print("[Adjust] stick left")
+    def on_left_untouched(self, action=None, device=None):
+        self.stickLeft = False
+    def on_right_touched(self, action=None, device=None):
+        self._ensure_node()
+        self.stickRight = True
+        print("[Adjust] stick right")
+    def on_right_untouched(self, action=None, device=None):
+        self.stickRight = False
+
     def enable(self):
         self.isEnabled = True
         try:
@@ -245,18 +295,18 @@ class AdjustTool:
         execute.signal().triggered.connect(self.stopMove)
 
         # 摇杆信号
-        self.upPressed.signal().triggered.connect(self.on_stick_forward)
-        self.upReleased.signal().triggered.connect(self.on_stick_release)
-        self.downPressed.signal().triggered.connect(self.on_stick_backward)
-        self.downReleased.signal().triggered.connect(self.on_stick_release)
-        self.leftPressed.signal().triggered.connect(self.on_stick_left)
-        self.leftReleased.signal().triggered.connect(self.on_stick_release)
-        self.rightPressed.signal().triggered.connect(self.on_stick_right)
-        self.rightReleased.signal().triggered.connect(self.on_stick_release)
+        self.padUpTouched.signal().triggered.connect(self.on_up_touched)
+        self.padUpUntouched.signal().triggered.connect(self.on_up_untouched)
+        self.padDownTouched.signal().triggered.connect(self.on_down_touched)
+        self.padDownUntouched.signal().triggered.connect(self.on_down_untouched)
+        self.padLeftTouched.signal().triggered.connect(self.on_left_touched)
+        self.padLeftUntouched.signal().triggered.connect(self.on_left_untouched)
+        self.padRightTouched.signal().triggered.connect(self.on_right_touched)
+        self.padRightUntouched.signal().triggered.connect(self.on_right_untouched)
 
         # timer
         if not self.timerConnected:
-            self.timer.connect(self.constraintCheckFunction)
+            self.timer.connect(self.updateLoop)
             self.timerConnected = True
         self.timer.setActive(1)
 
@@ -301,7 +351,10 @@ class AdjustTool:
         try:
             self.isEnabled = False
             self.startMoveFlag = False
-            self.stickState = 'none'
+            self.stickForward = False
+            self.stickBackward = False
+            self.stickLeft = False
+            self.stickRight = False
         except Exception:
             pass
         try:
@@ -320,35 +373,35 @@ class AdjustTool:
         except Exception:
             pass
         try:
-            self.upPressed.signal().triggered.disconnect(self.on_stick_forward)
+            self.padUpTouched.signal().triggered.disconnect(self.on_up_touched)
         except Exception:
             pass
         try:
-            self.upReleased.signal().triggered.disconnect(self.on_stick_release)
+            self.padUpUntouched.signal().triggered.disconnect(self.on_up_untouched)
         except Exception:
             pass
         try:
-            self.downPressed.signal().triggered.disconnect(self.on_stick_backward)
+            self.padDownTouched.signal().triggered.disconnect(self.on_down_touched)
         except Exception:
             pass
         try:
-            self.downReleased.signal().triggered.disconnect(self.on_stick_release)
+            self.padDownUntouched.signal().triggered.disconnect(self.on_down_untouched)
         except Exception:
             pass
         try:
-            self.leftPressed.signal().triggered.disconnect(self.on_stick_left)
+            self.padLeftTouched.signal().triggered.disconnect(self.on_left_touched)
         except Exception:
             pass
         try:
-            self.leftReleased.signal().triggered.disconnect(self.on_stick_release)
+            self.padLeftUntouched.signal().triggered.disconnect(self.on_left_untouched)
         except Exception:
             pass
         try:
-            self.rightPressed.signal().triggered.disconnect(self.on_stick_right)
+            self.padRightTouched.signal().triggered.disconnect(self.on_right_touched)
         except Exception:
             pass
         try:
-            self.rightReleased.signal().triggered.disconnect(self.on_stick_release)
+            self.padRightUntouched.signal().triggered.disconnect(self.on_right_untouched)
         except Exception:
             pass
         try:
