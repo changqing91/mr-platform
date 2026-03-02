@@ -71,6 +71,15 @@ count = 0
 Cloned_ref_obj = findNode("Cloned_ref_obj")
 
 class Notes:
+    """
+    标注工具 - Pico 手柄交互方案:
+      Right trigger: 放置标注 / 删除模式下删除标注
+      Left trigger:  切换标注样式 (循环)
+      Left grip:     切换放置模式 (手持 <-> 射线)
+      Right grip:    切换删除模式
+      摇杆上拨:       放大标注
+      摇杆下拨:       缩小标注
+    """
     def __init__(self):
         self.isEnabled = False
         self.activeNode = None
@@ -84,32 +93,14 @@ class Notes:
         self.rightController.setVisualizationMode(Visualization_ControllerAndHand)
         vrImmersiveInteractionService.setDefaultInteractionsActive(1)
 
-        padCenter = vrdVirtualTouchpadButton('padcenter', 0.0, 0.5, 0.0, 360.0)
-        padUpperLeft = vrdVirtualTouchpadButton('padupleft', 0.5, 1.0, 270.0, 330.0)
-        padLowerLeft = vrdVirtualTouchpadButton('paddownleft', 0.5, 1.0, 210.0, 270.0)
+        # 摇杆上下 (touched 拨动即触发)
         padUp = vrdVirtualTouchpadButton('padup', 0.5, 1.0, 330.0, 30.0)
-        padUpperRight = vrdVirtualTouchpadButton('padupright', 0.5, 1.0, 30.0, 90.0)
-        padLowerRight = vrdVirtualTouchpadButton('paddownright', 0.5, 1.0, 90.0, 150.0)
         padDown = vrdVirtualTouchpadButton('paddown', 0.5, 1.0, 150.0, 210.0)
-
-        self.rightController.addVirtualButton(padCenter, 'touchpad')
-        self.rightController.addVirtualButton(padUpperLeft, 'touchpad')
-        self.rightController.addVirtualButton(padLowerLeft, 'touchpad')
         self.rightController.addVirtualButton(padUp, 'touchpad')
-        self.rightController.addVirtualButton(padUpperRight, 'touchpad')
-        self.rightController.addVirtualButton(padLowerRight, 'touchpad')
         self.rightController.addVirtualButton(padDown, 'touchpad')
 
-        multiButtonPadNotes = vrDeviceService.createInteraction("MultiButtonPadNotes")
-        multiButtonPadNotes.setSupportedInteractionGroups(["NotesGroup"])
-
-        self.leftUpperActionNotes = multiButtonPadNotes.createControllerAction("right-padupleft-pressed")
-        self.leftDownActionNotes = multiButtonPadNotes.createControllerAction("right-paddownleft-pressed")
-        self.upActionNotes = multiButtonPadNotes.createControllerAction("right-padup-pressed")
-        self.downActionNotes = multiButtonPadNotes.createControllerAction("right-paddown-pressed")
-        self.rightUpperActionNotes = multiButtonPadNotes.createControllerAction("right-padupright-pressed")
-        self.rightDownActionNotes = multiButtonPadNotes.createControllerAction("right-paddownright-pressed")
-        self.centerActionNotes = multiButtonPadNotes.createControllerAction("right-padcenter-pressed")
+        multiButtonPad = vrDeviceService.createInteraction("MultiButtonPadNotes")
+        multiButtonPad.setSupportedInteractionGroups(["NotesGroup"])
 
         teleport = vrDeviceService.getInteraction("Teleport")
         teleport.addSupportedInteractionGroup("NotesGroup")
@@ -120,7 +111,18 @@ class Notes:
         self.pointer = vrDeviceService.getInteraction("Pointer")
         self.pointer.addSupportedInteractionGroup("NotesGroup")
 
-        self.triggerRightPressed = multiButtonPadNotes.createControllerAction("right-trigger-pressed")
+        # trigger: 放置/删除
+        self.triggerRightPressed = multiButtonPad.createControllerAction("right-trigger-pressed")
+        # Left Trigger: 切换标注样式
+        self.leftTriggerPressed = multiButtonPad.createControllerAction("left-trigger-pressed")
+        # Left Grip: 切换放置模式
+        self.leftGripPressed = multiButtonPad.createControllerAction("left-grip-pressed")
+        # grip(内侧键): 切换删除模式
+        self.gripPressed = multiButtonPad.createControllerAction("right-grip-pressed")
+        # 摇杆上下: 缩放
+        self.padUpTouched = multiButtonPad.createControllerAction("right-padup-touched")
+        self.padDownTouched = multiButtonPad.createControllerAction("right-paddown-touched")
+
         self.deleteNoteIsActive = False
         self.changeView = False
 
@@ -163,11 +165,13 @@ class Notes:
         vred_tool_registry[self.registry_key] = self
         vrDeviceService.setActiveInteractionGroup("NotesGroup")
 
-        self.leftUpperActionNotes.signal().triggered.connect(self.sizeDown)
-        self.upActionNotes.signal().triggered.connect(self.ChangeNote)
-        self.downActionNotes.signal().triggered.connect(self.deleteNote)
-        self.rightUpperActionNotes.signal().triggered.connect(self.sizeUp)
-        self.centerActionNotes.signal().triggered.connect(self.changeNoteView)
+        # 连接信号
+        self.triggerRightPressed.signal().triggered.connect(self.trigger_right_pressed)
+        self.leftTriggerPressed.signal().triggered.connect(self.ChangeNote)
+        self.leftGripPressed.signal().triggered.connect(self.changeNoteView)
+        self.gripPressed.signal().triggered.connect(self.deleteNote)
+        self.padUpTouched.signal().triggered.connect(self.sizeUp)
+        self.padDownTouched.signal().triggered.connect(self.sizeDown)
 
         refObject_node = vrNodeService.getNodeFromId(refObject.getID())
         refObject_node.getChild(0).setVisibilityFlag(True)
@@ -188,17 +192,17 @@ class Notes:
         self.deleteNoteIsActive = False
         self.changeView = False
         self.iconsNotesTrashOff()
-        self.triggerRightPressed.signal().triggered.connect(self.trigger_right_pressed)
         self.timer.setActive(1)
         self.timer.connect(self.distanceFunc)
 
-        if self.changeView == False:
+        if not self.changeView:
             self.iconsNotesConstraint()
             refObject_node.getParent().setVisibilityFlag(True)
             self.onControllerNotesMapping()
         else:
             self.iconsNotesRay()
             self.onRayNotesMapping()
+
     def disable(self):
         self.isEnabled = False
         try:
@@ -207,27 +211,27 @@ class Notes:
         except Exception:
             pass
         try:
-            self.leftUpperActionNotes.signal().triggered.disconnect(self.sizeDown)
-        except Exception:
-            pass
-        try:
-            self.upActionNotes.signal().triggered.disconnect(self.ChangeNote)
-        except Exception:
-            pass
-        try:
-            self.downActionNotes.signal().triggered.disconnect(self.deleteNote)
-        except Exception:
-            pass
-        try:
-            self.rightUpperActionNotes.signal().triggered.disconnect(self.sizeUp)
-        except Exception:
-            pass
-        try:
-            self.centerActionNotes.signal().triggered.disconnect(self.changeNoteView)
-        except Exception:
-            pass
-        try:
             self.triggerRightPressed.signal().triggered.disconnect(self.trigger_right_pressed)
+        except Exception:
+            pass
+        try:
+            self.leftTriggerPressed.signal().triggered.disconnect(self.ChangeNote)
+        except Exception:
+            pass
+        try:
+            self.leftGripPressed.signal().triggered.disconnect(self.changeNoteView)
+        except Exception:
+            pass
+        try:
+            self.gripPressed.signal().triggered.disconnect(self.deleteNote)
+        except Exception:
+            pass
+        try:
+            self.padUpTouched.signal().triggered.disconnect(self.sizeUp)
+        except Exception:
+            pass
+        try:
+            self.padDownTouched.signal().triggered.disconnect(self.sizeDown)
         except Exception:
             pass
         try:
