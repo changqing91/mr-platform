@@ -462,14 +462,30 @@ if qt_binding:
             except Exception:
                 pass
             vred_tool_registry[self.registry_key] = self
+            self.multi.setSupportedInteractionGroups(["NotesGroup"])
             vrDeviceService.setActiveInteractionGroup("NotesGroup")
+            self.pointer.setControllerActionMapping("prepare", "right-customtrigger-touched")
+            self.pointer.setControllerActionMapping("abort", "disable")
+            self.pointer.setControllerActionMapping("start", "right-trigger-pressed")
+            self.pointer.setControllerActionMapping("execute", "right-trigger-released")
             self.triggerRightPressed.signal().triggered.connect(self.on_trigger)
             self.timer.setActive(1)
             self.timer.connect(self.distanceFunc)
         def disable(self):
             try:
+                self.multi.setSupportedInteractionGroups([])
+            except Exception:
+                pass
+            try:
                 if vred_tool_registry.get(self.registry_key) is self:
                     del vred_tool_registry[self.registry_key]
+            except Exception:
+                pass
+            try:
+                self.pointer.setControllerActionMapping("prepare", "any-customtrigger-touched")
+                self.pointer.setControllerActionMapping("abort", "any-customtrigger-untouched")
+                self.pointer.setControllerActionMapping("start", "any-customtrigger-pressed")
+                self.pointer.setControllerActionMapping("execute", "any-customtrigger-released")
             except Exception:
                 pass
             try:

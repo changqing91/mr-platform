@@ -1,4 +1,5 @@
 import random
+import math
 
 global vred_tool_registry
 if 'vred_tool_registry' not in globals():
@@ -99,8 +100,8 @@ class Notes:
         self.rightController.addVirtualButton(padUp, 'touchpad')
         self.rightController.addVirtualButton(padDown, 'touchpad')
 
-        multiButtonPad = vrDeviceService.createInteraction("MultiButtonPadNotes")
-        multiButtonPad.setSupportedInteractionGroups(["NotesGroup"])
+        self.multiButtonPad = vrDeviceService.createInteraction("MultiButtonPadNotes")
+        self.multiButtonPad.setSupportedInteractionGroups(["NotesGroup"])
 
         teleport = vrDeviceService.getInteraction("Teleport")
         teleport.addSupportedInteractionGroup("NotesGroup")
@@ -111,17 +112,12 @@ class Notes:
         self.pointer = vrDeviceService.getInteraction("Pointer")
         self.pointer.addSupportedInteractionGroup("NotesGroup")
 
-        # trigger: 放置/删除
-        self.triggerRightPressed = multiButtonPad.createControllerAction("right-trigger-pressed")
-        # Left Trigger: 切换标注样式
-        self.leftTriggerPressed = multiButtonPad.createControllerAction("left-trigger-pressed")
-        # Left Grip: 切换放置模式
-        self.leftGripPressed = multiButtonPad.createControllerAction("left-grip-pressed")
-        # grip(内侧键): 切换删除模式
-        self.gripPressed = multiButtonPad.createControllerAction("right-grip-pressed")
-        # 摇杆上下: 缩放
-        self.padUpTouched = multiButtonPad.createControllerAction("right-padup-touched")
-        self.padDownTouched = multiButtonPad.createControllerAction("right-paddown-touched")
+        self.triggerRightPressed = self.multiButtonPad.createControllerAction("right-trigger-pressed")
+        self.leftTriggerPressed = self.multiButtonPad.createControllerAction("left-trigger-pressed")
+        self.leftGripPressed = self.multiButtonPad.createControllerAction("left-grip-pressed")
+        self.gripPressed = self.multiButtonPad.createControllerAction("right-grip-pressed")
+        self.padUpTouched = self.multiButtonPad.createControllerAction("right-padup-touched")
+        self.padDownTouched = self.multiButtonPad.createControllerAction("right-paddown-touched")
 
         self.deleteNoteIsActive = False
         self.changeView = False
@@ -135,17 +131,34 @@ class Notes:
         refObject.setActive(0)
         intersectionRay = self.rightController.pick()
         hitpoint = intersectionRay.getPoint()
+        hitNormal = intersectionRay.getNormal()
         hitNode = intersectionRay.getNode()
         hitNode = toNode(hitNode.getObjectId())
         interPosRay = Pnt3f(hitpoint.x(), hitpoint.y(), hitpoint.z())
         refObject.setActive(1)
 
         self.activeNode = hitNode
-        vrConstraintService.createOrientationConstraint([self.rightController.getNode()], refObject)
         if not self.changeView:
+            vrConstraintService.createOrientationConstraint([self.rightController.getNode()], refObject)
             setTransformNodeTranslation(refObject, handPos.x(), handPos.y(), handPos.z(), 1)
         else:
-            setTransformNodeTranslation(refObject, interPosRay.x(), interPosRay.y(), interPosRay.z(), 1)
+            nx, ny, nz = hitNormal.x(), hitNormal.y(), hitNormal.z()
+            normalLen = math.sqrt(nx * nx + ny * ny + nz * nz)
+            if normalLen > 1e-6:
+                nx /= normalLen
+                ny /= normalLen
+                nz /= normalLen
+
+            noteScale = getTransformNodeScale(refObject)
+            offset = max(noteScale.x(), noteScale.y(), noteScale.z()) * 0.5
+            posX = interPosRay.x() + nx * offset
+            posY = interPosRay.y() + ny * offset
+            posZ = interPosRay.z() + nz * offset
+            setTransformNodeTranslation(refObject, posX, posY, posZ, 1)
+
+            ry = math.degrees(math.atan2(nx, nz))
+            rx = math.degrees(math.atan2(-ny, math.sqrt(nx * nx + nz * nz)))
+            setTransformNodeRotation(refObject, rx, ry, 0)
 
     def enable(self):
         global refObject
@@ -163,9 +176,9 @@ class Notes:
         except Exception:
             pass
         vred_tool_registry[self.registry_key] = self
+        self.multiButtonPad.setSupportedInteractionGroups(["NotesGroup"])
         vrDeviceService.setActiveInteractionGroup("NotesGroup")
 
-        # 连接信号
         self.triggerRightPressed.signal().triggered.connect(self.trigger_right_pressed)
         self.leftTriggerPressed.signal().triggered.connect(self.ChangeNote)
         self.leftGripPressed.signal().triggered.connect(self.changeNoteView)
@@ -205,6 +218,10 @@ class Notes:
 
     def disable(self):
         self.isEnabled = False
+        try:
+            self.multiButtonPad.setSupportedInteractionGroups([])
+        except Exception:
+            pass
         try:
             if vred_tool_registry.get(self.registry_key) is self:
                 del vred_tool_registry[self.registry_key]
