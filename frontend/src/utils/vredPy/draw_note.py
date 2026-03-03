@@ -1,6 +1,16 @@
 import random
 import math
 
+_pad_input = 'touchpad'
+_grip_input = 'grip'
+try:
+    _xr = getattr(vrImmersiveInteractionService, 'getOpenXRRuntime', None)
+    if _xr and _xr():
+        _pad_input = 'thumbstick'
+        _grip_input = 'squeeze'
+except Exception:
+    pass
+
 global vred_tool_registry
 if 'vred_tool_registry' not in globals():
     vred_tool_registry = {}
@@ -97,25 +107,25 @@ class Notes:
         # 摇杆上下 (touched 拨动即触发)
         padUp = vrdVirtualTouchpadButton('padup', 0.5, 1.0, 330.0, 30.0)
         padDown = vrdVirtualTouchpadButton('paddown', 0.5, 1.0, 150.0, 210.0)
-        self.rightController.addVirtualButton(padUp, 'touchpad')
-        self.rightController.addVirtualButton(padDown, 'touchpad')
+        self.rightController.addVirtualButton(padUp, _pad_input)
+        self.rightController.addVirtualButton(padDown, _pad_input)
 
         self.multiButtonPad = vrDeviceService.createInteraction("MultiButtonPadNotes")
         self.multiButtonPad.setSupportedInteractionGroups(["NotesGroup"])
 
         teleport = vrDeviceService.getInteraction("Teleport")
         teleport.addSupportedInteractionGroup("NotesGroup")
-        teleport.setControllerActionMapping("prepare", "left-touchpad-touched")
-        teleport.setControllerActionMapping("abort", "left-touchpad-untouched")
-        teleport.setControllerActionMapping("execute", "left-touchpad-pressed")
+        teleport.setControllerActionMapping("prepare", "left-{}-touched".format(_pad_input))
+        teleport.setControllerActionMapping("abort", "left-{}-untouched".format(_pad_input))
+        teleport.setControllerActionMapping("execute", "left-{}-pressed".format(_pad_input))
 
         self.pointer = vrDeviceService.getInteraction("Pointer")
         self.pointer.addSupportedInteractionGroup("NotesGroup")
 
         self.triggerRightPressed = self.multiButtonPad.createControllerAction("right-trigger-pressed")
         self.leftTriggerPressed = self.multiButtonPad.createControllerAction("left-trigger-pressed")
-        self.leftGripPressed = self.multiButtonPad.createControllerAction("left-grip-pressed")
-        self.gripPressed = self.multiButtonPad.createControllerAction("right-grip-pressed")
+        self.leftGripPressed = self.multiButtonPad.createControllerAction("left-{}-pressed".format(_grip_input))
+        self.gripPressed = self.multiButtonPad.createControllerAction("right-{}-pressed".format(_grip_input))
         self.padUpTouched = self.multiButtonPad.createControllerAction("right-padup-touched")
         self.padDownTouched = self.multiButtonPad.createControllerAction("right-paddown-touched")
 

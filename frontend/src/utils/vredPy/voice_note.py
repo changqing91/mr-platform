@@ -54,7 +54,9 @@ if qt_binding:
                 "vb-audio",
                 "vac",
                 "microphone",
-                "mic"
+                "mic",
+                "virtual desktop",
+                "virtual desktop audio"
             ]
             for dev in inputs:
                 try:
@@ -400,6 +402,7 @@ if qt_binding:
             self.pointer = vrDeviceService.getInteraction("Pointer")
             self.pointer.addSupportedInteractionGroup("NotesGroup")
             self.triggerRightPressed = self.multi.createControllerAction("right-trigger-pressed")
+            self.executeAction = None
             self.timer = vrTimer()
             self.registry_key = "tool_voice_note"
             self.enable()
@@ -468,7 +471,11 @@ if qt_binding:
             self.pointer.setControllerActionMapping("abort", "disable")
             self.pointer.setControllerActionMapping("start", "right-trigger-pressed")
             self.pointer.setControllerActionMapping("execute", "right-trigger-released")
-            self.triggerRightPressed.signal().triggered.connect(self.on_trigger)
+            try:
+                self.executeAction = self.pointer.getControllerAction("execute")
+                self.executeAction.signal().triggered.connect(self.on_trigger)
+            except Exception:
+                self.executeAction = None
             self.timer.setActive(1)
             self.timer.connect(self.distanceFunc)
         def disable(self):
@@ -489,7 +496,8 @@ if qt_binding:
             except Exception:
                 pass
             try:
-                self.triggerRightPressed.signal().triggered.disconnect(self.on_trigger)
+                if self.executeAction:
+                    self.executeAction.signal().triggered.disconnect(self.on_trigger)
             except Exception:
                 pass
             try:

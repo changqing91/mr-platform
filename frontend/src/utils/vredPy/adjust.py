@@ -1,6 +1,16 @@
 import os
 import math
 
+_pad_input = 'touchpad'
+_grip_input = 'grip'
+try:
+    _xr = getattr(vrImmersiveInteractionService, 'getOpenXRRuntime', None)
+    if _xr and _xr():
+        _pad_input = 'thumbstick'
+        _grip_input = 'squeeze'
+except Exception:
+    pass
+
 global vred_tool_registry
 if 'vred_tool_registry' not in globals():
     vred_tool_registry = {}
@@ -74,19 +84,19 @@ class AdjustTool:
         padDown = vrdVirtualTouchpadButton('paddown', 0.5, 1.0, 150.0, 210.0)
         padLeft = vrdVirtualTouchpadButton('padleft', 0.5, 1.0, 210.0, 330.0)
         padRight = vrdVirtualTouchpadButton('padright', 0.5, 1.0, 30.0, 150.0)
-        self.rightController.addVirtualButton(padUp, 'touchpad')
-        self.rightController.addVirtualButton(padDown, 'touchpad')
-        self.rightController.addVirtualButton(padLeft, 'touchpad')
-        self.rightController.addVirtualButton(padRight, 'touchpad')
+        self.rightController.addVirtualButton(padUp, _pad_input)
+        self.rightController.addVirtualButton(padDown, _pad_input)
+        self.rightController.addVirtualButton(padLeft, _pad_input)
+        self.rightController.addVirtualButton(padRight, _pad_input)
 
         multiButtonPad = vrDeviceService.createInteraction("MultiButtonPadAdjust")
         multiButtonPad.setSupportedInteractionGroups(["AdjustGroup"])
 
         teleport = vrDeviceService.getInteraction("Teleport")
         teleport.addSupportedInteractionGroup("AdjustGroup")
-        teleport.setControllerActionMapping("prepare", "left-touchpad-touched")
-        teleport.setControllerActionMapping("abort", "left-touchpad-untouched")
-        teleport.setControllerActionMapping("execute", "left-touchpad-pressed")
+        teleport.setControllerActionMapping("prepare", "left-{}-touched".format(_pad_input))
+        teleport.setControllerActionMapping("abort", "left-{}-untouched".format(_pad_input))
+        teleport.setControllerActionMapping("execute", "left-{}-pressed".format(_pad_input))
 
         self.pointer = vrDeviceService.getInteraction("Pointer")
         self.pointer.addSupportedInteractionGroup("AdjustGroup")

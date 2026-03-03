@@ -1,5 +1,15 @@
 import os
 
+_pad_input = 'touchpad'
+_grip_input = 'grip'
+try:
+    _xr = getattr(vrImmersiveInteractionService, 'getOpenXRRuntime', None)
+    if _xr and _xr():
+        _pad_input = 'thumbstick'
+        _grip_input = 'squeeze'
+except Exception:
+    pass
+
 global vred_tool_registry
 if 'vred_tool_registry' not in globals():
     vred_tool_registry = {}
@@ -60,20 +70,20 @@ class SectionTool:
         padUpperRight = vrdVirtualTouchpadButton('padupright', 0.5, 1.0, 30.0, 90.0)
         padLowerRight = vrdVirtualTouchpadButton('paddownright', 0.5, 1.0, 90.0, 150.0)
         padDown = vrdVirtualTouchpadButton('paddown', 0.5, 1.0, 150.0, 210.0)
-        self.rightController.addVirtualButton(padCenter, 'touchpad')
-        self.rightController.addVirtualButton(padUpperLeft, 'touchpad')
-        self.rightController.addVirtualButton(padLowerLeft, 'touchpad')
-        self.rightController.addVirtualButton(padUp, 'touchpad')
-        self.rightController.addVirtualButton(padUpperRight, 'touchpad')
-        self.rightController.addVirtualButton(padLowerRight, 'touchpad')
-        self.rightController.addVirtualButton(padDown, 'touchpad')
+        self.rightController.addVirtualButton(padCenter, _pad_input)
+        self.rightController.addVirtualButton(padUpperLeft, _pad_input)
+        self.rightController.addVirtualButton(padLowerLeft, _pad_input)
+        self.rightController.addVirtualButton(padUp, _pad_input)
+        self.rightController.addVirtualButton(padUpperRight, _pad_input)
+        self.rightController.addVirtualButton(padLowerRight, _pad_input)
+        self.rightController.addVirtualButton(padDown, _pad_input)
         multiButtonPadClip = vrDeviceService.createInteraction("MultiButtonPadClip")
         multiButtonPadClip.setSupportedInteractionGroups(["ClipGroup"])
         teleport = vrDeviceService.getInteraction("Teleport")
         teleport.addSupportedInteractionGroup("ClipGroup")
-        teleport.setControllerActionMapping("prepare", "left-touchpad-touched")
-        teleport.setControllerActionMapping("abort", "left-touchpad-untouched")
-        teleport.setControllerActionMapping("execute", "left-touchpad-pressed")
+        teleport.setControllerActionMapping("prepare", "left-{}-touched".format(_pad_input))
+        teleport.setControllerActionMapping("abort", "left-{}-untouched".format(_pad_input))
+        teleport.setControllerActionMapping("execute", "left-{}-pressed".format(_pad_input))
         self.pointer = vrDeviceService.getInteraction("Pointer")
         self.pointer.addSupportedInteractionGroup("ClipGroup")
         self.leftUpperActionClip = multiButtonPadClip.createControllerAction("right-padupleft-pressed")
