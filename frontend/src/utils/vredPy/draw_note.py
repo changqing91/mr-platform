@@ -96,6 +96,7 @@ class Notes:
         self.activeNode = None
         self.upbuttonIsActive = False
         self.timer = vrTimer()
+        self.orientationConstraint = None  # 保存约束引用
 
         self.leftController = vrDeviceService.getVRDevice("left-controller")
         self.rightController = vrDeviceService.getVRDevice("right-controller")
@@ -149,9 +150,23 @@ class Notes:
 
         self.activeNode = hitNode
         if not self.changeView:
-            vrConstraintService.createOrientationConstraint([self.rightController.getNode()], refObject)
+            # 删除旧约束再创建新约束
+            if self.orientationConstraint:
+                try:
+                    vrConstraintService.deleteConstraint(self.orientationConstraint)
+                except Exception:
+                    pass
+            self.orientationConstraint = vrConstraintService.createOrientationConstraint([self.rightController.getNode()], refObject)
             setTransformNodeTranslation(refObject, handPos.x(), handPos.y(), handPos.z(), 1)
         else:
+            # 射线模式下删除约束
+            if self.orientationConstraint:
+                try:
+                    vrConstraintService.deleteConstraint(self.orientationConstraint)
+                    self.orientationConstraint = None
+                except Exception:
+                    pass
+            
             nx, ny, nz = hitNormal.x(), hitNormal.y(), hitNormal.z()
             normalLen = math.sqrt(nx * nx + ny * ny + nz * nz)
             if normalLen > 1e-6:
@@ -267,6 +282,12 @@ class Notes:
             pass
         try:
             self.neutralNotes()
+        except Exception:
+            pass
+        try:
+            if self.orientationConstraint:
+                vrConstraintService.deleteConstraint(self.orientationConstraint)
+                self.orientationConstraint = None
         except Exception:
             pass
         try:
