@@ -87,8 +87,7 @@ const StreamingView = ({
         schemeCompareActive: false,
         liveRefFolder: '',
         realtimeRefActive: false,
-        displayMode: 'standard', // 'standard', 'immersive'
-        immersiveType: 'xr', // 'xr', 'mr'
+        displayMode: 'standard', // 'standard', 'xr', 'mr'
         showCalibration: false
     });
 
@@ -226,27 +225,103 @@ const StreamingView = ({
         }
     };
 
-    const handleStandardDisplay = () => {
+    const handleStandardDisplay = async () => {
         updateStreamParam('displayMode', 'standard');
         sendPython('setDisplayMode(VR_DISPLAY_STANDARD)');
+        // 关闭底板
+        await removeSceneplateFloor();
     };
 
-    const handleEnterXR = () => {
-        updateStreamParam('displayMode', 'immersive');
+    const handleEnterXR = async () => {
+        updateStreamParam('displayMode', 'xr');
         sendPython('setDisplayMode(VR_DISPLAY_OPEN_XR)');
+        // 关闭底板
+        await removeSceneplateFloor();
     };
 
-    const handleToggleMode = () => {
-        if (streamParams.displayMode !== 'immersive') return;
-        const newType = streamParams.immersiveType === 'xr' ? 'mr' : 'xr';
-        updateStreamParam('immersiveType', newType);
+    const handleEnterMR = async () => {
+        updateStreamParam('displayMode', 'mr');
+        sendPython('setDisplayMode(VR_DISPLAY_OPEN_XR)');
+        // 创建底板
+        await createSceneplateFloor();
+    };
 
-        if (newType === 'mr') {
-            // Switch to MR (Varjo/Passthrough)
-            sendPython('setDisplayMode(VR_DISPLAY_VARJO)');
-        } else {
-            // Switch back to VR (OpenXR)
-            sendPython('setDisplayMode(VR_DISPLAY_OPEN_VR)');
+    const createSceneplateFloor = async () => {
+        if (!machine) return;
+        try {
+            // 网络路径需要使用正斜杠或双反斜杠
+            const floorImagePath = '//192.168.7.80/upload/blue.jpg';
+            
+            // 使用 Python 脚本创建场景板底板
+            const pythonScript = `
+# 创建 MR 底板
+NodeType = vrSceneplateTypes.NodeType
+ContentType = vrSceneplateTypes.ContentType
+
+# 开启场景板显示
+vrOSGWidget.enableSceneplates(True)
+
+# 获取场景板根节点
+theRoot = vrSceneplateService.getRootNode()
+
+# 查找并删除已存在的 MR_Floor
+existingNode = vrSceneplateService.findNode('MR_Floor')
+if existingNode.isValid():
+    vrSceneplateService.removeNodes([existingNode])
+
+# 创建 Backplate 类型的场景板节点（背景板，适合作为底板）
+theNode = vrSceneplateService.createNode(theRoot, NodeType.Backplate, 'MR_Floor')
+thePlate = vrdSceneplateNode(theNode)
+
+# 设置内容类型为图片
+thePlate.setContentType(ContentType.Image)
+
+# 加载并设置图片
+imagePath = '${floorImagePath}'
+print('Loading image from:', imagePath)
+
+try:
+    theImage = vrImageService.loadImage(imagePath)
+    if theImage.isValid():
+        thePlate.setImage(theImage)
+        print('Image loaded and set successfully')
+    else:
+        print('ERROR: Image is not valid')
+except Exception as e:
+    print('ERROR loading image:', str(e))
+
+# 设置为可见
+thePlate.setVisibilityFlag(True)
+
+print('MR floor created')
+`;
+            
+            await api.processes.executePython(machine.ip, machine.port || 8888, pythonScript);
+        } catch (e) {
+            console.error('Failed to create sceneplate floor:', e);
+        }
+    };
+
+    const removeSceneplateFloor = async () => {
+        if (!machine) return;
+        try {
+            // 使用 Python 脚本删除场景板底板
+            const pythonScript = `
+# 删除 MR 底板
+existingNode = vrSceneplateService.findNode('MR_Floor')
+if existingNode.isValid():
+    vrSceneplateService.removeNodes([existingNode])
+    print('MR floor removed successfully')
+else:
+    print('MR floor not found')
+
+# 关闭场景板显示
+vrOSGWidget.enableSceneplates(False)
+`;
+            
+            await api.processes.executePython(machine.ip, machine.port || 8888, pythonScript);
+        } catch (e) {
+            console.error('Failed to remove sceneplate floor:', e);
         }
     };
 
@@ -346,10 +421,10 @@ const StreamingView = ({
                     {streamParams.isTracking && <span className="text-[#39C5BB] flex items-center gap-1"><Glasses size={12} /> HMD TRACKING</span>}
                     {streamParams.schemeCompareActive && <span className="text-[#39C5BB] flex items-center gap-1"><SplitSquareHorizontal size={12} /> COMPARING</span>}
                     {streamParams.realtimeRefActive && <span className="text-[#39C5BB] flex items-center gap-1"><ImageIcon size={12} /> REF ACTIVE</span>}
-                    {streamParams.displayMode === 'immersive' && streamParams.immersiveType === 'xr' && (
+                    {streamParams.displayMode === 'xr' && (
                         <span className="text-[#39C5BB] flex items-center gap-1 bg-[#39C5BB]/10 px-2 py-0.5 rounded border border-[#39C5BB]/20"><Glasses size={12} /> XR ACTIVE</span>
                     )}
-                    {streamParams.displayMode === 'immersive' && streamParams.immersiveType === 'mr' && (
+                    {streamParams.displayMode === 'mr' && (
                         <span className="text-[#39C5BB] flex items-center gap-1 bg-[#39C5BB]/10 px-2 py-0.5 rounded border border-[#39C5BB]/20"><Headset size={12} /> MR ACTIVE</span>
                     )}
                 </div>
@@ -497,36 +572,31 @@ const StreamingView = ({
 
                     <div className="mt-auto pt-4 border-t border-gray-800 space-y-3">
                         <h3 className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">显示模式</h3>
-                        <div className="grid grid-cols-2 gap-2">
+                        <div className="grid grid-cols-3 gap-2">
                             <button
                                 onClick={handleStandardDisplay}
                                 className={`py-3 rounded-lg font-bold text-sm flex items-center justify-center gap-2 transition-all ${streamParams.displayMode === 'standard' ? `text-white shadow-lg` : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white'}`}
                                 style={{ backgroundColor: streamParams.displayMode === 'standard' ? THEME_COLOR : '' }}
                             >
-                                <Monitor size={18} /> 标准显示
+                                <Monitor size={18} /> 标准
                             </button>
 
                             <button
                                 onClick={handleEnterXR}
-                                className={`py-3 rounded-lg font-bold text-sm flex items-center justify-center gap-2 transition-all ${streamParams.displayMode === 'immersive' ? `text-white shadow-lg` : 'bg-gray-800 border border-gray-700 text-gray-400 hover:bg-gray-700 hover:text-white'}`}
-                                style={{ backgroundColor: streamParams.displayMode === 'immersive' ? THEME_COLOR : '' }}
+                                className={`py-3 rounded-lg font-bold text-sm flex items-center justify-center gap-2 transition-all ${streamParams.displayMode === 'xr' ? `text-white shadow-lg` : 'bg-gray-800 border border-gray-700 text-gray-400 hover:bg-gray-700 hover:text-white'}`}
+                                style={{ backgroundColor: streamParams.displayMode === 'xr' ? THEME_COLOR : '' }}
                             >
-                                <Glasses size={18} /> OpenXR
+                                <Glasses size={18} /> XR
+                            </button>
+
+                            <button
+                                onClick={handleEnterMR}
+                                className={`py-3 rounded-lg font-bold text-sm flex items-center justify-center gap-2 transition-all ${streamParams.displayMode === 'mr' ? `text-white shadow-lg` : 'bg-gray-800 border border-gray-700 text-gray-400 hover:bg-gray-700 hover:text-white'}`}
+                                style={{ backgroundColor: streamParams.displayMode === 'mr' ? THEME_COLOR : '' }}
+                            >
+                                <Headset size={18} /> MR
                             </button>
                         </div>
-                        <button
-                            onClick={handleToggleMode}
-                            disabled={streamParams.displayMode !== 'immersive'}
-                            className={`w-full py-3 rounded-lg font-bold text-sm flex items-center justify-center gap-2 transition-all ${streamParams.displayMode === 'immersive' ? `bg-purple-600 text-white hover:bg-purple-500 shadow-lg cursor-pointer` : 'bg-gray-800/50 border border-gray-700 text-gray-600 cursor-not-allowed'}`}
-                        >
-                            {streamParams.displayMode !== 'immersive'
-                                ? <><Headset size={18} /> 切换模式 (需先进入XR)</>
-                                : (streamParams.immersiveType === 'xr'
-                                    ? <><Headset size={18} /> 切换为 MR</>
-                                    : <><Glasses size={18} /> 切换为 VR</>
-                                )
-                            }
-                        </button>
                     </div>
                 </div>
             </div>

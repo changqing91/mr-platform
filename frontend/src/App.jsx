@@ -64,6 +64,7 @@ const App = () => {
     const [streamingMachineId, setStreamingMachineId] = useState(null);
     const [machineScripts, setMachineScripts] = useState({}); // { machineId: Set<scriptId> }
     const [showScriptTools, setShowScriptTools] = useState(false);
+    const [collaborationMachineIds, setCollaborationMachineIds] = useState(new Set());
 
     // --- State: Modals ---
     const [showProjectModal, setShowProjectModal] = useState(false);
@@ -162,6 +163,13 @@ const App = () => {
             // Don't show error immediately on load to avoid spam if server is down initially
         }
     };
+
+    useEffect(() => {
+        setCollaborationMachineIds(prev => {
+            const next = new Set(Array.from(prev).filter(machineId => !!runningMachines[machineId]));
+            return next;
+        });
+    }, [runningMachines]);
 
     // --- Handlers: Auth ---
     const handleLogin = async (e) => {
@@ -445,19 +453,15 @@ const App = () => {
         if (isBatchMode && selectedBatchIds.size > 0) {
             const newPending = { ...pendingLaunches };
             selectedBatchIds.forEach(mid => {
-                // Only if not already running/booting
-                if (!runningMachines[mid] && !bootingMachines.has(mid)) {
-                    newPending[mid] = project.id;
-                }
+                // 允许为所有节点（包括运行中的）分配项目
+                newPending[mid] = project.id;
             });
             setPendingLaunches(newPending);
             setSelectedBatchIds(new Set());
             addNotification(`已为 ${selectedBatchIds.size} 个节点预设项目: ${project.name}`, 'info');
         } else if (activeMachineId && !isBatchMode) {
-             // Single mode assignment
-             if (!runningMachines[activeMachineId] && !bootingMachines.has(activeMachineId)) {
-                 setPendingLaunches(prev => ({ ...prev, [activeMachineId]: project.id }));
-             }
+             // Single mode assignment - 允许为运行中的节点分配项目
+             setPendingLaunches(prev => ({ ...prev, [activeMachineId]: project.id }));
         }
     };
 
@@ -510,8 +514,8 @@ const App = () => {
             } else {
                 setActiveMachineId(machine.id);
                 
-                // Auto-assign active project if one is selected
-                if (activeProject && !runningMachines[machine.id] && !bootingMachines.has(machine.id)) {
+                // Auto-assign active project if one is selected (允许为运行中的节点分配)
+                if (activeProject) {
                     setPendingLaunches(prev => ({ ...prev, [machine.id]: activeProject }));
                 }
             }
@@ -525,6 +529,94 @@ const App = () => {
         setIsBatchMode(false);
         setShowScriptTools(true);
 
+    };
+
+    const escapePythonString = (value) => String(value || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+
+    const joinCollaborationSession = async (machine, hostMachineId) => {
+        const hostMachine = machines.find(m => m.id === hostMachineId);
+        if (!hostMachine) return;
+
+        const isHost = machine.id === hostMachine.id;
+        const sessionLink = isHost ? 'localhost' : hostMachine.ip;
+        const userName = escapePythonString(isHost ? `Primary-${machine.name}` : `Secondary-${machine.name}`);
+        const roomName = 'MR-Room';
+        const color = isHost ? '0 1 0 1' : '1 0 0 1';
+        const pythonCode = `
+try:
+    vrSessionService.join('${sessionLink}', '${userName}', '${color}', '${roomName}', '')
+    vrSessionService.setAudioEnabled(True)
+    print('Joined collaboration room: ${roomName}')
+except Exception as e:
+    print('Join collaboration failed:', str(e))
+`;
+
+        await api.processes.executePython(machine.ip, machine.port || 8888, pythonCode);
+    };
+
+    const leaveCollaborationSession = async (machine) => {
+        const pythonCode = `
+try:
+    vrSessionService.leave()
+    print('Left collaboration room')
+except Exception as e:
+    print('Leave collaboration failed:', str(e))
+`;
+
+        await api.processes.executePython(machine.ip, machine.port || 8888, pythonCode);
+    };
+
+    const toggleMachineCollaboration = async (machine, checked) => {
+        if (!runningMachines[machine.id]) {
+            addNotification('仅运行中的节点可加入协作', 'warning');
+            return;
+        }
+
+        if (checked) {
+            const currentIds = Array.from(collaborationMachineIds);
+            const hostMachineId = currentIds.length > 0 ? currentIds[0] : machine.id;
+
+            try {
+                await joinCollaborationSession(machine, hostMachineId);
+                setCollaborationMachineIds(prev => new Set([...prev, machine.id]));
+                addNotification(`节点 ${machine.name} 已加入 VRED 协作`, 'success');
+            } catch (e) {
+                console.error('Failed to join VRED collaboration:', e);
+                addNotification(`节点 ${machine.name} 加入协作失败`, 'error');
+            }
+            return;
+        }
+
+        try {
+            await leaveCollaborationSession(machine);
+
+            const currentIds = Array.from(collaborationMachineIds);
+            const hostMachineId = currentIds[0];
+
+            setCollaborationMachineIds(prev => {
+                const next = new Set(prev);
+                next.delete(machine.id);
+                return next;
+            });
+
+            if (hostMachineId === machine.id) {
+                const remainingIds = currentIds.filter(id => id !== machine.id && !!runningMachines[id]);
+                if (remainingIds.length > 0) {
+                    const newHostId = remainingIds[0];
+                    await Promise.all(remainingIds.map(async (id) => {
+                        const target = machines.find(m => m.id === id);
+                        if (!target) return;
+                        await joinCollaborationSession(target, newHostId);
+                    }));
+                    addNotification('协作主节点已切换', 'info');
+                }
+            }
+
+            addNotification(`节点 ${machine.name} 已离开 VRED 协作`, 'info');
+        } catch (e) {
+            console.error('Failed to leave VRED collaboration:', e);
+            addNotification(`节点 ${machine.name} 离开协作失败`, 'error');
+        }
     };
 
     const handleInjectScripts = (scriptIds) => {
@@ -622,6 +714,24 @@ const App = () => {
             await Promise.all(machineIds.map(async (machineId) => {
                 const projectId = launchesToProcess[machineId];
                 try {
+                    // 如果节点已经在运行，先停止进程
+                    if (runningMachines[machineId]) {
+                        try {
+                            await api.processes.kill(machineId);
+                            // 从运行列表中移除
+                            setRunningMachines(prev => {
+                                const next = { ...prev };
+                                delete next[machineId];
+                                return next;
+                            });
+                            // 等待一小段时间确保进程完全停止
+                            await new Promise(resolve => setTimeout(resolve, 1000));
+                        } catch (stopError) {
+                            console.error(`Failed to stop process on ${machineId}:`, stopError);
+                            // 继续尝试启动，让后端处理冲突
+                        }
+                    }
+                    
                     await api.processes.launch(machineId, projectId);
                     
                     // Success: Update UI
@@ -891,6 +1001,8 @@ const App = () => {
                         setShowMonitorWall={setShowMonitorWall}
                         setIsBatchMode={setIsBatchMode}
                         openScriptTools={openScriptTools}
+                        collaborationMachineIds={collaborationMachineIds}
+                        toggleMachineCollaboration={toggleMachineCollaboration}
                     />
                 </div>
             </div>

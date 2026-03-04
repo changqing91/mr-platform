@@ -1,3 +1,5 @@
+import os
+
 global vred_tool_registry
 if 'vred_tool_registry' not in globals():
     vred_tool_registry = {}
@@ -14,7 +16,97 @@ class MeasureTool:
         self.pointer = None
         self.executeAction = None
         self.registry_key = "tool_measure"
+        self.rightController = vrDeviceService.getVRDevice("right-controller")
+        self.newRightCon = None
+        self.measureControllerConstraint = None
         self.enable()
+
+    def _find_or_load_measure_controller(self):
+        try:
+            node = findNode("ControllerDraw")
+            if node and not node.isNull():
+                return node
+        except Exception:
+            pass
+
+        try:
+            base_dir = None
+            try:
+                base_dir = os.path.join(os.environ['USERPROFILE'], 'Documents')
+            except Exception:
+                try:
+                    base_dir = os.path.join(os.environ['HOME'], 'Documents')
+                except Exception:
+                    base_dir = None
+
+            if not base_dir:
+                return None
+
+            filepath = os.path.join(base_dir, 'Autodesk', 'Automotive', 'VRED', 'ControllerDraw.osb')
+            if not os.path.exists(filepath):
+                return None
+
+            node = loadGeometry(filepath)
+            try:
+                node.setName("ControllerDraw")
+            except Exception:
+                pass
+            return node
+        except Exception:
+            return None
+
+    def _activate_measure_controller(self):
+        self.newRightCon = self._find_or_load_measure_controller()
+        if self.newRightCon:
+            try:
+                self.rightController.setVisible(0)
+            except Exception:
+                pass
+            try:
+                self.rightController.setEnabled(0)
+            except Exception:
+                pass
+            try:
+                self.newRightCon.setActive(1)
+            except Exception:
+                pass
+            try:
+                self.measureControllerConstraint = vrConstraintService.createParentConstraint(
+                    [self.rightController.getNode()], self.newRightCon, False
+                )
+            except Exception:
+                self.measureControllerConstraint = None
+        else:
+            try:
+                self.rightController.setVisible(1)
+            except Exception:
+                pass
+            try:
+                self.rightController.setEnabled(1)
+            except Exception:
+                pass
+
+    def _deactivate_measure_controller(self):
+        try:
+            if self.measureControllerConstraint:
+                vrConstraintService.deleteConstraint(self.measureControllerConstraint)
+                self.measureControllerConstraint = None
+        except Exception:
+            pass
+        try:
+            if self.newRightCon:
+                self.newRightCon.setActive(0)
+        except Exception:
+            pass
+        try:
+            self.rightController.setVisible(1)
+        except Exception:
+            pass
+        try:
+            self.rightController.setEnabled(1)
+        except Exception:
+            pass
+
     def enable(self):
         self.isEnabled = True
         try:
@@ -28,6 +120,7 @@ class MeasureTool:
             pass
         vred_tool_registry[self.registry_key] = self
         self.switchOn()
+        self._activate_measure_controller()
     def switchOn(self):
         if not self.on:
             self.point1Selected = False
@@ -104,5 +197,6 @@ class MeasureTool:
         except Exception:
             pass
         self.switchOff()
+        self._deactivate_measure_controller()
 
 MeasureTool()

@@ -14,39 +14,39 @@ global vred_tool_registry
 if 'vred_tool_registry' not in globals():
     vred_tool_registry = {}
 
-rotationControllerFound = False
-try:
-    allRotNodes = getAllNodes()
-    for node in allRotNodes:
-        nodeName = node.getName()
-        if nodeName == "VRController_Rotation" or nodeName == "VRControllerRotation":
-            rotationControllerFound = True
-            break
-except Exception:
-    rotationControllerFound = False
+# rotationControllerFound = False
+# try:
+#     allRotNodes = getAllNodes()
+#     for node in allRotNodes:
+#         nodeName = node.getName()
+#         if nodeName == "VRController_Rotation" or nodeName == "VRControllerRotation":
+#             rotationControllerFound = True
+#             break
+# except Exception:
+#     rotationControllerFound = False
 
-if not rotationControllerFound:
-    try:
-        base_dir = None
-        try:
-            base_dir = os.path.join(os.environ['USERPROFILE'], 'Documents')
-        except Exception:
-            try:
-                base_dir = os.path.join(os.environ['HOME'], 'Documents')
-            except Exception:
-                base_dir = None
-        if base_dir:
-            filepath = os.path.join(base_dir, 'Autodesk', 'Automotive', 'VRED')
-            filename = os.path.join(filepath, 'VRControllerRotation.osb')
-            if os.path.exists(filename):
-                node = loadGeometry(filename)
-                try:
-                    node.setName("VRControllerRotation")
-                except Exception:
-                    pass
-                rotationControllerFound = True
-    except Exception:
-        rotationControllerFound = False
+# if not rotationControllerFound:
+#     try:
+#         base_dir = None
+#         try:
+#             base_dir = os.path.join(os.environ['USERPROFILE'], 'Documents')
+#         except Exception:
+#             try:
+#                 base_dir = os.path.join(os.environ['HOME'], 'Documents')
+#             except Exception:
+#                 base_dir = None
+#         if base_dir:
+#             filepath = os.path.join(base_dir, 'Autodesk', 'Automotive', 'VRED')
+#             filename = os.path.join(filepath, 'VRControllerRotation.osb')
+#             if os.path.exists(filename):
+#                 node = loadGeometry(filename)
+#                 try:
+#                     node.setName("VRControllerRotation")
+#                 except Exception:
+#                     pass
+#                 rotationControllerFound = True
+#     except Exception:
+#         rotationControllerFound = False
 
 class TurntableTool:
     def __init__(self):
@@ -96,6 +96,21 @@ class TurntableTool:
 
         self.registry_key = "tool_turntable"
         self.enable()
+
+    def _find_node_by_names(self, names):
+        try:
+            all_nodes = getAllNodes()
+            if not all_nodes:
+                return None
+            for node in all_nodes:
+                try:
+                    if node and not node.isNull() and node.getName() in names:
+                        return node
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        return None
 
     def _resolve_target(self):
         print("[Turntable] _resolve_target called")
@@ -241,15 +256,7 @@ class TurntableTool:
         
         if rotationControllerFound:
             try:
-                try:
-                    self.newRightCon = findNode("VRController_Rotation")
-                except Exception:
-                    self.newRightCon = None
-                if not self.newRightCon:
-                    try:
-                        self.newRightCon = findNode("VRControllerRotation")
-                    except Exception:
-                        self.newRightCon = None
+                self.newRightCon = self._find_node_by_names(("VRController_Rotation", "VRControllerRotation"))
             except Exception:
                 self.newRightCon = None
             

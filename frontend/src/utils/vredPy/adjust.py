@@ -20,7 +20,7 @@ try:
     allAdjustNodes = getAllNodes()
     for node in allAdjustNodes:
         nodeName = node.getName()
-        if nodeName == "VRController_Move" or nodeName == "VRControllerMove":
+        if nodeName == "WT-MR_Remote_controllers":
             adjustControllerFound = True
             break
 except Exception:
@@ -37,12 +37,11 @@ if not adjustControllerFound:
             except Exception:
                 base_dir = None
         if base_dir:
-            filepath = os.path.join(base_dir, 'Autodesk', 'Automotive', 'VRED')
-            filename = os.path.join(filepath, 'VRControllerMove.osb')
-            if os.path.exists(filename):
-                node = loadGeometry(filename)
+            filepath = os.path.join(base_dir, 'Autodesk', 'Automotive', 'VRED', 'ControllerBase.osb')
+            if os.path.exists(filepath):
+                node = loadGeometry(filepath)
                 try:
-                    node.setName("VRControllerMove")
+                    node.setName("WT-MR_Remote_controllers")
                 except Exception:
                     pass
                 adjustControllerFound = True
@@ -323,19 +322,18 @@ class AdjustTool:
         if adjustControllerFound:
             try:
                 try:
-                    self.newRightCon = findNode("VRController_Move")
+                    self.newRightCon = findNode("WT-MR_Remote_controllers")
                 except Exception:
                     self.newRightCon = None
-                if not self.newRightCon:
-                    try:
-                        self.newRightCon = findNode("VRControllerMove")
-                    except Exception:
-                        self.newRightCon = None
             except Exception:
                 self.newRightCon = None
             if self.newRightCon:
                 try:
                     self.rightController.setVisible(0)
+                except Exception:
+                    pass
+                try:
+                    self.rightController.setEnabled(0)
                 except Exception:
                     pass
                 try:
@@ -354,6 +352,10 @@ class AdjustTool:
         else:
             try:
                 self.rightController.setVisible(1)
+            except Exception:
+                pass
+            try:
+                self.rightController.setEnabled(1)
             except Exception:
                 pass
 
@@ -426,6 +428,10 @@ class AdjustTool:
             pass
         try:
             self.rightController.setVisible(1)
+        except Exception:
+            pass
+        try:
+            self.rightController.setEnabled(1)
         except Exception:
             pass
         try:

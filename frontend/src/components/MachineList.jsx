@@ -30,7 +30,9 @@ const MachineList = ({
     setActiveMachineId,
     setShowMonitorWall,
     setIsBatchMode,
-    openScriptTools
+    openScriptTools,
+    collaborationMachineIds,
+    toggleMachineCollaboration
 }) => {
     const pendingCount = Object.keys(pendingLaunches).length;
 
@@ -96,6 +98,7 @@ const MachineList = ({
                      
                      const isSelectedInBatch = isBatchMode && selectedBatchIds.has(machine.id);
                      const isActiveInSingle = !isBatchMode && activeMachineId === machine.id;
+                     const isInCollaboration = collaborationMachineIds?.has(machine.id);
                      
                      let borderClass = 'border-white';
                      let ringClass = '';
@@ -112,8 +115,8 @@ const MachineList = ({
                          bgClass = 'bg-yellow-50';
                      }
                      
+                     // 离线节点不可点击，其他情况都可以点击
                      let isClickable = !isOffline;
-                     if (isRunning && !isBatchMode) isClickable = false;
 
                      return (
                          <div 
@@ -130,9 +133,9 @@ const MachineList = ({
                          >
                              {/* Left Side: Project Info */}
                              <div 
-                                 className={`flex gap-3 ${isRunning ? 'cursor-pointer group/thumb' : ''}`}
+                                 className={`flex gap-3 ${isRunning && !isBatchMode ? 'cursor-pointer group/thumb' : ''}`}
                                  onClick={(e) => {
-                                     if (isRunning) {
+                                     if (isRunning && !isBatchMode) {
                                          e.stopPropagation();
                                          setStreamingMachineId(machine.id);
                                          setActiveMachineId(null);
@@ -145,10 +148,12 @@ const MachineList = ({
                                  <div className={`w-36 h-24 rounded-lg overflow-hidden relative flex items-center justify-center transition-colors shrink-0 ${isRunning ? 'bg-black' : 'bg-gray-100'}`}>
                                      {(isRunning || isBooting) && project ? (
                                          <>
-                                            <ProjectThumbnail project={project} className="w-full h-full opacity-80 group-hover/thumb:opacity-60 transition-opacity" />
-                                            <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover/thumb:opacity-100 transition-opacity">
-                                                <Play size={24} className="text-white fill-current" />
-                                            </div>
+                                            <ProjectThumbnail project={project} className={`w-full h-full opacity-80 transition-opacity ${!isBatchMode ? 'group-hover/thumb:opacity-60' : ''}`} />
+                                            {!isBatchMode && (
+                                                <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover/thumb:opacity-100 transition-opacity">
+                                                    <Play size={24} className="text-white fill-current" />
+                                                </div>
+                                            )}
                                             <div className="absolute top-1 left-1 bg-black/60 text-white text-[9px] px-1 rounded backdrop-blur-sm">{project.type}</div>
                                             <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 to-transparent p-2 pt-6">
                                                 <div className="text-[10px] font-bold text-white leading-tight truncate">{project.name}</div>
@@ -214,6 +219,21 @@ const MachineList = ({
                                  <div className="flex items-center justify-end gap-1.5 mt-2">
                                      {!isBatchMode && (
                                          <>
+                                             {isRunning && (
+                                                 <label 
+                                                    className="flex items-center gap-1 px-2 py-1 rounded bg-emerald-50 text-emerald-700 hover:bg-emerald-100 transition-colors text-[10px] font-bold cursor-pointer"
+                                                    onClick={(e) => e.stopPropagation()}
+                                                    title="加入VRED协作"
+                                                 >
+                                                    <input
+                                                        type="checkbox"
+                                                        className="w-3.5 h-3.5 accent-emerald-500"
+                                                        checked={!!isInCollaboration}
+                                                        onChange={(e) => toggleMachineCollaboration(machine, e.target.checked)}
+                                                    />
+                                                    协作
+                                                 </label>
+                                             )}
                                              {isRunning ? (
                                                  <>
                                                      <button onClick={(e) => restartNode(machine, e)} className="p-1.5 bg-blue-50 text-blue-500 rounded hover:bg-blue-100 transition-colors" title="重启项目"><RotateCcw size={14} /></button>

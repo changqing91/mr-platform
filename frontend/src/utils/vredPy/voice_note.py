@@ -405,7 +405,95 @@ if qt_binding:
             self.executeAction = None
             self.timer = vrTimer()
             self.registry_key = "tool_voice_note"
+            self.newRightCon = None
+            self.voiceControllerConstraint = None
             self.enable()
+
+        def _find_or_load_voice_controller(self):
+            try:
+                node = findNode("ControllerVoiceNote")
+                if node and not node.isNull():
+                    return node
+            except Exception:
+                pass
+
+            try:
+                base_dir = None
+                try:
+                    base_dir = os.path.join(os.environ['USERPROFILE'], 'Documents')
+                except Exception:
+                    try:
+                        base_dir = os.path.join(os.environ['HOME'], 'Documents')
+                    except Exception:
+                        base_dir = None
+
+                if not base_dir:
+                    return None
+
+                filepath = os.path.join(base_dir, 'Autodesk', 'Automotive', 'VRED', 'ControllerVoiceNote.osb')
+                if not os.path.exists(filepath):
+                    return None
+
+                node = loadGeometry(filepath)
+                try:
+                    node.setName("ControllerVoiceNote")
+                except Exception:
+                    pass
+                return node
+            except Exception:
+                return None
+
+        def _activate_voice_controller(self):
+            self.newRightCon = self._find_or_load_voice_controller()
+            if self.newRightCon:
+                try:
+                    self.rightController.setVisible(0)
+                except Exception:
+                    pass
+                try:
+                    self.rightController.setEnabled(0)
+                except Exception:
+                    pass
+                try:
+                    self.newRightCon.setActive(1)
+                except Exception:
+                    pass
+                try:
+                    self.voiceControllerConstraint = vrConstraintService.createParentConstraint(
+                        [self.rightController.getNode()], self.newRightCon, False
+                    )
+                except Exception:
+                    self.voiceControllerConstraint = None
+            else:
+                try:
+                    self.rightController.setVisible(1)
+                except Exception:
+                    pass
+                try:
+                    self.rightController.setEnabled(1)
+                except Exception:
+                    pass
+
+        def _deactivate_voice_controller(self):
+            try:
+                if self.voiceControllerConstraint:
+                    vrConstraintService.deleteConstraint(self.voiceControllerConstraint)
+                    self.voiceControllerConstraint = None
+            except Exception:
+                pass
+            try:
+                if self.newRightCon:
+                    self.newRightCon.setActive(0)
+            except Exception:
+                pass
+            try:
+                self.rightController.setVisible(1)
+            except Exception:
+                pass
+            try:
+                self.rightController.setEnabled(1)
+            except Exception:
+                pass
         def distanceFunc(self):
             hover_node = None
             try:
@@ -478,6 +566,7 @@ if qt_binding:
                 self.executeAction = None
             self.timer.setActive(1)
             self.timer.connect(self.distanceFunc)
+            self._activate_voice_controller()
         def disable(self):
             try:
                 self.multi.setSupportedInteractionGroups([])
@@ -509,5 +598,6 @@ if qt_binding:
                     stop_recording()
             except Exception:
                 pass
+            self._deactivate_voice_controller()
     VoiceNotes()
     print("executed")
