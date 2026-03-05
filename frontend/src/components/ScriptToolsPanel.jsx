@@ -13,7 +13,7 @@ const ScriptToolsPanel = ({
 }) => {
     const [selectedScriptIds, setSelectedScriptIds] = useState(new Set());
     const [isConfirmingKill, setIsConfirmingKill] = useState(false);
-
+console.log(1)
     const handleScriptClick = (tool) => {
         if (selectedScriptIds.has(tool.id)) {
             setSelectedScriptIds(new Set());
