@@ -7,7 +7,6 @@ try:
     _xr = getattr(vrImmersiveInteractionService, 'getOpenXRRuntime', None)
     if _xr and _xr():
         _pad_input = 'thumbstick'
-        _grip_input = 'squeeze'
 except Exception:
     pass
 
@@ -32,16 +31,7 @@ for node in allNotesNodes:
         customFunctionsGroup = node
 
 if notesController == 0:
-    import os
-    myDocuments = os.path.join(os.path.join(os.environ['USERPROFILE']), 'Documents')
-    filepath = myDocuments + "\\Autodesk\\Automotive\\VRED"
-    filename = "\\VRControllerNotes"
-    if os.path.exists(filepath + str(filename) + ".osb"):
-        node = loadGeometry(filepath + str(filename) + ".osb")
-        node.setName("VRControllerNotes")
-        notesControllerFound = True
-    else:
-        notesControllerFound = False
+    notesControllerFound = False
 else:
     notesControllerFound = True
 
