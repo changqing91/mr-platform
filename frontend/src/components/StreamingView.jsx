@@ -80,7 +80,7 @@ const StreamingView = ({
         hmdIp: '',
         hmdPort: '8888',
         trackingInterval: '2.0',
-        fovMultiplier: '1.3',
+        fovMultiplier: '3.0',
         isTracking: false,
         schemeIp: '',
         schemePort: '8888',
@@ -92,17 +92,21 @@ const StreamingView = ({
     });
 
     const updateStreamParam = (key, value) => setStreamParams(prev => {
+        return { ...prev, [key]: value };
+    });
+
+    const validateStreamParam = (key) => setStreamParams(prev => {
         if (key === 'trackingInterval') {
-            const numericValue = Number.parseFloat(value);
+            const numericValue = Number.parseFloat(prev[key]);
             const safeValue = Number.isFinite(numericValue) && numericValue >= 2 ? numericValue : 2;
             return { ...prev, [key]: safeValue.toFixed(1) };
         }
         if (key === 'fovMultiplier') {
-            const numericValue = Number.parseFloat(value);
-            const safeValue = Number.isFinite(numericValue) && numericValue >= 0.5 && numericValue <= 3 ? numericValue : 1.3;
+            const numericValue = Number.parseFloat(prev[key]);
+            const safeValue = Number.isFinite(numericValue) && numericValue >= 0.5 && numericValue <= 10 ? numericValue : 3;
             return { ...prev, [key]: safeValue.toFixed(1) };
         }
-        return { ...prev, [key]: value };
+        return prev;
     });
 
     const trackingTimerRef = useRef(null);
@@ -179,7 +183,7 @@ const StreamingView = ({
             await viewpoint.activate(false, true);
 
             // 设置 FOV（应用倍数以扩大大屏视野）
-            const fovMultiplier = Number.parseFloat(streamParams.fovMultiplier) || 1.3;
+            const fovMultiplier = Number.parseFloat(streamParams.fovMultiplier) || 3;
             await targetCamera.setFov(fov * fovMultiplier);
 
             // 激活后删除 viewpoint，避免累积
@@ -491,11 +495,11 @@ vrOSGWidget.enableSceneplates(False)
                             </div>
                             <div>
                                 <label className="block text-[10px] text-gray-500 mb-1">追踪间隔 (s)</label>
-                                <input type="number" min="2" step="0.1" placeholder="2.0" value={streamParams.trackingInterval} onChange={(e) => updateStreamParam('trackingInterval', e.target.value)} className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-xs text-white focus:border-[#39C5BB] outline-none" />
+                                <input type="text" placeholder="2.0" value={streamParams.trackingInterval} onChange={(e) => updateStreamParam('trackingInterval', e.target.value)} onBlur={() => validateStreamParam('trackingInterval')} className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-xs text-white focus:border-[#39C5BB] outline-none" />
                             </div>
                             <div>
-                                <label className="block text-[10px] text-gray-500 mb-1">FOV 倍数 (0.5-3.0)</label>
-                                <input type="number" min="0.5" max="3.0" step="0.1" placeholder="1.3" value={streamParams.fovMultiplier} onChange={(e) => updateStreamParam('fovMultiplier', e.target.value)} className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-xs text-white focus:border-[#39C5BB] outline-none" />
+                                <label className="block text-[10px] text-gray-500 mb-1">FOV 倍数 (0.5-10.0)</label>
+                                <input type="text" placeholder="3.0" value={streamParams.fovMultiplier} onChange={(e) => updateStreamParam('fovMultiplier', e.target.value)} onBlur={() => validateStreamParam('fovMultiplier')} className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-xs text-white focus:border-[#39C5BB] outline-none" />
                             </div>
 
                             <div className="flex rounded-lg overflow-hidden border border-gray-700 w-full">
