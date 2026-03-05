@@ -619,7 +619,7 @@ except Exception as e:
         }
     };
 
-    const handleInjectScripts = (scriptIds) => {
+    const handleInjectScripts = async (scriptIds, fallbackMachineId = null) => {
         // Prepare Python Code
         let pythonCode = "";
         scriptIds.forEach(id => {
@@ -643,28 +643,42 @@ except Exception as e:
 
             // Execute on all selected machines
             const targets = machines.filter(m => selectedBatchIds.has(m.id));
-            targets.forEach(m => {
-                 api.processes.executePython(m.ip, m.port, pythonCode)
-                    .catch(e => console.error(`Failed to inject on ${m.name}`, e));
-            });
-
-            addNotification(`已向 ${selectedBatchIds.size} 台机器注入 ${scriptIds.length} 个脚本`, 'success');
-        } else if (activeMachineId) {
+            const results = await Promise.allSettled(
+                targets.map((m) => api.processes.executePython(m.ip, m.port || 8888, pythonCode))
+            );
+            const failedCount = results.filter(r => r.status === 'rejected').length;
+            if (failedCount > 0) {
+                console.error('Batch script injection had failures:', results);
+                addNotification(`脚本注入部分失败（失败 ${failedCount} 台）`, 'warning');
+            } else {
+                addNotification(`已向 ${selectedBatchIds.size} 台机器注入 ${scriptIds.length} 个脚本`, 'success');
+            }
+        } else {
+            const targetMachineId = activeMachineId || fallbackMachineId;
+            if (!targetMachineId) {
+                addNotification('未选择目标机器，无法注入脚本', 'warning');
+                return;
+            }
             // Single injection
             setMachineScripts(prev => {
-                const current = prev[activeMachineId] ? new Set(prev[activeMachineId]) : new Set();
+                const current = prev[targetMachineId] ? new Set(prev[targetMachineId]) : new Set();
                 scriptIds.forEach(s => current.add(s));
-                return { ...prev, [activeMachineId]: current };
+                return { ...prev, [targetMachineId]: current };
             });
 
             // Execute
-            const machine = machines.find(m => m.id === activeMachineId);
+            const machine = machines.find(m => m.id === targetMachineId);
             if (machine) {
-                api.processes.executePython(machine.ip, machine.port, pythonCode)
-                   .catch(e => console.error(`Failed to inject on ${machine.name}`, e));
+                try {
+                    await api.processes.executePython(machine.ip, machine.port || 8888, pythonCode);
+                    addNotification(`脚本注入成功`, 'success');
+                } catch (e) {
+                    console.error(`Failed to inject on ${machine.name}`, e);
+                    addNotification('脚本注入失败，请检查节点连接状态', 'error');
+                }
+            } else {
+                addNotification('目标机器不存在，无法注入脚本', 'error');
             }
-
-            addNotification(`脚本注入成功`, 'success');
         }
     };
 

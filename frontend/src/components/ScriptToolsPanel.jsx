@@ -25,7 +25,7 @@ const ScriptToolsPanel = ({
     const handleExecute = () => {
         const [selectedId] = Array.from(selectedScriptIds);
         if (selectedId) {
-            onInject([selectedId]);
+            onInject([selectedId], machine?.id);
             setSelectedScriptIds(new Set());
         }
     };
