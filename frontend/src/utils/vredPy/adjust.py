@@ -117,7 +117,7 @@ class AdjustTool:
 
     def getMovable(self, node):
         while not node.isNull():
-            if hasNodeTag(node, 'Movable'):
+            if vrMetadataService.hasTag(node, 'Movable'):
                 return node
             if node.getName() == "Group" or node.getName() == "Transform":
                 break
@@ -176,6 +176,7 @@ class AdjustTool:
                     return
             except Exception:
                 pass
+        # 1. 用户选中的节点
         try:
             nodes = getSelectedNodes()
             if nodes and len(nodes) > 0 and not nodes[0].isNull():
@@ -184,17 +185,40 @@ class AdjustTool:
                 return
         except Exception:
             pass
+        # 2. 用 vrMetadataService 直接查找带 Movable 标签的节点
+        try:
+            tagged = vrMetadataService.getObjectsWithTag('Movable')
+            if tagged and len(tagged) > 0:
+                for obj in tagged:
+                    try:
+                        if not obj.isNull():
+                            name = obj.getName()
+                            if "VRController" in name or "controller" in name.lower():
+                                continue
+                            self.node = obj
+                            self._prepare_node_ref()
+                            return
+                    except Exception:
+                        continue
+        except Exception:
+            pass
+        # 3. 兜底：根节点第一个非控制器子节点
         try:
             root = getRootNode()
             if root and not root.isNull():
                 children = root.getChildren()
                 if children and len(children) > 0:
                     for child in children:
-                        movable = self.getMovable(child)
-                        if movable and not movable.isNull():
-                            self.node = movable
-                            self._prepare_node_ref()
-                            return
+                        try:
+                            if not child.isNull():
+                                name = child.getName()
+                                if "VRController" in name or "controller" in name.lower():
+                                    continue
+                                self.node = child
+                                self._prepare_node_ref()
+                                return
+                        except Exception:
+                            continue
         except Exception:
             pass
 

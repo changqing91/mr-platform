@@ -14,6 +14,7 @@ global vred_tool_registry
 if 'vred_tool_registry' not in globals():
     vred_tool_registry = {}
 
+rotationControllerFound = False
 # rotationControllerFound = False
 # try:
 #     allRotNodes = getAllNodes()
@@ -114,6 +115,8 @@ class TurntableTool:
 
     def _resolve_target(self):
         print("[Turntable] _resolve_target called")
+
+        # 1. 如果用户选中了节点，从选中节点向上找 Movable 祖先
         try:
             nodes = getSelectedNodes()
             print("[Turntable] selected nodes:", len(nodes) if nodes else 0)
@@ -132,50 +135,47 @@ class TurntableTool:
         except Exception as e:
             print("[Turntable] error getting selected nodes:", str(e))
             pass
-        
+
+        # 2. 没有选中节点时，直接用 vrMetadataService 查找所有带 Movable 标签的节点
+        try:
+            tagged = vrMetadataService.getObjectsWithTag('Movable')
+            print("[Turntable] objects with Movable tag:", len(tagged) if tagged else 0)
+            if tagged and len(tagged) > 0:
+                for obj in tagged:
+                    try:
+                        if not obj.isNull():
+                            name = obj.getName()
+                            if "VRController" in name or "controller" in name.lower():
+                                continue
+                            print("[Turntable] found Movable-tagged node:", name)
+                            return obj
+                    except Exception:
+                        continue
+        except Exception as e:
+            print("[Turntable] error querying Movable tag:", str(e))
+            pass
+
+        # 3. 兜底：从根节点子级中取第一个非控制器节点
         try:
             root = getRootNode()
-            print("[Turntable] got root node")
             if root and not root.isNull():
                 children = root.getChildren()
-                print("[Turntable] root children count:", len(children) if children else 0)
+                print("[Turntable] fallback: root children count:", len(children) if children else 0)
                 if children and len(children) > 0:
                     for child in children:
                         try:
                             if not child.isNull():
-                                print("[Turntable] checking child:", child.getName())
-                                movable = self._get_movable(child)
-                                if movable and not movable.isNull():
-                                    print("[Turntable] found movable from root children:", movable.getName())
-                                    return movable
-                        except Exception as e:
-                            print("[Turntable] error checking child:", str(e))
+                                name = child.getName()
+                                if "VRController" in name or "controller" in name.lower():
+                                    continue
+                                print("[Turntable] fallback: using root child:", name)
+                                return child
+                        except Exception:
                             continue
         except Exception as e:
-            print("[Turntable] error getting root children:", str(e))
+            print("[Turntable] error in fallback:", str(e))
             pass
-        
-        try:
-            nodes = getAllNodes()
-            print("[Turntable] all nodes count:", len(nodes) if nodes else 0)
-            if nodes:
-                for node in nodes:
-                    try:
-                        if not node.isNull():
-                            name = node.getName()
-                            # 跳过控制器节点
-                            if "VRController" in name or "controller" in name.lower():
-                                continue
-                            movable = self._get_movable(node)
-                            if movable and not movable.isNull():
-                                print("[Turntable] found movable from all nodes:", movable.getName())
-                                return movable
-                    except Exception:
-                        continue
-        except Exception as e:
-            print("[Turntable] error getting all nodes:", str(e))
-            pass
-        
+
         print("[Turntable] no target found")
         return None
 
@@ -185,7 +185,7 @@ class TurntableTool:
             while node and not node.isNull():
                 name = node.getName()
                 print("[Turntable] checking node:", name)
-                if hasNodeTag(node, 'Movable'):
+                if vrMetadataService.hasTag(node, 'Movable'):
                     print("[Turntable] found Movable tag on:", name)
                     return node
                 if name in ("Group", "Transform"):
