@@ -11,13 +11,6 @@ if qt_binding:
     import os
     import datetime
     import tempfile
-    _pad_input = 'touchpad'
-    try:
-        _xr = getattr(vrImmersiveInteractionService, 'getOpenXRRuntime', None)
-        if _xr and _xr():
-            _pad_input = 'thumbstick'
-    except Exception:
-        pass
     if 'voice_note_state' not in globals() or voice_note_state.get('qt_binding') != qt_binding:
         voice_note_state = {
             'qt_binding': qt_binding,
@@ -36,7 +29,9 @@ if qt_binding:
             'rect_audio_paths': {},
             'rect_base_scales': {},
             'hover_rect': None,
-            'hover_scale': 1.2
+            'hover_scale': 1.2,
+            'voice_nodes': [],
+            'voice_node_hit_radius': 80.0
         }
     state = voice_note_state
     def ensure_recorder():
@@ -205,7 +200,7 @@ if qt_binding:
                     try:
                         normal = hit.getNormal()
                         if normal and normal.length() > 0.0001:
-                            return point + normal.normalized() * 42.0
+                            return point + normal.normalized() * 50.0
                     except Exception:
                         pass
                     return point
@@ -302,13 +297,107 @@ if qt_binding:
             player.setMedia(QtMultimedia.QMediaContent(url))
         player.play()
         return True
+    def find_tagged_ancestor(node, tag):
+        current = node
+        depth = 0
+        while current and depth < 20:
+            try:
+                if vrMetadataService.hasTag(current, tag):
+                    return current
+            except Exception:
+                pass
+            try:
+                current = current.getParent()
+            except Exception:
+                break
+            depth += 1
+        return None
+    def get_ray_from_device(device):
+        if not device:
+            return None, None
+        try:
+            matrix = device.getTrackingMatrix()
+            if matrix:
+                col = matrix.column(3)
+                origin = QtGui.QVector3D(col.x(), col.y(), col.z())
+                axis = matrix.column(2)
+                direction = QtGui.QVector3D(axis.x(), axis.y(), axis.z())
+                if direction.length() > 0.0001:
+                    return origin, direction.normalized()
+        except Exception:
+            pass
+        return None, None
+    def get_node_world_position(node):
+        if not node:
+            return None
+        try:
+            t = node.getWorldTranslation()
+            if t:
+                return t
+        except Exception:
+            pass
+        try:
+            t = node.getTranslation()
+            if hasattr(t, 'x'):
+                return QtGui.QVector3D(t.x(), t.y(), t.z())
+            elif hasattr(t, '__getitem__'):
+                return QtGui.QVector3D(t[0], t[1], t[2])
+        except Exception:
+            pass
+        return None
+    def ray_sphere_test(ray_origin, ray_dir, sphere_center, radius):
+        oc = ray_origin - sphere_center
+        a = QtGui.QVector3D.dotProduct(ray_dir, ray_dir)
+        b = 2.0 * QtGui.QVector3D.dotProduct(oc, ray_dir)
+        c = QtGui.QVector3D.dotProduct(oc, oc) - radius * radius
+        discriminant = b * b - 4.0 * a * c
+        if discriminant < 0:
+            return False, float('inf')
+        import math
+        t = (-b - math.sqrt(discriminant)) / (2.0 * a)
+        if t < 0:
+            t = (-b + math.sqrt(discriminant)) / (2.0 * a)
+        if t < 0:
+            return False, float('inf')
+        return True, t
+    def find_nearest_voice_node(device):
+        ray_origin, ray_dir = get_ray_from_device(device)
+        if ray_origin is None or ray_dir is None:
+            return None
+        radius = state.get('voice_node_hit_radius', 80.0)
+        best_node = None
+        best_t = float('inf')
+        alive = []
+        for node in state['voice_nodes']:
+            try:
+                if node.isNull():
+                    continue
+            except Exception:
+                pass
+            alive.append(node)
+            pos = get_node_world_position(node)
+            if pos is None:
+                continue
+            hit, t = ray_sphere_test(ray_origin, ray_dir, pos, radius)
+            if hit and t < best_t:
+                best_t = t
+                best_node = node
+        state['voice_nodes'] = alive
+        return best_node
     def create_rectangle(text, position=None):
-        root = vrScenegraphService.getRootNode()
-        color = QtGui.QColor(0, 60, 180)
         rect = None
         annotation = None
         try:
-            rect = vrGeometryService.createSphere(root, 40.0, 32, 32, color)
+            filepath = r"C:\Users\WhatTech\Documents\Autodesk\Automotive\VRED\VoicePlayer.osb"
+            if os.path.exists(filepath):
+                rect = loadGeometry(filepath)
+                if rect:
+                    rect.setName("VoiceNode")
+                    try:
+                        rect.makeTransform()
+                    except Exception:
+                        pass
+                    rect.setActive(1)
         except Exception:
             rect = None
         if rect:
@@ -316,6 +405,19 @@ if qt_binding:
                 rect.setName(text if text else "VoiceNode")
             except Exception:
                 pass
+            store_rect_scale(rect)
+        if position and rect:
+            try:
+                rect.setTranslation(position.x(), position.y(), position.z())
+            except Exception:
+                try:
+                    rect.setWorldTranslation(position)
+                except Exception:
+                    try:
+                        rect.setTranslation(position)
+                    except Exception:
+                        pass
+        if rect:
             try:
                 cam = vrCameraService.getActiveCamera(True)
                 aim = vrConstraintService.createAimConstraint([cam], [], rect)
@@ -323,16 +425,6 @@ if qt_binding:
                     aim.setVisualizationVisible(False)
             except Exception:
                 pass
-            store_rect_scale(rect)
-        if position and rect:
-            try:
-                rect.setWorldTranslation(position)
-            except Exception:
-                try:
-                    rect.setTranslation(position)
-                except Exception:
-                    pass
-        if rect:
             try:
                 vrMetadataService.addTags([rect], ["voice_note_rect"])
             except Exception:
@@ -344,7 +436,8 @@ if qt_binding:
                     annotation.setSceneNode(rect)
                     annotation.setAnchored(True)
                     if position:
-                        annotation.setPosition(position)
+                        annotation.setPosition(QtGui.QVector3D(position.x(), position.y(), position.z()))
+                    annotation.setUseSceneNodeVisibility(True)
                 except Exception:
                     annotation = None
         return rect, annotation
@@ -366,6 +459,7 @@ if qt_binding:
         state['current_audio_path'] = path
         state['current_label'] = label
         if rect:
+            state['voice_nodes'].append(rect)
             key = get_rect_key(rect)
             if key:
                 state['rect_audio_paths'][key] = path
@@ -413,6 +507,8 @@ if qt_binding:
             self.registry_key = "tool_voice_note"
             self.newRightCon = None
             self.voiceControllerConstraint = None
+            self.teleport = vrDeviceService.getInteraction("Teleport")
+            self.teleport.addSupportedInteractionGroup("NotesGroup")
             self.enable()
 
         def _find_or_load_voice_controller(self):
@@ -501,48 +597,24 @@ if qt_binding:
             except Exception:
                 pass
         def distanceFunc(self):
-            hover_node = None
             try:
-                hit = self.rightController.pick()
+                self.rightController.enableRay("custom")
             except Exception:
-                hit = None
-            if hit and hit.hasHit():
-                try:
-                    node = hit.getNode()
-                except Exception:
-                    node = None
-                if node:
-                    try:
-                        if vrMetadataService.hasTag(node, "voice_note_rect"):
-                            hover_node = node
-                    except Exception:
-                        hover_node = None
+                pass
+            hover_node = find_nearest_voice_node(self.rightController)
             set_hover_rect(hover_node)
         def on_trigger(self, action_obj=None, device_obj=None):
             _ = action_obj
             device = device_obj if device_obj else self.rightController
-            if device:
-                try:
-                    hit = device.pick()
-                except Exception:
-                    hit = None
-                if hit and hit.hasHit():
-                    try:
-                        node = hit.getNode()
-                    except Exception:
-                        node = None
-                    if node:
-                        try:
-                            if vrMetadataService.hasTag(node, "voice_note_rect"):
-                                if state['is_recording'] and state.get('current_rect') == node:
-                                    stop_recording()
-                                else:
-                                    key = get_rect_key(node)
-                                    path = state['rect_audio_paths'].get(key)
-                                    play_audio(path)
-                                return
-                        except Exception:
-                            pass
+            nearest = find_nearest_voice_node(device)
+            if nearest:
+                if state['is_recording'] and state.get('current_rect') == nearest:
+                    stop_recording()
+                else:
+                    key = get_rect_key(nearest)
+                    path = state['rect_audio_paths'].get(key)
+                    play_audio(path)
+                return
             pos = get_device_target_position(device)
             if state['is_recording']:
                 stop_recording()
@@ -561,11 +633,7 @@ if qt_binding:
             vred_tool_registry[self.registry_key] = self
             self.multi.setSupportedInteractionGroups(["NotesGroup"])
             vrDeviceService.setActiveInteractionGroup("NotesGroup")
-            self.teleport = vrDeviceService.getInteraction("Teleport")
-            self.teleport.addSupportedInteractionGroup("NotesGroup")
-            self.teleport.setControllerActionMapping("prepare", "right-{}-touched".format(_pad_input))
-            self.teleport.setControllerActionMapping("abort", "right-{}-untouched".format(_pad_input))
-            self.teleport.setControllerActionMapping("execute", "right-{}-pressed".format(_pad_input))
+            self.pointer.addSupportedInteractionGroup("NotesGroup")
             self.pointer.setControllerActionMapping("prepare", "right-customtrigger-touched")
             self.pointer.setControllerActionMapping("abort", "disable")
             self.pointer.setControllerActionMapping("start", "right-trigger-pressed")
@@ -575,6 +643,16 @@ if qt_binding:
                 self.executeAction.signal().triggered.connect(self.on_trigger)
             except Exception:
                 self.executeAction = None
+            try:
+                self.teleport.setControllerActionMapping("prepare", "left-customtrigger-touched")
+                self.teleport.setControllerActionMapping("execute", "left-customtrigger-pressed")
+                self.teleport.setControllerActionMapping("abort", "left-customtrigger-untouched")
+            except Exception:
+                pass
+            try:
+                self.rightController.enableRay("custom")
+            except Exception:
+                pass
             self.timer.setActive(1)
             self.timer.connect(self.distanceFunc)
             self._activate_voice_controller()
@@ -589,9 +667,7 @@ if qt_binding:
             except Exception:
                 pass
             try:
-                self.teleport.setControllerActionMapping("prepare", "any-{}-touched".format(_pad_input))
-                self.teleport.setControllerActionMapping("abort", "any-{}-untouched".format(_pad_input))
-                self.teleport.setControllerActionMapping("execute", "any-{}-pressed".format(_pad_input))
+                self.rightController.disableRay()
             except Exception:
                 pass
             try:
@@ -599,6 +675,12 @@ if qt_binding:
                 self.pointer.setControllerActionMapping("abort", "any-customtrigger-untouched")
                 self.pointer.setControllerActionMapping("start", "any-customtrigger-pressed")
                 self.pointer.setControllerActionMapping("execute", "any-customtrigger-released")
+            except Exception:
+                pass
+            try:
+                self.teleport.setControllerActionMapping("prepare", "any-customtrigger-touched")
+                self.teleport.setControllerActionMapping("execute", "any-customtrigger-pressed")
+                self.teleport.setControllerActionMapping("abort", "any-customtrigger-untouched")
             except Exception:
                 pass
             try:
