@@ -4,6 +4,78 @@
 const { createCoreController } = require('@strapi/strapi').factories;
 const http = require('http');
 
+/**
+ * 向 VRED 发送单条 Python 命令 (GET /python?value=...)
+ * @param {string} ip   VRED 主机 IP
+ * @param {number} port VRED WebInterface 端口
+ * @param {string} code Python 代码 (短)
+ * @param {number} timeout 超时毫秒数，默认 5000
+ * @returns {Promise<string>}
+ */
+const sendPythonToVRED = (ip, port, code, timeout = 5000) => {
+    return new Promise((resolve, reject) => {
+        const url = `http://${ip}:${port}/python?value=${encodeURIComponent(code)}`;
+        const req = http.get(url, (res) => {
+            let data = '';
+            res.on('data', (chunk) => data += chunk);
+            res.on('end', () => resolve(data));
+        });
+        req.on('error', (e) => {
+            console.error('Python Request Error:', e);
+            reject(e);
+        });
+        req.setTimeout(timeout, () => {
+            req.destroy();
+            reject(new Error('Request timeout'));
+        });
+    });
+};
+
+/**
+ * 安全限制: VRED Beast HTTP 对请求头 (含 URL) 有 ~8KB 限制。
+ * 当 URL 编码后超过此阈值时，将代码 base64 编码后分块发送，
+ * 最后在 VRED 中 decode + exec。
+ */
+const MAX_SAFE_URL_CODE_LENGTH = 4000;
+const B64_CHUNK_SIZE = 6000;
+
+/**
+ * 向 VRED 执行 Python 代码，自动处理大代码分块
+ */
+const executePythonOnVRED = async (ip, port, code) => {
+    const encodedLength = encodeURIComponent(code).length;
+
+    // ---- 小代码: 直接单次请求 ----
+    if (encodedLength <= MAX_SAFE_URL_CODE_LENGTH) {
+        return sendPythonToVRED(ip, port, code);
+    }
+
+    // ---- 大代码: base64 分块 ----
+    const b64 = Buffer.from(code, 'utf-8').toString('base64');
+    const totalChunks = Math.ceil(b64.length / B64_CHUNK_SIZE);
+    console.log(`[executePython] Code too large (${code.length} chars, encoded ${encodedLength}). Splitting into ${totalChunks} base64 chunks.`);
+
+    // 第一块: 初始化变量
+    const firstChunk = b64.slice(0, B64_CHUNK_SIZE);
+    await sendPythonToVRED(ip, port, `_py_b64_code = "${firstChunk}"`);
+
+    // 后续块: 追加
+    for (let i = 1; i < totalChunks; i++) {
+        const chunk = b64.slice(i * B64_CHUNK_SIZE, (i + 1) * B64_CHUNK_SIZE);
+        await sendPythonToVRED(ip, port, `_py_b64_code += "${chunk}"`);
+    }
+
+    // 解码并执行
+    const result = await sendPythonToVRED(
+        ip, port,
+        `exec(__import__('base64').b64decode(_py_b64_code).decode('utf-8'))`,
+        30000  // 大代码执行可能需要更长时间
+    );
+
+    console.log(`[executePython] Chunked execution complete (${totalChunks} chunks)`);
+    return result;
+};
+
 const terminateProcess = async (strapi, processEntity) => {
     const machine = processEntity.machine;
     const vredPort = machine.port || 8888;
@@ -132,28 +204,11 @@ module.exports = createCoreController('api::process.process', ({ strapi }) => ({
             }
             const targetPort = port || 8888;
 
-            console.log(`Executing Python on ${ip}:${targetPort}: ${code}`);
+            console.log(`Executing Python on ${ip}:${targetPort} (${code.length} chars)`);
 
-            const result = await new Promise((resolve, reject) => {
-                console.log(`excute python: http://${ip}:${targetPort}/python?value=${encodeURIComponent(code)}`)
-                const req = http.get(`http://${ip}:${targetPort}/python?value=${encodeURIComponent(code)}`, (res) => {
-                    let responseData = '';
-                    res.on('data', (chunk) => responseData += chunk);
-                    res.on('end', () => resolve(responseData));
-                });
+            const result = await executePythonOnVRED(ip, targetPort, code);
 
-                req.on('error', (e) => {
-                    console.error('Python Request Error:', e);
-                    reject(e);
-                });
-
-                req.setTimeout(5000, () => {
-                    req.destroy();
-                    reject(new Error('Request timeout'));
-                });
-            });
-
-            console.log(`excute callback : ${result}`)
+            console.log(`execute callback : ${result}`);
             return { message: 'Command executed', result };
         } catch (error) {
             console.error('ExecutePython Error:', error);

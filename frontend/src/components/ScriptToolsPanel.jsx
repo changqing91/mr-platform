@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ArrowLeft, RotateCcw, CheckSquare, Play, Square, AlertTriangle } from 'lucide-react';
+import { ArrowLeft, RotateCcw, CheckSquare, Play, Square, AlertTriangle, Zap, Power } from 'lucide-react';
 import { MR_TOOLS, THEME_COLOR } from '../constants';
 
 const ScriptToolsPanel = ({
@@ -7,26 +7,17 @@ const ScriptToolsPanel = ({
     isBatchMode,
     selectedBatchCount,
     onBack,
-    onInject,
+    onSwitchTool,
     onReset,
-    onKill
+    onKill,
+    activeTool,
+    isToolsInjected
 }) => {
-    const [selectedScriptIds, setSelectedScriptIds] = useState(new Set());
     const [isConfirmingKill, setIsConfirmingKill] = useState(false);
-console.log(1)
-    const handleScriptClick = (tool) => {
-        if (selectedScriptIds.has(tool.id)) {
-            setSelectedScriptIds(new Set());
-            return;
-        }
-        setSelectedScriptIds(new Set([tool.id]));
-    };
 
-    const handleExecute = () => {
-        const [selectedId] = Array.from(selectedScriptIds);
-        if (selectedId) {
-            onInject([selectedId], machine?.id);
-            setSelectedScriptIds(new Set());
+    const handleToolClick = (tool) => {
+        if (onSwitchTool) {
+            onSwitchTool(tool.id);
         }
     };
 
@@ -55,12 +46,18 @@ console.log(1)
                         </p>
                     </div>
                 </div>
+                {isToolsInjected && (
+                    <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-green-50 border border-green-200">
+                        <Zap size={14} className="text-green-500" />
+                        <span className="text-xs font-bold text-green-600">工具已注入</span>
+                    </div>
+                )}
             </div>
 
             <div className="flex-1 p-8 overflow-y-auto custom-scrollbar">
                 <div className="flex justify-between items-center mb-4">
                     <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wider">
-                        MR 功能脚本 {isBatchMode && '(批量注入)'}
+                        MR 功能工具 {isBatchMode && '(批量控制)'} — 点击即可切换
                     </h3>
                     <button 
                         onClick={onReset}
@@ -72,63 +69,51 @@ console.log(1)
 
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-6 mb-8">
                     {MR_TOOLS.map(tool => {
-                        const isSelected = selectedScriptIds.has(tool.id);
+                        const isActive = activeTool === tool.id;
                         return (
                             <button 
                                 key={tool.id} 
-                                onClick={() => handleScriptClick(tool)} 
+                                onClick={() => handleToolClick(tool)} 
                                 className={`
                                     flex flex-col items-center p-6 bg-white border rounded-2xl shadow-sm hover:shadow-lg transition-all group relative 
-                                    ${isSelected ? `border-[${THEME_COLOR}] ring-1 ring-[${THEME_COLOR}] bg-[#39C5BB]/5` : 'border-gray-200 hover:border-[#39C5BB] hover:-translate-y-1'}
+                                    ${isActive ? 'ring-2 shadow-lg' : 'border-gray-200 hover:border-[#39C5BB] hover:-translate-y-1'}
                                 `}
                                 style={{ 
-                                    borderColor: isSelected ? THEME_COLOR : undefined,
-                                    backgroundColor: isSelected ? 'rgba(57, 197, 187, 0.05)' : undefined
+                                    borderColor: isActive ? THEME_COLOR : undefined,
+                                    backgroundColor: isActive ? 'rgba(57, 197, 187, 0.08)' : undefined,
+                                    ringColor: isActive ? THEME_COLOR : undefined
                                 }}
                             >
-                                {/* Selection Checkmark */}
-                                <div 
-                                    className={`absolute top-3 right-3 w-5 h-5 rounded-full border flex items-center justify-center transition-colors`}
-                                    style={{
-                                        backgroundColor: isSelected ? THEME_COLOR : 'white',
-                                        borderColor: isSelected ? 'transparent' : '#D1D5DB'
-                                    }}
-                                >
-                                    {isSelected && <CheckSquare size={12} className="text-white" />}
-                                </div>
+                                {/* Active indicator */}
+                                {isActive && (
+                                    <div 
+                                        className="absolute top-3 right-3 w-5 h-5 rounded-full flex items-center justify-center animate-pulse"
+                                        style={{ backgroundColor: THEME_COLOR }}
+                                    >
+                                        <Power size={10} className="text-white" />
+                                    </div>
+                                )}
                                 
-                                <div className={`w-16 h-16 rounded-2xl flex items-center justify-center mb-4 transition-colors ${isSelected ? 'bg-white' : 'bg-gray-50 group-hover:bg-[#39C5BB]/10'}`}>
+                                <div className={`w-16 h-16 rounded-2xl flex items-center justify-center mb-4 transition-colors ${isActive ? 'bg-white shadow-sm' : 'bg-gray-50 group-hover:bg-[#39C5BB]/10'}`}>
                                     <tool.icon 
                                         size={32} 
                                         className="transition-colors"
-                                        style={{ color: isSelected ? THEME_COLOR : undefined }} 
+                                        style={{ color: isActive ? THEME_COLOR : undefined }} 
                                     />
                                 </div>
                                 <span 
                                     className="font-bold mb-1"
-                                    style={{ color: isSelected ? THEME_COLOR : '#374151' }}
+                                    style={{ color: isActive ? THEME_COLOR : '#374151' }}
                                 >
                                     {tool.name}
                                 </span>
-                                <span className="text-xs text-center text-gray-400">{tool.description}</span>
+                                <span className="text-xs text-center text-gray-400">
+                                    {isActive ? '当前生效' : tool.description}
+                                </span>
                             </button>
                         )
                     })}
                 </div>
-
-                {/* Confirm Injection Button - Shows when any script selected */}
-                {selectedScriptIds.size > 0 && (
-                    <div className="mb-10 animate-in fade-in slide-in-from-bottom-2">
-                        <button 
-                            onClick={handleExecute}
-                            className="w-full py-4 rounded-xl text-white font-bold shadow-lg flex items-center justify-center gap-2 hover:opacity-90 transition-opacity hover:-translate-y-0.5"
-                            style={{ backgroundColor: THEME_COLOR }}
-                        >
-                            <Play size={20} fill="currentColor"/> 
-                            确认注入 {selectedScriptIds.size} 个脚本
-                        </button>
-                    </div>
-                )}
 
                 <div className="border-t border-gray-100 pt-8">
                     <h3 className="text-sm font-bold text-red-400 uppercase tracking-wider mb-4">危险操作区</h3>
