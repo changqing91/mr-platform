@@ -1,0 +1,150 @@
+默认MR（左·控制手柄功能）
+    ControllerLeft
+        - Left Trigger：射线，击中几何体可触发点击传感器
+        - Left joystick：触碰可激活Teleport，按下进行移动
+        - Left Grip：牵引移动，按住并移动手柄即可移动
+        - X Button：单击，恢复手柄默认功能
+        - Y Button：单击，显示/隐藏MR Remote菜单
+        - VR Menu：显示SteamVR/VDXR菜单
+默认MR（右·控制手柄功能）
+    ControllerRight
+        - Right Trigger：射线，击中几何体可触发点击传感器
+        - Right Joystick：触碰可激活Teleport，按下进行移动
+        - Right Grip：飞行工具，按住并移动手柄即可飞行
+        - A Button：单击截图，\\{SHAREDFOLDER}\Screenshot
+        - B Button：默认无功能
+        - Device Menu：显示MR HMD菜单
+语音标注
+    语音标注-初始状态（右·控制手柄功能）
+        VoiceNoteDefault_R
+            - Right Trigger：射线，击中几何体可触发点击传感器
+            - Right Joystick：触碰可激活Teleport，按下进行移动
+            - Right Grip：长按Grip，球体出现，与球体相交的录音播放球被抓取并随控制手柄移动
+            - A Button：长按A键时，开始录音，松开完成录音，就地生成录音播放器
+            - B Button：长按B键，橡皮与录音播放球相交时进行标注删除，松开B键橡皮消失并即出擦除工具
+            - Device Menu：显示MR HMD菜单
+    开始录音（右·控制手柄功能）
+        VoiceNoteRecord_R
+            - Right Trigger：射线，击中几何体可触发点击传感器
+            - Right Joystick：触碰可激活Teleport，按下进行移动
+            - Right Grip：长按Grip，球体出现，与球体相交的录音播放球被抓取并随控制手柄移动
+            - A Button：长按A键时，开始录音，松开完成录音，就地生成录音播放器
+            - B Button：长按B键，橡皮与录音播放球相交时进行标注删除，松开B键橡皮消失并即出擦除工具
+            - Device Menu：显示MR HMD菜单
+    移动语音标注（右·控制手柄功能）
+        VoiceNoteMove_R
+            - Right Trigger：射线，击中几何体可触发点击传感器
+            - Right Joystick：触碰可激活Teleport，按下进行移动
+            - Right Grip：长按Grip，球体出现，与球体相交的录音播放球被抓取并随控制手柄移动
+            - A Button：长按A键时，开始录音，松开完成录音，就地生成录音播放器
+            - B Button：长按B键，橡皮与录音播放球相交时进行标注删除，松开B键橡皮消失并即出擦除工具
+            - Device Menu：显示MR HMD菜单
+    删除录音（右·控制手柄功能）
+        VoiceNoteEraser_R
+            - Right Trigger：射线，击中几何体可触发点击传感器
+            - Right Joystick：触碰可激活Teleport，按下进行移动
+            - Right Grip：长按Grip，球体出现，与球体相交的录音播放球被抓取并随控制手柄移动
+            - A Button：长按A键时，开始录音，松开完成录音，就地生成录音播放器
+            - B Button：长按B键橡皮出现，橡皮与录音播放球相交时进行标注删除，松开B键橡皮消失并即出擦除工具
+            - Device Menu：显示MR HMD菜单
+图形标注
+    图形标注-默认状态（右·控制手柄功能）
+        TagDefault_R
+            - Right Trigger：放置标注 / 删除标注
+            - Right Joystick：触碰可激活Teleport，按下进行移动
+            - Right Grip：靠近按住选择移动，松开完成放置
+            - A Button：循环切换添加/删除模式
+            - B Button：循环切换标注样式
+            - Device Menu：显示MR HMD菜单
+    添加·图形标注（右·控制手柄功能）
+        TagAdd_R
+            - Right Trigger：放置标注 / 删除标注
+            - Right Joystick：触碰可激活Teleport，按下进行移动
+            - Right Grip：靠近按住选择移动，松开完成放置
+            - A Button：循环切换添加/删除模式
+            - B Button：循环切换标注样式
+            - Device Menu：显示MR HMD菜单
+    删除·图形标注（右·控制手柄功能）
+        TagDelete_R
+            - Right Trigger：放置标注 / 删除标注
+            - Right Joystick：触碰可激活Teleport，按下进行移动
+            - Right Grip：靠近按住选择移动，松开完成放置
+            - A Button：循环切换添加/删除模式
+            - B Button：循环切换标注样式
+            - Device Menu：显示MR HMD菜单
+    切换样式·图形标注（右·控制手柄功能）
+        TagIconSwitch
+            - Right Trigger：放置标注 / 删除标注
+            - Right Joystick：触碰可激活Teleport，按下进行移动
+            - Right Grip：靠近按住选择移动，松开完成放置
+            - A Button：循环切换添加/删除模式
+            - B Button：循环切换标注样式
+            - Device Menu：显示MR HMD菜单
+    变换位置·图形标注（右·控制手柄功能）
+        TagMove_R
+            - Right Trigger：放置标注 / 删除标注
+            - Right Joystick：触碰可激活Teleport，按下进行移动
+            - Right Grip：靠近按住选择移动，松开完成放置
+            - A Button：循环切换添加/删除模式
+            - B Button：循环切换标注样式
+            - Device Menu：显示MR HMD菜单
+    样式·图形标注（右·控制手柄功能）
+        Tags
+            - Good / Smile
+            - Passed / Notice
+            - Cancel / Flag
+            - Move / AlignTo
+            - AlignCenter / MoreCurve
+测量工具
+    添加·测量标注（右·控制手柄功能）
+        MeasurementPtoP_R
+            - Right Trigger：通过射线击中两次任意表面。第三次击中任意表面后不做任何操作，相当于删除
+            - Right Joystick：触碰可激活Teleport，按下进行移动
+            - Right Grip：无
+            - A Button：无
+            - B Button：无
+            - Device Menu：显示MR HMD菜单
+物体变换
+    物体变换（右·控制手柄功能）
+        Transform_R
+            - Right Trigger：通过射线击中物体，保持长按即可移动，松开即结束操作
+            - Right Joystick：触碰可激活Teleport，按下进行移动
+            - Right Grip：飞行工具，按住并移动手柄即可飞行
+            - A Button：无
+            - B Button：无
+            - Device Menu：显示MR HMD菜单
+截面
+    开关·截面功能（右·控制手柄功能）
+        ClipPositive_R
+            - Right Trigger：射线，击中几何体可触发点击传感器
+            - Right Joystick：触碰可激活Teleport，按下进行移动
+            - Right Grip：飞行工具，按住并移动手柄即可飞行
+            - A Button：循环启用/禁用截面功能
+            - B Button：循环切换正反面
+            - Device Menu：显示MR HMD菜单
+    切换正反·截面功能（右·控制手柄功能）
+        ClipNegative_R
+            - Right Trigger：射线，击中几何体可触发点击传感器
+            - Right Joystick：触碰可激活Teleport，按下进行移动
+            - Right Grip：飞行工具，按住并移动手柄即可飞行
+            - A Button：循环启用/禁用截面功能
+            - B Button：循环切换正反面
+            - Device Menu：显示MR HMD菜单
+旋转展示
+    启用·旋转展示（右·控制手柄功能）
+        Turntable_R
+            - Right Trigger：射线，击中几何体可触发点击传感器
+            - Right Joystick：触碰可激活Teleport，按下进行移动
+            - Right Grip：无
+            - A Button：长按并左右拖拽，正反旋转
+            - B Button：恢复至原位置
+            - Device Menu：显示MR HMD菜单
+手电筒（指示工具）
+    手电筒-默认状态（右·控制手柄功能）
+        Flashlight_R
+            - Right Trigger：射线，击中几何体可触发点击传感器
+            - Right Joystick：触碰可激活Teleport，按下进行移动
+            - Right Grip：飞行工具，按住并移动手柄即可飞行
+            - A Button：开ON
+            - B Button：关OFF
+            - Device Menu：显示MR HMD菜单

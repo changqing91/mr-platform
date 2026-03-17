@@ -38,141 +38,44 @@ else:
     # 模块级资源加载
     # ======================================================================
 
-    def _get_vred_documents_dir():
-        base_dir = None
-        try:
-            base_dir = os.path.join(os.environ['USERPROFILE'], 'Documents')
-        except Exception:
-            try:
-                base_dir = os.path.join(os.environ['HOME'], 'Documents')
-            except Exception:
-                pass
-        if base_dir:
-            return os.path.join(base_dir, 'Autodesk', 'Automotive', 'VRED')
-        return None
+    _MMR_OSB_PATH = r"\\192.168.7.80\upload\VRED\MMR_Stuff.osb"
 
-    # --- Adjust 控制器 ---
-    adjustControllerFound = False
+    _mmrLoaded = False
     try:
         for node in getAllNodes():
-            if node.getName() == "WT-MR_Remote_controllers":
-                adjustControllerFound = True
+            if node.getName() == "MRcontrollerRight":
+                _mmrLoaded = True
                 break
     except Exception:
         pass
 
-    if not adjustControllerFound:
-        try:
-            vred_dir = _get_vred_documents_dir()
-            if vred_dir:
-                filepath = os.path.join(vred_dir, 'ControllerBase.osb')
-                if os.path.exists(filepath):
-                    node = loadGeometry(filepath)
-                    try:
-                        node.setName("WT-MR_Remote_controllers")
-                    except Exception:
-                        pass
-                    adjustControllerFound = True
-        except Exception:
-            pass
+    if not _mmrLoaded:
+        loadGeometry(_MMR_OSB_PATH)
+        findNode("MRcontrollerLeft").setActive(0)
+        findNode("MRcontrollerRight").setActive(0)
 
-    # --- Notes (draw_note) 资源 ---
-    notesControllerFound = False
-    mainCustomFuncGroup = False
-    customFunctionsGroup = None
+    adjustControllerFound = True
+    notesControllerFound = True
+    clippingControllerFound = True
+    rotationControllerFound = True
 
-    notesController = 0
-    goodBadNotes = 0
+    # 左手控制器约束
+    _mrLeft = findNode("MRcontrollerLeft")
+    _leftCtrl = vrDeviceService.getVRDevice("left-controller")
+    _mrLeft.setActive(1)
+    vrConstraintService.createParentConstraint([_leftCtrl.getNode()], _mrLeft, False)
+
+    # Notes 节点引用
     try:
-        allNotesNodes = getAllNodes()
-        for node in allNotesNodes:
-            allNotesNodeName = node.getName()
-            if allNotesNodeName == "VRController_Notes":
-                notesController += 1
-            elif allNotesNodeName == "Notes":
-                goodBadNotes += 1
-            elif allNotesNodeName == "VRED-VR-Custom-Fucntion":
-                mainCustomFuncGroup = True
-                customFunctionsGroup = node
-    except Exception:
-        pass
-
-    notesControllerFound = notesController > 0
-
-    if goodBadNotes == 0:
-        try:
-            vred_dir = _get_vred_documents_dir()
-            if vred_dir:
-                filepath = os.path.join(vred_dir, 'VRControllerNotes_Notes.osb')
-                if os.path.exists(filepath):
-                    node = loadGeometry(filepath)
-                    node.setName("VRControllerNotes_Notes")
-                    createNode("Group", "Cloned_ref_obj")
-        except Exception:
-            pass
-
-    if not mainCustomFuncGroup:
-        try:
-            customFunctionsGroup = createNode('Group', 'VRED-VR-Custom-Fucntion')
-        except Exception:
-            pass
-
-    allFuncNames = [
-        "VRControllerMove", "VRControllerSelect", "VRControllerNotes",
-        "VRControllerDraw", "VRControllerNotes_Notes", "Cloned_ref_obj",
-        "D_Tool", "D_Lines", "D_tempLine", "Group_html"
-    ]
-
-    try:
-        if customFunctionsGroup:
-            allNodeFuncname = getAllNodes()
-            for node in allNodeFuncname:
-                if node.getName() in allFuncNames:
-                    addChilds(customFunctionsGroup, [node])
-    except Exception:
-        pass
-
-    try:
-        refObject = findNode("Notes").getChild(0)
-        switchNode = findNode("Notes")
+        refObject = findNode("MR_Stuff").getChild(0)    # first tag style child (tag_Move)
     except Exception:
         refObject = None
-        switchNode = None
 
     noteCount = 0
     try:
         Cloned_ref_obj = findNode("Cloned_ref_obj")
     except Exception:
-        Cloned_ref_obj = None
-
-    # --- Section (剖面) 控制器 ---
-    clippingControllerFound = False
-    try:
-        for node in getAllNodes():
-            nodeName = node.getName()
-            if nodeName == "VRController_Clip" or nodeName == "VRControllerClip":
-                clippingControllerFound = True
-                break
-    except Exception:
-        pass
-
-    if not clippingControllerFound:
-        try:
-            vred_dir = _get_vred_documents_dir()
-            if vred_dir:
-                filename = os.path.join(vred_dir, 'VRControllerClip.osb')
-                if os.path.exists(filename):
-                    node = loadGeometry(filename)
-                    try:
-                        node.setName("VRControllerClip")
-                    except Exception:
-                        pass
-                    clippingControllerFound = True
-        except Exception:
-            pass
-
-    # --- Turntable 旋转控制器 (目前禁用加载) ---
-    rotationControllerFound = False
+        Cloned_ref_obj = createNode('Group', 'Cloned_ref_obj')
 
     # ======================================================================
     # 工具类定义
@@ -450,42 +353,15 @@ else:
                 self.timerConnected = True
             self.timer.setActive(1)
 
-            if adjustControllerFound:
-                try:
-                    self.newRightCon = findNode("WT-MR_Remote_controllers")
-                except Exception:
-                    self.newRightCon = None
-                if self.newRightCon:
-                    try:
-                        self.rightController.setVisible(0)
-                    except Exception:
-                        pass
-                    try:
-                        self.rightController.setEnabled(0)
-                    except Exception:
-                        pass
-                    try:
-                        self.newRightCon.setActive(1)
-                    except Exception:
-                        pass
-                    try:
-                        controllerPos = getTransformNodeTranslation(self.rightController.getNode(), 1)
-                        setTransformNodeTranslation(self.newRightCon, controllerPos.x(), controllerPos.y(), controllerPos.z(), True)
-                    except Exception:
-                        pass
-                    try:
-                        self.AdjustControllerConstraint = vrConstraintService.createParentConstraint([self.rightController.getNode()], self.newRightCon, False)
-                    except Exception:
-                        self.AdjustControllerConstraint = None
-            else:
-                try:
-                    self.rightController.setVisible(1)
-                except Exception:
-                    pass
-                try:
-                    self.rightController.setEnabled(1)
-                except Exception:
-                    pass
+            self.newRightCon = findNode("MRcontrollerRight")
+            findNode("CtrllrR_UI").fields().setInt32("choice", 11)
+            self.rightController.setVisible(0)
+            self.rightController.setEnabled(0)
+            self.newRightCon.setActive(1)
+            controllerPos = getTransformNodeTranslation(self.rightController.getNode(), 1)
+            setTransformNodeTranslation(self.newRightCon, controllerPos.x(), controllerPos.y(), controllerPos.z(), True)
+            self.AdjustControllerConstraint = vrConstraintService.createParentConstraint(
+                [self.rightController.getNode()], self.newRightCon, False)
             print("[AllTools] AdjustTool enabled")
 
         def disable(self):
@@ -591,7 +467,6 @@ else:
         def __init__(self):
             self.isEnabled = False
             self.activeNode = None
-            self.upbuttonIsActive = False
             self.timer = vrTimer()
             self.orientationConstraint = None
 
@@ -619,14 +494,13 @@ else:
             self.pointer.addSupportedInteractionGroup("NotesGroup")
 
             self.triggerRightPressed = self.multiButtonPad.createControllerAction("right-trigger-pressed")
-            self.leftTriggerPressed = self.multiButtonPad.createControllerAction("left-trigger-pressed")
-            self.leftGripPressed = self.multiButtonPad.createControllerAction("left-{}-pressed".format(_grip_input))
             self.gripPressed = self.multiButtonPad.createControllerAction("right-{}-pressed".format(_grip_input))
-            self.padUpTouched = self.multiButtonPad.createControllerAction("right-padup-touched")
-            self.padDownTouched = self.multiButtonPad.createControllerAction("right-paddown-touched")
+            self.gripReleasedAction = self.multiButtonPad.createControllerAction("right-{}-released".format(_grip_input))
+            self.aPressedAction = self.multiButtonPad.createControllerAction("right-a-pressed")
+            self.bPressedAction = self.multiButtonPad.createControllerAction("right-b-pressed")
 
             self.deleteNoteIsActive = False
-            self.changeView = False
+            self.grabConstraint = None
 
             self.registry_key = "tool_draw_note"
 
@@ -643,44 +517,16 @@ else:
             refObject.setActive(1)
 
             self.activeNode = hitNode
-            if not self.changeView:
-                if self.orientationConstraint:
-                    try:
-                        vrConstraintService.deleteConstraint(self.orientationConstraint)
-                    except Exception:
-                        pass
-                self.orientationConstraint = vrConstraintService.createOrientationConstraint([self.rightController.getNode()], refObject)
-                setTransformNodeTranslation(refObject, handPos.x(), handPos.y(), handPos.z(), 1)
-            else:
-                if self.orientationConstraint:
-                    try:
-                        vrConstraintService.deleteConstraint(self.orientationConstraint)
-                        self.orientationConstraint = None
-                    except Exception:
-                        pass
-
-                nx, ny, nz = hitNormal.x(), hitNormal.y(), hitNormal.z()
-                normalLen = math.sqrt(nx * nx + ny * ny + nz * nz)
-                if normalLen > 1e-6:
-                    nx /= normalLen
-                    ny /= normalLen
-                    nz /= normalLen
-
-                noteScale = getTransformNodeScale(refObject)
-                offset = max(noteScale.x(), noteScale.y(), noteScale.z()) * 0.5
-                posX = interPosRay.x() + nx * offset
-                posY = interPosRay.y() + ny * offset
-                posZ = interPosRay.z() + nz * offset
-                setTransformNodeTranslation(refObject, posX, posY, posZ, 1)
-
-                ry = math.degrees(math.atan2(nx, nz))
-                rx = math.degrees(math.atan2(-ny, math.sqrt(nx * nx + nz * nz)))
-                setTransformNodeRotation(refObject, rx, ry, 0)
+            if self.orientationConstraint:
+                try:
+                    vrConstraintService.deleteConstraint(self.orientationConstraint)
+                except Exception:
+                    pass
+            self.orientationConstraint = vrConstraintService.createOrientationConstraint([self.rightController.getNode()], refObject)
+            setTransformNodeTranslation(refObject, handPos.x(), handPos.y(), handPos.z(), 1)
 
         def enable(self):
             global refObject
-            global switchNode
-            global notesControllerFound
             self.isEnabled = True
 
             try:
@@ -697,44 +543,31 @@ else:
             vrDeviceService.setActiveInteractionGroup("NotesGroup")
 
             self.triggerRightPressed.signal().triggered.connect(self.trigger_right_pressed)
-            self.leftTriggerPressed.signal().triggered.connect(self.ChangeNote)
-            self.leftGripPressed.signal().triggered.connect(self.changeNoteView)
-            self.gripPressed.signal().triggered.connect(self.deleteNote)
-            self.padUpTouched.signal().triggered.connect(self.sizeUp)
-            self.padDownTouched.signal().triggered.connect(self.sizeDown)
+            self.aPressedAction.signal().triggered.connect(self.toggleDeleteMode)
+            self.bPressedAction.signal().triggered.connect(self.ChangeNote)
+            self.gripPressed.signal().triggered.connect(self.grabNote)
+            self.gripReleasedAction.signal().triggered.connect(self.releaseNote)
 
             if refObject:
-                refObject_node = vrNodeService.getNodeFromId(refObject.getID())
-                refObject_node.getChild(0).setVisibilityFlag(True)
+                refObject = findNode("MR_Stuff").getChild(0)
 
-                refObject = switchNode.getChild(0)
-                switchNode.fields().setInt32("choice", 0)
-
-            if notesControllerFound:
-                self.newRightCon = findNode("VRController_Notes")
-                self.rightController.setVisible(0)
-                self.newRightCon.setActive(1)
-                controllerPos = getTransformNodeTranslation(self.rightController.getNode(), 1)
-                setTransformNodeTranslation(self.newRightCon, controllerPos.x(), controllerPos.y(), controllerPos.z(), True)
-                self.NoteControllerConstraint = vrConstraintService.createParentConstraint([self.rightController.getNode()], self.newRightCon, False)
-            else:
-                self.rightController.setVisible(1)
+            self.newRightCon = findNode("MRcontrollerRight")
+            findNode("CtrllrR_UI").fields().setInt32("choice", 1)
+            self.rightController.setVisible(0)
+            self.newRightCon.setActive(1)
+            controllerPos = getTransformNodeTranslation(self.rightController.getNode(), 1)
+            setTransformNodeTranslation(self.newRightCon, controllerPos.x(), controllerPos.y(), controllerPos.z(), True)
+            self.NoteControllerConstraint = vrConstraintService.createParentConstraint(
+                [self.rightController.getNode()], self.newRightCon, False)
 
             self.deleteNoteIsActive = False
-            self.changeView = False
             self.iconsNotesTrashOff()
             self.timer.setActive(1)
             self.timer.connect(self.distanceFunc)
 
-            if not self.changeView:
-                self.iconsNotesConstraint()
-                if refObject:
-                    refObject_node = vrNodeService.getNodeFromId(refObject.getID())
-                    refObject_node.getParent().setVisibilityFlag(True)
-                self.onControllerNotesMapping()
-            else:
-                self.iconsNotesRay()
-                self.onRayNotesMapping()
+            if refObject:
+                refObject_node = vrNodeService.getNodeFromId(refObject.getID())
+                refObject_node.getParent().setVisibilityFlag(True)
             print("[AllTools] Notes enabled")
 
         def disable(self):
@@ -753,31 +586,23 @@ else:
             except Exception:
                 pass
             try:
-                self.leftTriggerPressed.signal().triggered.disconnect(self.ChangeNote)
+                self.aPressedAction.signal().triggered.disconnect(self.toggleDeleteMode)
             except Exception:
                 pass
             try:
-                self.leftGripPressed.signal().triggered.disconnect(self.changeNoteView)
+                self.bPressedAction.signal().triggered.disconnect(self.ChangeNote)
             except Exception:
                 pass
             try:
-                self.gripPressed.signal().triggered.disconnect(self.deleteNote)
+                self.gripPressed.signal().triggered.disconnect(self.grabNote)
             except Exception:
                 pass
             try:
-                self.padUpTouched.signal().triggered.disconnect(self.sizeUp)
-            except Exception:
-                pass
-            try:
-                self.padDownTouched.signal().triggered.disconnect(self.sizeDown)
+                self.gripReleasedAction.signal().triggered.disconnect(self.releaseNote)
             except Exception:
                 pass
             try:
                 self.timer.setActive(0)
-            except Exception:
-                pass
-            try:
-                self.neutralNotes()
             except Exception:
                 pass
             try:
@@ -832,19 +657,17 @@ else:
                     vrSessionService.sendPython('setTransformNodeScale(clonedRef, ' + scaleString + ')')
                     vrSessionService.sendPython('addNodeTag(Cloned_ref_obj, "Cloned Note")')
 
-        def deleteNote(self):
+        def toggleDeleteMode(self):
             global refObject
             refObject_node = vrNodeService.getNodeFromId(refObject.getID())
             if not self.deleteNoteIsActive:
-                self.iconsNotesTrashOn()
-                refObject_node.getParent().setVisibilityFlag(False)
                 self.deleteNoteIsActive = True
-                self.onRayNotesMapping()
+                findNode("CtrllrR_UI").fields().setInt32("choice", 3)
+                refObject_node.getParent().setVisibilityFlag(False)
             else:
                 self.deleteNoteIsActive = False
-                self.iconsNotesTrashOff()
+                findNode("CtrllrR_UI").fields().setInt32("choice", 1)
                 refObject_node.getParent().setVisibilityFlag(True)
-                self.defaultNotesMappings()
 
         def sizeUp(self):
             global refObject
@@ -862,84 +685,55 @@ else:
             for current_note in switch_child:
                 setTransformNodeScale(current_note, currentsize.x() / 1.2, currentsize.y() / 1.2, currentsize.z() / 1.2)
 
-        def changeNoteView(self):
+        def ChangeNote(self):
             global refObject
-            if not self.deleteNoteIsActive:
-                if not self.changeView:
-                    self.iconsNotesRay()
-                    self.changeView = True
-                    self.onRayNotesMapping()
-                else:
-                    self.changeView = False
-                    self.iconsNotesConstraint()
-                    self.onControllerNotesMapping()
-
         def ChangeNote(self):
             global refObject
             global noteCount
-            global switchNode
-
-            refObject.getParent()
-            hello = vrNodeService.getNodeFromId(refObject.getParent().getID())
-            all_child = hello.getChildren()
-
-            if not self.upbuttonIsActive:
-                index = noteCount % len(all_child)
+            _mr_stuff = findNode("MR_Stuff")
+            _tag_nodes = [_mr_stuff.getChild(i) for i in range(_mr_stuff.getNChildren())
+                          if _mr_stuff.getChild(i).getName().startswith("tag_")]
+            if _tag_nodes:
+                index = noteCount % len(_tag_nodes)
                 noteCount += 1
-                refObject = switchNode.getChild(index)
-                switchNode.fields().setInt32("choice", index)
-            else:
-                self.upbuttonIsActive = False
+                refObject = _tag_nodes[index]
 
         def iconsNotesTrashOn(self):
-            global notesControllerFound
-            if notesControllerFound:
-                setSwitchMaterialChoice("C_N_Icon_Minus", 0)
-                setSwitchMaterialChoice("C_N_Icon_Next", 0)
-                setSwitchMaterialChoice("C_N_Icon_Plus", 0)
-                setSwitchMaterialChoice("C_N_Icon_Trash", 2)
+            findNode("CtrllrR_UI").fields().setInt32("choice", 3)
 
         def iconsNotesTrashOff(self):
-            global notesControllerFound
-            if notesControllerFound:
-                setSwitchMaterialChoice("C_N_Icon_Minus", 1)
-                setSwitchMaterialChoice("C_N_Icon_Next", 1)
-                setSwitchMaterialChoice("C_N_Icon_Plus", 1)
-                setSwitchMaterialChoice("C_N_Icon_Trash", 1)
+            findNode("CtrllrR_UI").fields().setInt32("choice", 1)
 
         def iconsNotesConstraint(self):
-            global notesControllerFound
-            if notesControllerFound:
-                setSwitchMaterialChoice("C_N_Icon_Notes", 2)
+            findNode("CtrllrR_UI").fields().setInt32("choice", 1)
 
         def iconsNotesRay(self):
-            global notesControllerFound
-            if notesControllerFound:
-                setSwitchMaterialChoice("C_N_Icon_Notes", 1)
+            findNode("CtrllrR_UI").fields().setInt32("choice", 2)
 
-        def neutralNotes(self):
-            self.pointer.setControllerActionMapping("prepare", "any-customtrigger-touched")
-            self.pointer.setControllerActionMapping("abort", "any-customtrigger-untouched")
-            self.pointer.setControllerActionMapping("start", "any-customtrigger-pressed")
-            self.pointer.setControllerActionMapping("execute", "any-customtrigger-released")
+        def grabNote(self, action=None, device=None):
+            global Cloned_ref_obj
+            right_node = self.rightController.getNode()
+            best, best_dist = None, float('inf')
+            try:
+                for i in range(Cloned_ref_obj.getNChildren()):
+                    child = Cloned_ref_obj.getChild(i)
+                    pos = getTransformNodeTranslation(child, 1)
+                    hand = getTransformNodeTranslation(right_node, 1)
+                    dx = pos.x()-hand.x(); dy = pos.y()-hand.y(); dz = pos.z()-hand.z()
+                    d = math.sqrt(dx*dx+dy*dy+dz*dz)
+                    if d < best_dist:
+                        best_dist, best = d, child
+            except Exception:
+                pass
+            if best:
+                self.grabConstraint = vrConstraintService.createParentConstraint([right_node], best, True)
+                findNode("CtrllrR_UI").fields().setInt32("choice", 4)
 
-        def onControllerNotesMapping(self):
-            self.pointer.setControllerActionMapping("prepare", "disable")
-            self.pointer.setControllerActionMapping("abort", "any-customtrigger-untouched")
-            self.pointer.setControllerActionMapping("start", "any-customtrigger-pressed")
-            self.pointer.setControllerActionMapping("execute", "any-customtrigger-released")
-
-        def onRayNotesMapping(self):
-            self.pointer.setControllerActionMapping("prepare", "right-customtrigger-touched")
-            self.pointer.setControllerActionMapping("abort", "disable")
-            self.pointer.setControllerActionMapping("start", "right-customtrigger-pressed")
-            self.pointer.setControllerActionMapping("execute", "right-customtrigger-released")
-
-        def defaultNotesMappings(self):
-            if not self.changeView:
-                self.onControllerNotesMapping()
-            else:
-                self.onRayNotesMapping()
+        def releaseNote(self, action=None, device=None):
+            if self.grabConstraint:
+                vrConstraintService.deleteConstraint(self.grabConstraint)
+                self.grabConstraint = None
+            findNode("CtrllrR_UI").fields().setInt32("choice", 3 if self.deleteNoteIsActive else 1)
 
     # ------------------------------------------------------------------
     # SectionTool - 剖面工具
@@ -996,6 +790,8 @@ else:
             self.centerActionClip = multiButtonPadClip.createControllerAction("right-padcenter-pressed")
             self.triggerRightPressed = multiButtonPadClip.createControllerAction("right-trigger-pressed")
             self.triggerRightReleased = multiButtonPadClip.createControllerAction("right-trigger-released")
+            self.aPressedAction = multiButtonPadClip.createControllerAction("right-a-pressed")
+            self.bPressedAction = multiButtonPadClip.createControllerAction("right-b-pressed")
 
             self.registry_key = "tool_section"
             self.newRightCon = None
@@ -1023,40 +819,19 @@ else:
             self.rightUpperActionClip.signal().triggered.connect(self.ContourVis)
             self.rightDownActionClip.signal().triggered.connect(self.constZ)
             self.centerActionClip.signal().triggered.connect(self.ClippingState)
+            self.aPressedAction.signal().triggered.connect(self.ClippingState)
+            self.bPressedAction.signal().triggered.connect(self.toggleClipDir)
             self.triggerRightPressed.signal().triggered.connect(self.trigger_right_pressed)
             self.triggerRightReleased.signal().triggered.connect(self.trigger_right_released)
 
-            if clippingControllerFound:
-                try:
-                    try:
-                        self.newRightCon = findNode("VRController_Clip")
-                    except Exception:
-                        self.newRightCon = None
-                    if not self.newRightCon:
-                        try:
-                            self.newRightCon = findNode("VRControllerClip")
-                        except Exception:
-                            self.newRightCon = None
-                except Exception:
-                    self.newRightCon = None
-                if self.newRightCon:
-                    try:
-                        self.rightController.setVisible(0)
-                    except Exception:
-                        pass
-                    try:
-                        self.newRightCon.setActive(1)
-                    except Exception:
-                        pass
-                    try:
-                        controllerPos = getTransformNodeTranslation(self.rightController.getNode(), 1)
-                        setTransformNodeTranslation(self.newRightCon, controllerPos.x(), controllerPos.y(), controllerPos.z(), True)
-                    except Exception:
-                        pass
-                    try:
-                        self.ClipControllerConstraint = vrConstraintService.createParentConstraint([self.rightController.getNode()], self.newRightCon, False)
-                    except Exception:
-                        self.ClipControllerConstraint = None
+            self.newRightCon = findNode("MRcontrollerRight")
+            findNode("CtrllrR_UI").fields().setInt32("choice", 5)
+            self.rightController.setVisible(0)
+            self.newRightCon.setActive(1)
+            controllerPos = getTransformNodeTranslation(self.rightController.getNode(), 1)
+            setTransformNodeTranslation(self.newRightCon, controllerPos.x(), controllerPos.y(), controllerPos.z(), True)
+            self.ClipControllerConstraint = vrConstraintService.createParentConstraint(
+                [self.rightController.getNode()], self.newRightCon, False)
             try:
                 node = self.newRightCon if self.newRightCon else self.rightController.getNode()
                 self.originalPos = getTransformNodeTranslation(node, 1)
@@ -1100,6 +875,14 @@ else:
             except Exception:
                 pass
             try:
+                self.aPressedAction.signal().triggered.disconnect(self.ClippingState)
+            except Exception:
+                pass
+            try:
+                self.bPressedAction.signal().triggered.disconnect(self.toggleClipDir)
+            except Exception:
+                pass
+            try:
                 self.triggerRightPressed.signal().triggered.disconnect(self.trigger_right_pressed)
             except Exception:
                 pass
@@ -1118,17 +901,6 @@ else:
             try:
                 enableClippingPlane(0)
                 self.clipping = False
-            except Exception:
-                pass
-            try:
-                if clippingControllerFound:
-                    setSwitchMaterialChoice("C_C_Icon_X", 0)
-                    setSwitchMaterialChoice("C_C_Icon_Y", 0)
-                    setSwitchMaterialChoice("C_C_Icon_Z", 0)
-                    setSwitchMaterialChoice("C_C_Clip", 0)
-                    setSwitchMaterialChoice("C_C_Grid", 0)
-                    setSwitchMaterialChoice("C_C_Contour", 0)
-                    setSwitchMaterialChoice("C_C_Plane", 0)
             except Exception:
                 pass
             try:
@@ -1158,11 +930,6 @@ else:
                 except Exception:
                     pass
                 self.gridVis = True
-                try:
-                    if clippingControllerFound:
-                        setSwitchMaterialChoice("C_C_Grid", 1)
-                except Exception:
-                    pass
             else:
                 self.gridVis = False
                 try:
@@ -1173,13 +940,6 @@ else:
                     vrSessionService.sendPython("setClippingGridVisualization(0, Vec3f(1,1,1))")
                 except Exception:
                     pass
-                try:
-                    if clippingControllerFound:
-                        setSwitchMaterialChoice("C_C_Grid", 0)
-                except Exception:
-                    pass
-
-        def PlaneVis(self):
             if not self.planeVis:
                 try:
                     setClippingPlaneVisualization(1, Vec3f(0.16, 0.16, 0.28))
@@ -1190,11 +950,6 @@ else:
                 except Exception:
                     pass
                 self.planeVis = True
-                try:
-                    if clippingControllerFound:
-                        setSwitchMaterialChoice("C_C_Plane", 1)
-                except Exception:
-                    pass
             else:
                 self.planeVis = False
                 try:
@@ -1205,13 +960,6 @@ else:
                     vrSessionService.sendPython("setClippingPlaneVisualization(0, Vec3f(0.16,0.16,0.28))")
                 except Exception:
                     pass
-                try:
-                    if clippingControllerFound:
-                        setSwitchMaterialChoice("C_C_Plane", 0)
-                except Exception:
-                    pass
-
-        def ContourVis(self):
             if not self.contourVis:
                 try:
                     setClippingContourVisualization(1, Vec3f(0, 0, 0), 5)
@@ -1222,11 +970,6 @@ else:
                 except Exception:
                     pass
                 self.contourVis = True
-                try:
-                    if clippingControllerFound:
-                        setSwitchMaterialChoice("C_C_Contour", 1)
-                except Exception:
-                    pass
             else:
                 self.contourVis = False
                 try:
@@ -1237,13 +980,6 @@ else:
                     vrSessionService.sendPython("setClippingContourVisualization(0, Vec3f(0,0,0),5)")
                 except Exception:
                     pass
-                try:
-                    if clippingControllerFound:
-                        setSwitchMaterialChoice("C_C_Contour", 0)
-                except Exception:
-                    pass
-
-        def constX(self):
             if not self.constXPressed:
                 self.constXPressed = True
                 try:
@@ -1305,11 +1041,6 @@ else:
                 except Exception:
                     pass
                 self.clipping = True
-                try:
-                    if clippingControllerFound:
-                        setSwitchMaterialChoice("C_C_Clip", 1)
-                except Exception:
-                    pass
             else:
                 enableClippingPlane(0)
                 try:
@@ -1317,11 +1048,6 @@ else:
                 except Exception:
                     pass
                 self.clipping = False
-                try:
-                    if clippingControllerFound:
-                        setSwitchMaterialChoice("C_C_Clip", 0)
-                except Exception:
-                    pass
 
         def trigger_right_pressed(self):
             if self.clipping:
@@ -1396,29 +1122,24 @@ else:
                     vrSessionService.sendPython("setClippingPlanePosition(point)")
 
         def clipXConstraintON(self):
-            if clippingControllerFound:
-                setSwitchMaterialChoice("C_C_Icon_X", 1)
-                setSwitchMaterialChoice("C_C_Icon_Y", 0)
-                setSwitchMaterialChoice("C_C_Icon_Z", 0)
+            pass
         def clipXConstraintOFF(self):
-            if clippingControllerFound:
-                setSwitchMaterialChoice("C_C_Icon_X", 0)
+            pass
         def clipYConstraintON(self):
-            if clippingControllerFound:
-                setSwitchMaterialChoice("C_C_Icon_X", 0)
-                setSwitchMaterialChoice("C_C_Icon_Y", 1)
-                setSwitchMaterialChoice("C_C_Icon_Z", 0)
+            pass
         def clipYConstraintOFF(self):
-            if clippingControllerFound:
-                setSwitchMaterialChoice("C_C_Icon_Y", 0)
+            pass
         def clipZConstraintON(self):
-            if clippingControllerFound:
-                setSwitchMaterialChoice("C_C_Icon_X", 0)
-                setSwitchMaterialChoice("C_C_Icon_Y", 0)
-                setSwitchMaterialChoice("C_C_Icon_Z", 1)
+            pass
         def clipZConstraintOFF(self):
-            if clippingControllerFound:
-                setSwitchMaterialChoice("C_C_Icon_Z", 0)
+            pass
+
+        def toggleClipDir(self, action=None, device=None):
+            try:
+                cur = findNode("CtrllrR_UI").fields().getInt32("choice")
+                findNode("CtrllrR_UI").fields().setInt32("choice", 6 if cur == 5 else 5)
+            except Exception:
+                pass
 
     # ------------------------------------------------------------------
     # TurntableTool - 展示台旋转工具
@@ -1462,23 +1183,12 @@ else:
 
             self.leftTouched = self.multiButtonPad.createControllerAction("right-padleft-touched")
             self.rightTouched = self.multiButtonPad.createControllerAction("right-padright-touched")
+            self.aPressedAction = self.multiButtonPad.createControllerAction("right-a-pressed")
+            self.aReleasedAction = self.multiButtonPad.createControllerAction("right-a-released")
+            self.bPressedAction = self.multiButtonPad.createControllerAction("right-b-pressed")
+            self.originalAngle = 0.0
 
             self.registry_key = "tool_turntable"
-
-        def _find_node_by_names(self, names):
-            try:
-                all_nodes = getAllNodes()
-                if not all_nodes:
-                    return None
-                for node in all_nodes:
-                    try:
-                        if node and not node.isNull() and node.getName() in names:
-                            return node
-                    except Exception:
-                        continue
-            except Exception:
-                pass
-            return None
 
         def _resolve_target(self):
             try:
@@ -1574,26 +1284,25 @@ else:
             vred_tool_registry[self.registry_key] = self
             vrDeviceService.setActiveInteractionGroup("TurntableGroup")
 
-            triggerStart = self.pointer.getControllerAction("start")
-            triggerStart.signal().triggered.connect(self.on_trigger_toggle)
+            self.aPressedAction.signal().triggered.connect(self.start_rotation)
+            self.aReleasedAction.signal().triggered.connect(self.stop_rotation)
+            self.bPressedAction.signal().triggered.connect(self.restore_rotation)
             self.leftTouched.signal().triggered.connect(self.set_counterclockwise)
             self.rightTouched.signal().triggered.connect(self.set_clockwise)
 
-            if rotationControllerFound:
+            self.newRightCon = findNode("MRcontrollerRight")
+            findNode("CtrllrR_UI").fields().setInt32("choice", 13)
+            self.rightController.setVisible(0)
+            self.newRightCon.setActive(1)
+            controllerPos = getTransformNodeTranslation(self.rightController.getNode(), 1)
+            setTransformNodeTranslation(self.newRightCon, controllerPos.x(), controllerPos.y(), controllerPos.z(), True)
+            self.RotationControllerConstraint = vrConstraintService.createParentConstraint(
+                [self.rightController.getNode()], self.newRightCon, False)
+            if self.node:
                 try:
-                    self.newRightCon = self._find_node_by_names(("VRController_Rotation", "VRControllerRotation"))
+                    self.originalAngle = getTransformNodeRotation(self.node).z()
                 except Exception:
-                    self.newRightCon = None
-                if self.newRightCon:
-                    try:
-                        if not self.newRightCon.isNull():
-                            self.rightController.setVisible(0)
-                            self.newRightCon.setActive(1)
-                            controllerPos = getTransformNodeTranslation(self.rightController.getNode(), 1)
-                            setTransformNodeTranslation(self.newRightCon, controllerPos.x(), controllerPos.y(), controllerPos.z(), True)
-                            self.RotationControllerConstraint = vrConstraintService.createParentConstraint([self.rightController.getNode()], self.newRightCon, False)
-                    except Exception:
-                        pass
+                    self.originalAngle = 0.0
             print("[AllTools] TurntableTool enabled")
 
         def disable(self):
@@ -1605,8 +1314,15 @@ else:
             except Exception:
                 pass
             try:
-                triggerStart = self.pointer.getControllerAction("start")
-                triggerStart.signal().triggered.disconnect(self.on_trigger_toggle)
+                self.aPressedAction.signal().triggered.disconnect(self.start_rotation)
+            except Exception:
+                pass
+            try:
+                self.aReleasedAction.signal().triggered.disconnect(self.stop_rotation)
+            except Exception:
+                pass
+            try:
+                self.bPressedAction.signal().triggered.disconnect(self.restore_rotation)
             except Exception:
                 pass
             try:
@@ -1639,11 +1355,14 @@ else:
         def set_counterclockwise(self, action=None, device=None):
             self.direction = -1
 
-        def on_trigger_toggle(self, action=None, device=None):
-            if self.rotating:
-                self.stop_rotation()
-            else:
-                self.start_rotation()
+        def restore_rotation(self, action=None, device=None):
+            if self.node:
+                try:
+                    rot = getTransformNodeRotation(self.node)
+                    setTransformNodeRotation(self.node, rot.x(), rot.y(), self.originalAngle)
+                    self.currentAngle = self.originalAngle
+                except Exception:
+                    pass
 
         def start_rotation(self):
             self.node = self._resolve_target()
@@ -1710,58 +1429,18 @@ else:
             self.measureControllerConstraint = None
 
         def _find_or_load_measure_controller(self):
-            try:
-                node = findNode("ControllerDraw")
-                if node and not node.isNull():
-                    return node
-            except Exception:
-                pass
-            try:
-                vred_dir = _get_vred_documents_dir()
-                if not vred_dir:
-                    return None
-                filepath = os.path.join(vred_dir, 'ControllerDraw.osb')
-                if not os.path.exists(filepath):
-                    return None
-                node = loadGeometry(filepath)
-                try:
-                    node.setName("ControllerDraw")
-                except Exception:
-                    pass
-                return node
-            except Exception:
-                return None
+            return findNode("MRcontrollerRight")
 
         def _activate_measure_controller(self):
             self.newRightCon = self._find_or_load_measure_controller()
-            if self.newRightCon:
-                try:
-                    self.rightController.setVisible(0)
-                except Exception:
-                    pass
-                try:
-                    self.rightController.setEnabled(0)
-                except Exception:
-                    pass
-                try:
-                    self.newRightCon.setActive(1)
-                except Exception:
-                    pass
-                try:
-                    self.measureControllerConstraint = vrConstraintService.createParentConstraint(
-                        [self.rightController.getNode()], self.newRightCon, False
-                    )
-                except Exception:
-                    self.measureControllerConstraint = None
-            else:
-                try:
-                    self.rightController.setVisible(1)
-                except Exception:
-                    pass
-                try:
-                    self.rightController.setEnabled(1)
-                except Exception:
-                    pass
+            controllerPos = getTransformNodeTranslation(self.rightController.getNode(), 1)
+            findNode("CtrllrR_UI").fields().setInt32("choice", 14)
+            self.rightController.setVisible(0)
+            self.rightController.setEnabled(0)
+            self.newRightCon.setActive(1)
+            self.measureControllerConstraint = vrConstraintService.createParentConstraint(
+                [self.rightController.getNode()], self.newRightCon, False
+            )
 
         def _deactivate_measure_controller(self):
             try:
@@ -1950,37 +1629,12 @@ else:
             root_node = getInternalRootNode()
             self.geo = createNode("Transform3D", "VR_Flashlight", root_node, False)
             self.trans = createNode("Transform3D", "FlashlightPos", self.geo, False)
-            self.load_model()
-            try:
-                self.flashlight_handle = vrNodeService.findNode("Housing_02", False, False, self.trans)
-            except Exception:
-                self.flashlight_handle = None
             self.geo.setActive(False)
             try:
                 setIsVRNode(self.trans, True)
                 setIsVRNode(self.geo, True)
             except Exception:
                 pass
-
-        def load_model(self):
-            model_path = self.get_controller_osb_path()
-            nodes = []
-            if model_path:
-                try:
-                    nodes = loadOSB([model_path])
-                except Exception:
-                    nodes = []
-            for node in nodes:
-                self.trans.addChild(node)
-
-        def get_controller_osb_path(self):
-            vred_dir = _get_vred_documents_dir()
-            if not vred_dir:
-                return None
-            filename = os.path.join(vred_dir, "ControllerFlashlight.osb")
-            if os.path.exists(filename):
-                return filename
-            return None
 
         def update_flashlight(self, device):
             try:
@@ -2072,24 +1726,17 @@ else:
         def _stop_light_timer(self):
             self.lightTimer.setActive(0)
 
-        def toggle_light(self, action=None, device=None):
-            """Trigger 按下时切换聚光灯开/关。"""
+        def switch_on_light(self, action=None, device=None):
             if self.lightNode is None:
                 self._create_spotlight()
-            if self.lightNode is None:
-                return
-            if self.lightOn:
-                try:
-                    self.lightNode.setOn(False)
-                except Exception:
-                    pass
-                self.lightOn = False
-            else:
-                try:
-                    self.lightNode.setOn(True)
-                except Exception:
-                    pass
+            if self.lightNode:
+                self.lightNode.setOn(True)
                 self.lightOn = True
+
+        def switch_off_light(self, action=None, device=None):
+            if self.lightNode:
+                self.lightNode.setOn(False)
+                self.lightOn = False
 
         def switch_on(self):
             if self.on:
@@ -2133,50 +1780,18 @@ else:
                     pass
 
         def _find_or_load_flashlight_controller(self):
-            try:
-                node = findNode("ControllerFlashlight")
-                if node and not node.isNull():
-                    return node
-            except Exception:
-                pass
-            try:
-                vred_dir = _get_vred_documents_dir()
-                if not vred_dir:
-                    return None
-                filepath = os.path.join(vred_dir, 'ControllerFlashlight.osb')
-                if not os.path.exists(filepath):
-                    return None
-                node = loadGeometry(filepath)
-                try:
-                    node.setName("ControllerFlashlight")
-                except Exception:
-                    pass
-                return node
-            except Exception:
-                return None
+            return findNode("MRcontrollerRight")
 
         def _activate_flashlight_controller(self):
             self.newRightCon = self._find_or_load_flashlight_controller()
-            if self.newRightCon:
-                try:
-                    self.rightController.setVisible(0)
-                except Exception:
-                    pass
-                try:
-                    self.newRightCon.setActive(1)
-                except Exception:
-                    pass
-                try:
-                    self.flashlightControllerConstraint = vrConstraintService.createParentConstraint(
-                        [self.rightController.getNode()], self.newRightCon, False
-                    )
-                except Exception:
-                    self.flashlightControllerConstraint = None
-            else:
-                try:
-                    self.rightController.setVisible(1)
-                except Exception:
-                    pass
+            controllerPos = getTransformNodeTranslation(self.rightController.getNode(), 1)
+            findNode("CtrllrR_UI").fields().setInt32("choice", 12)
+            self.rightController.setVisible(0)
+            self.newRightCon.setActive(1)
+            setTransformNodeTranslation(self.newRightCon, controllerPos.x(), controllerPos.y(), controllerPos.z(), True)
+            self.flashlightControllerConstraint = vrConstraintService.createParentConstraint(
+                [self.rightController.getNode()], self.newRightCon, False
+            )
 
         def _deactivate_flashlight_controller(self):
             try:
@@ -2208,7 +1823,8 @@ else:
                 pass
             vred_tool_registry[self.registry_key] = self
             vrDeviceService.setActiveInteractionGroup("FlashlightGroup")
-            self.triggerRightPressed.signal().triggered.connect(self.toggle_light)
+            self.aPressedAction.signal().triggered.connect(self.switch_on_light)
+            self.bPressedAction.signal().triggered.connect(self.switch_off_light)
             self.switch_on()
             self._activate_flashlight_controller()
             print("[AllTools] FlashlightTool enabled")
@@ -2221,7 +1837,11 @@ else:
             except Exception:
                 pass
             try:
-                self.triggerRightPressed.signal().triggered.disconnect(self.toggle_light)
+                self.aPressedAction.signal().triggered.disconnect(self.switch_on_light)
+            except Exception:
+                pass
+            try:
+                self.bPressedAction.signal().triggered.disconnect(self.switch_off_light)
             except Exception:
                 pass
             self.switch_off()
@@ -2249,6 +1869,8 @@ else:
                 self.pointer.addSupportedInteractionGroup("VoiceNotesGroup")
 
                 # ── button actions ──
+                self.aPressedAction = self.multi.createControllerAction("right-a-pressed")
+                self.aReleasedAction = self.multi.createControllerAction("right-a-released")
                 self.bPressedAction = self.multi.createControllerAction("right-b-pressed")
                 self.bReleasedAction = self.multi.createControllerAction("right-b-released")
                 self.gripPressedAction = self.multi.createControllerAction(
@@ -2298,6 +1920,7 @@ else:
                 self._grip_held = False
                 self._dragging_node = None
                 self._drag_constraint = None
+                self._eraser_held = False
 
                 # ── misc ──
                 self.isEnabled = False
@@ -2555,33 +2178,11 @@ else:
                             return self._voice_player_template
                     except Exception:
                         pass
-                try:
-                    vred_dir = _get_vred_documents_dir()
-                    if not vred_dir:
-                        return None
-                    osb_path = os.path.join(vred_dir, 'VoicePlayer.osb')
-                    if not os.path.exists(osb_path):
-                        return None
-                    tmpl = loadGeometry(osb_path)
-                    if tmpl:
-                        try:
-                            tmpl.setName('__VoicePlayer_Template__')
-                        except Exception:
-                            pass
-                        try:
-                            tmpl.setActive(False)
-                        except Exception:
-                            pass
-                        try:
-                            setIsVRNode(tmpl, True)
-                        except Exception:
-                            pass
-                        self._voice_player_template = tmpl
-                        print('[VoiceNotes] VoicePlayer template loaded')
-                        return tmpl
-                except Exception as e:
-                    print('[VoiceNotes] VoicePlayer template load failed: ' + str(e))
-                return None
+                tmpl = findNode("VoicePlayer")
+                tmpl.setActive(False)
+                setIsVRNode(tmpl, True)
+                self._voice_player_template = tmpl
+                return tmpl
 
             def _create_note_node(self, label, position=None):
                 """Clone the VoicePlayer template, place it in the scene and register it."""
@@ -2734,49 +2335,17 @@ else:
             # ── custom controller ──────────────────────────────────────────
 
             def _find_or_load_voice_controller(self):
-                try:
-                    node = findNode("ControllerVoiceNote")
-                    if node and not node.isNull():
-                        return node
-                except Exception:
-                    pass
-                try:
-                    vred_dir = _get_vred_documents_dir()
-                    if not vred_dir:
-                        return None
-                    filepath = os.path.join(vred_dir, 'ControllerVoiceNote.osb')
-                    if not os.path.exists(filepath):
-                        return None
-                    node = loadGeometry(filepath)
-                    try:
-                        node.setName("ControllerVoiceNote")
-                    except Exception:
-                        pass
-                    return node
-                except Exception:
-                    return None
+                return findNode("MRcontrollerRight")
 
             def _activate_voice_controller(self):
                 self.newRightCon = self._find_or_load_voice_controller()
-                if self.newRightCon:
-                    try:
-                        self.rightController.setVisible(0)
-                    except Exception:
-                        pass
-                    try:
-                        self.newRightCon.setActive(1)
-                    except Exception:
-                        pass
-                    try:
-                        self.voiceControllerConstraint = vrConstraintService.createParentConstraint(
-                            [self.rightController.getNode()], self.newRightCon, False)
-                    except Exception:
-                        self.voiceControllerConstraint = None
-                else:
-                    try:
-                        self.rightController.setVisible(1)
-                    except Exception:
-                        pass
+                controllerPos = getTransformNodeTranslation(self.rightController.getNode(), 1)
+                findNode("CtrllrR_UI").fields().setInt32("choice", 7)
+                self.rightController.setVisible(0)
+                self.newRightCon.setActive(1)
+                setTransformNodeTranslation(self.newRightCon, controllerPos.x(), controllerPos.y(), controllerPos.z(), True)
+                self.voiceControllerConstraint = vrConstraintService.createParentConstraint(
+                    [self.rightController.getNode()], self.newRightCon, False)
 
             def _deactivate_voice_controller(self):
                 try:
@@ -2836,6 +2405,24 @@ else:
                     self._set_hover_rect(None)
                     return
 
+                if self._eraser_held:
+                    right_pos = self._get_controller_position(self.rightController)
+                    for node in self._get_all_voice_note_nodes():
+                        key = self._get_rect_key(node)
+                        if not key:
+                            continue
+                        try:
+                            node_pos = getTransformNodeTranslation(node, 1)
+                            if right_pos and self._vec3_distance(right_pos, node_pos) <= VoiceNotes._TOUCH_DIST:
+                                for d in (self._rect_audio_paths, self._rect_base_scales,
+                                          self._rect_annotations, self._rect_labels,
+                                          self._voice_note_nodes):
+                                    d.pop(key, None)
+                                deleteNode(node, True)
+                        except Exception:
+                            pass
+                    return
+
                 if self._grip_held and self._dragging_node:
                     self._set_hover_rect(self._dragging_node)
                     return
@@ -2887,17 +2474,29 @@ else:
 
             # ── event handlers ─────────────────────────────────────────────
 
-            def on_b_pressed(self, action_obj=None, device_obj=None):
+            def on_a_pressed(self, action_obj=None, device_obj=None):
                 if self._is_recording:
                     return
+                findNode("CtrllrR_UI").fields().setInt32("choice", 8)
                 pos = self._get_controller_forward_position(self.rightController)
                 self._start_recording(pos)
-                print("[VoiceNotes] B pressed → 开始录音，位置: " + str(pos))
+                print("[VoiceNotes] A pressed → 开始录音，位置: " + str(pos))
 
-            def on_b_released(self, action_obj=None, device_obj=None):
+            def on_a_released(self, action_obj=None, device_obj=None):
                 if self._is_recording:
                     self._stop_recording()
-                    print("[VoiceNotes] B released → 结束录音")
+                    findNode("CtrllrR_UI").fields().setInt32("choice", 7)
+                    print("[VoiceNotes] A released → 结束录音")
+
+            def on_b_pressed(self, action_obj=None, device_obj=None):
+                self._eraser_held = True
+                findNode("CtrllrR_UI").fields().setInt32("choice", 9)
+                print("[VoiceNotes] B pressed → 橡皮擦激活")
+
+            def on_b_released(self, action_obj=None, device_obj=None):
+                self._eraser_held = False
+                findNode("CtrllrR_UI").fields().setInt32("choice", 7)
+                print("[VoiceNotes] B released → 橡皮擦停用")
 
             def on_grip_pressed(self, action_obj=None, device_obj=None):
                 if self._grip_held:
@@ -2926,6 +2525,7 @@ else:
                         [self.rightController.getNode()], best_node, True)
                     self._grip_held = True
                     self._dragging_node = best_node
+                    findNode("CtrllrR_UI").fields().setInt32("choice", 10)
                     print("[VoiceNotes] Grip → 开始拖动，dist={:.1f}mm".format(best_dist))
                 except Exception as e:
                     print("[VoiceNotes] Grip → createParentConstraint 失败: " + str(e))
@@ -2939,6 +2539,7 @@ else:
                     self._drag_constraint = None
                 self._grip_held = False
                 self._dragging_node = None
+                findNode("CtrllrR_UI").fields().setInt32("choice", 7)
                 print("[VoiceNotes] Grip released → 停止拖动")
 
             # ── lifecycle ──────────────────────────────────────────────────
@@ -2963,6 +2564,8 @@ else:
                 self.teleport.setControllerActionMapping("prepare", "left-{}-touched".format(_pad_input))
                 self.teleport.setControllerActionMapping("abort",   "left-{}-untouched".format(_pad_input))
                 self.teleport.setControllerActionMapping("execute",  "left-{}-pressed".format(_pad_input))
+                self.aPressedAction.signal().triggered.connect(self.on_a_pressed)
+                self.aReleasedAction.signal().triggered.connect(self.on_a_released)
                 self.bPressedAction.signal().triggered.connect(self.on_b_pressed)
                 self.bReleasedAction.signal().triggered.connect(self.on_b_released)
                 for act_p, act_r, lbl in [
@@ -2986,7 +2589,7 @@ else:
                     self._timerConnected = True
                 self.timer.setActive(1)
                 self._activate_voice_controller()
-                print("[AllTools] VoiceNotes enabled (B=录音, 触碰球=播放)")
+                print("[AllTools] VoiceNotes enabled (A=录音, B=橡皮擦, Grip=移动, 触碰球=播放)")
 
             def disable(self):
                 self.isEnabled = False
@@ -3004,6 +2607,14 @@ else:
                     self.teleport.setControllerActionMapping("prepare", "any-{}-touched".format(_pad_input))
                     self.teleport.setControllerActionMapping("abort",   "any-{}-untouched".format(_pad_input))
                     self.teleport.setControllerActionMapping("execute",  "any-{}-pressed".format(_pad_input))
+                except Exception:
+                    pass
+                try:
+                    self.aPressedAction.signal().triggered.disconnect(self.on_a_pressed)
+                except Exception:
+                    pass
+                try:
+                    self.aReleasedAction.signal().triggered.disconnect(self.on_a_released)
                 except Exception:
                     pass
                 try:
@@ -3034,6 +2645,7 @@ else:
                     self._drag_constraint = None
                 self._grip_held = False
                 self._dragging_node = None
+                self._eraser_held = False
                 try:
                     self.timer.setActive(0)
                 except Exception:
@@ -3167,9 +2779,7 @@ def cleanup_all_tools():
     """完全清除: 禁用所有工具 + 删除脚本创建的所有场景节点 + 重置状态"""
     global _tool_manager, _all_tools_initialized
     global vred_tool_registry
-    global refObject, switchNode, Cloned_ref_obj, noteCount
-    global customFunctionsGroup
-    global adjustControllerFound, notesControllerFound, clippingControllerFound, rotationControllerFound
+    global refObject, Cloned_ref_obj, noteCount
 
     # 1. 禁用所有工具
     try:
@@ -3179,25 +2789,11 @@ def cleanup_all_tools():
 
     # 2. 删除脚本创建/加载的所有场景节点
     _nodes_to_remove = [
-        "WT-MR_Remote_controllers",   # Adjust controller .osb
-        "VRControllerNotes_Notes",     # Notes controller .osb
-        "VRController_Notes",          # Notes controller variant
-        "Cloned_ref_obj",              # Notes cloned objects
-        "VRED-VR-Custom-Fucntion",     # Custom function group
-        "VRControllerClip",            # Section controller .osb
-        "VRController_Clip",           # Section controller variant
-        "ControllerDraw",              # Measure controller .osb
-        "VR_Flashlight",               # Flashlight geometry
-        "ControllerVoiceNote",         # Voice note controller .osb
-        "Notes",                       # Notes switch node
-        "VRControllerMove",
-        "VRControllerSelect",
-        "VRControllerNotes",
-        "VRControllerDraw",
-        "D_Tool",
-        "D_Lines",
-        "D_tempLine",
-        "Group_html",
+        "MRcontrollerLeft",
+        "MRcontrollerRight",
+        "MR_Stuff",
+        "Cloned_ref_obj",
+        "VR_Flashlight",
     ]
 
     for nodeName in _nodes_to_remove:
@@ -3252,14 +2848,8 @@ def cleanup_all_tools():
     # 7. 重置全局变量
     try:
         refObject = None
-        switchNode = None
         Cloned_ref_obj = None
         noteCount = 0
-        customFunctionsGroup = None
-        adjustControllerFound = False
-        notesControllerFound = False
-        clippingControllerFound = False
-        rotationControllerFound = False
     except Exception:
         pass
 
