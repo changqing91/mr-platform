@@ -7,6 +7,9 @@
 import os
 import math
 import random
+import datetime
+import tempfile
+from PySide6 import QtCore, QtMultimedia, QtGui
 
 # --- 防止重复初始化 ---
 global _all_tools_initialized
@@ -2225,397 +2228,510 @@ else:
             self._deactivate_flashlight_controller()
 
     # ------------------------------------------------------------------
-    # VoiceNotes - 语音标注工具 (需要 PySide6)
+    # VoiceNotes - 语音标注工具
     # ------------------------------------------------------------------
-    _voice_notes_available = False
-    try:
-        from PySide6 import QtCore, QtMultimedia, QtGui
-        _voice_notes_available = True
-    except Exception:
-        _voice_notes_available = False
+    class VoiceNotes:
+            _TOUCH_DIST = 150.0      # mm — controller must be within this distance to trigger playback
+            _FORWARD_OFFSET = 200.0  # mm — how far in front of the controller a new note is placed
 
-    if _voice_notes_available:
-        import datetime
-        import tempfile
-
-        if 'voice_note_state' not in globals() or voice_note_state.get('qt_binding') != 'pyside6':
-            voice_note_state = {
-                'qt_binding': 'pyside6',
-                'recorder': None,
-                'player': None,
-                'audio_input': None,
-                'audio_output': None,
-                'capture_session': None,
-                'is_recording': False,
-                'last_audio_path': None,
-                'current_rect': None,
-                'last_rect': None,
-                'current_annotation': None,
-                'current_label': None,
-                'current_audio_path': None,
-                'rect_audio_paths': {},
-                'rect_base_scales': {},
-                'hover_rect': None,
-                'hover_scale': 1.2
-            }
-        state = voice_note_state
-
-        def _ensure_recorder():
-            if state['recorder'] is not None:
-                return state['recorder']
-            state['audio_input'] = QtMultimedia.QAudioInput()
-            try:
-                inputs = QtMultimedia.QMediaDevices.audioInputs()
-                preferred_input = os.getenv("VOICE_NOTE_AUDIO_INPUT", "").strip().lower()
-                chosen_input = None
-                input_keywords = [
-                    "alvr", "virtual audio", "virtual-audio", "virtualaudio",
-                    "audio cable", "virtual audio cable", "cable", "vb-audio", "vac",
-                    "microphone", "mic", "virtual desktop", "virtual desktop audio"
-                ]
-                for dev in inputs:
-                    try:
-                        name = ""
-                        try:
-                            name = dev.description()
-                        except Exception:
-                            pass
-                        if not name:
-                            try:
-                                name = dev.deviceName()
-                            except Exception:
-                                name = ""
-                        lowered = name.lower() if name else ""
-                        if preferred_input and lowered and preferred_input in lowered:
-                            chosen_input = dev
-                            break
-                        if lowered and any(k in lowered for k in input_keywords):
-                            chosen_input = dev
-                            break
-                    except Exception:
-                        pass
-                if chosen_input is None:
-                    for dev in inputs:
-                        try:
-                            if dev.isDefault():
-                                chosen_input = dev
-                                break
-                        except Exception:
-                            pass
-                if chosen_input is None:
-                    try:
-                        if len(inputs) == 1:
-                            chosen_input = inputs[0]
-                    except Exception:
-                        pass
-                if chosen_input:
-                    try:
-                        state['audio_input'].setDevice(chosen_input)
-                    except Exception:
-                        pass
-            except Exception:
-                pass
-            state['recorder'] = QtMultimedia.QMediaRecorder()
-            state['capture_session'] = QtMultimedia.QMediaCaptureSession()
-            state['capture_session'].setAudioInput(state['audio_input'])
-            state['capture_session'].setRecorder(state['recorder'])
-            return state['recorder']
-
-        def _ensure_player():
-            state['player'] = QtMultimedia.QMediaPlayer()
-            try:
-                state['player'].setVolume(100)
-            except Exception:
-                pass
-            state['audio_output'] = QtMultimedia.QAudioOutput()
-            try:
-                outputs = QtMultimedia.QMediaDevices.audioOutputs()
-                preferred = os.getenv("VOICE_NOTE_AUDIO_DEVICE", "").strip().lower()
-                chosen = None
-                keywords = [
-                    "alvr", "virtual audio", "virtual-audio", "virtualaudio",
-                    "audio cable", "virtual audio cable", "cable", "vb-audio", "vac",
-                    "vr", "vive", "valve", "index", "oculus", "rift", "openxr",
-                    "reverb", "wmr", "headset", "headphones"
-                ]
-                for dev in outputs:
-                    try:
-                        name = ""
-                        try:
-                            name = dev.description()
-                        except Exception:
-                            pass
-                        if not name:
-                            try:
-                                name = dev.deviceName()
-                            except Exception:
-                                name = ""
-                        lowered = name.lower() if name else ""
-                        if preferred and lowered and preferred in lowered:
-                            chosen = dev
-                            break
-                        if lowered and any(k in lowered for k in keywords):
-                            chosen = dev
-                            break
-                    except Exception:
-                        pass
-                if chosen is None:
-                    for dev in outputs:
-                        try:
-                            if dev.isDefault():
-                                chosen = dev
-                                break
-                        except Exception:
-                            pass
-                if chosen is None:
-                    try:
-                        if len(outputs) == 1:
-                            chosen = outputs[0]
-                    except Exception:
-                        pass
-                if chosen:
-                    try:
-                        state['audio_output'].setDevice(chosen)
-                    except Exception:
-                        pass
-                try:
-                    state['audio_output'].setVolume(1.0)
-                except Exception:
-                    pass
-            except Exception:
-                pass
-            state['player'].setAudioOutput(state['audio_output'])
-            return state['player']
-
-        def _get_device_pick_position(device):
-            if not device:
-                return None
-            try:
-                hit = device.pick()
-                if hit and hit.hasHit():
-                    point = hit.getPoint()
-                    if point:
-                        try:
-                            normal = hit.getNormal()
-                            if normal and normal.length() > 0.0001:
-                                return point + normal.normalized() * 42.0
-                        except Exception:
-                            pass
-                        return point
-            except Exception:
-                pass
-            return None
-
-        def _get_device_target_position(device):
-            pos = _get_device_pick_position(device)
-            if pos:
-                return pos
-            try:
-                matrix = device.getTrackingMatrix()
-                if matrix:
-                    col = matrix.column(3)
-                    origin = QtGui.QVector3D(col.x(), col.y(), col.z())
-                    axis = matrix.column(2)
-                    forward = QtGui.QVector3D(axis.x(), axis.y(), axis.z())
-                    if forward.length() > 0.0001:
-                        return origin + forward.normalized() * 2.0
-            except Exception:
-                pass
-            return None
-
-        def _get_rect_key(node):
-            if not node:
-                return None
-            try:
-                key = node.getUniquePath()
-                if key:
-                    return key
-            except Exception:
-                pass
-            try:
-                name = node.getName()
-                if name:
-                    return name
-            except Exception:
-                pass
-            return str(id(node))
-
-        def _store_rect_scale(rect):
-            if not rect:
-                return
-            key = _get_rect_key(rect)
-            if not key:
-                return
-            if key in state['rect_base_scales']:
-                return
-            try:
-                base = rect.getScale()
-            except Exception:
-                base = QtGui.QVector3D(1.0, 1.0, 1.0)
-            state['rect_base_scales'][key] = base
-
-        def _apply_rect_scale(rect, scale):
-            if not rect or not scale:
-                return
-            try:
-                rect.setScale(scale)
-                return
-            except Exception:
-                pass
-            try:
-                rect.setWorldScale(scale)
-            except Exception:
-                pass
-
-        def _set_hover_rect(node):
-            if node == state.get('hover_rect'):
-                return
-            prev = state.get('hover_rect')
-            if prev:
-                prev_key = _get_rect_key(prev)
-                base = state['rect_base_scales'].get(prev_key)
-                if base:
-                    _apply_rect_scale(prev, base)
-            state['hover_rect'] = node
-            if node:
-                key = _get_rect_key(node)
-                base = state['rect_base_scales'].get(key)
-                if not base:
-                    try:
-                        base = node.getScale()
-                    except Exception:
-                        base = QtGui.QVector3D(1.0, 1.0, 1.0)
-                    state['rect_base_scales'][key] = base
-                factor = state.get('hover_scale', 1.2)
-                scale = QtGui.QVector3D(base.x() * factor, base.y() * factor, base.z() * factor)
-                _apply_rect_scale(node, scale)
-
-        def _play_audio(path):
-            if not path or not os.path.exists(path):
-                return False
-            player = _ensure_player()
-            url = QtCore.QUrl.fromLocalFile(path)
-            if hasattr(QtMultimedia.QMediaPlayer, "setSource"):
-                player.setSource(url)
-            else:
-                player.setMedia(QtMultimedia.QMediaContent(url))
-            player.play()
-            return True
-
-        def _create_rectangle(text, position=None):
-            root = vrScenegraphService.getRootNode()
-            color = QtGui.QColor(0, 60, 180)
-            rect = None
-            annotation = None
-            try:
-                rect = vrGeometryService.createSphere(root, 40.0, 32, 32, color)
-            except Exception:
-                rect = None
-            if rect:
-                try:
-                    rect.setName(text if text else "VoiceNode")
-                except Exception:
-                    pass
-                try:
-                    cam = vrCameraService.getActiveCamera(True)
-                    aim = vrConstraintService.createAimConstraint([cam], [], rect)
-                    if aim:
-                        aim.setVisualizationVisible(False)
-                except Exception:
-                    pass
-                _store_rect_scale(rect)
-            if position and rect:
-                try:
-                    rect.setWorldTranslation(position)
-                except Exception:
-                    try:
-                        rect.setTranslation(position)
-                    except Exception:
-                        pass
-            if rect:
-                try:
-                    vrMetadataService.addTags([rect], ["voice_note_rect"])
-                except Exception:
-                    pass
-                if text:
-                    try:
-                        annotation = vrAnnotationService.createAnnotation(text)
-                        annotation.setText(text)
-                        annotation.setSceneNode(rect)
-                        annotation.setAnchored(True)
-                        if position:
-                            annotation.setPosition(position)
-                    except Exception:
-                        annotation = None
-            return rect, annotation
-
-        def _start_recording(position=None):
-            base_dir = os.path.join(tempfile.gettempdir(), "vred_voice_notes")
-            if not os.path.exists(base_dir):
-                os.makedirs(base_dir)
-            ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = "voice_note_" + ts + ".wav"
-            path = os.path.join(base_dir, filename)
-            recorder = _ensure_recorder()
-            recorder.setOutputLocation(QtCore.QUrl.fromLocalFile(path))
-            label = ts
-            rect, annotation = _create_rectangle(label + " Recording", position)
-            recorder.record()
-            state['is_recording'] = True
-            state['current_rect'] = rect
-            state['current_annotation'] = annotation
-            state['current_audio_path'] = path
-            state['current_label'] = label
-            if rect:
-                key = _get_rect_key(rect)
-                if key:
-                    state['rect_audio_paths'][key] = path
-
-        def _stop_recording():
-            recorder = _ensure_recorder()
-            recorder.stop()
-            state['is_recording'] = False
-            if state['current_rect']:
-                old_key = _get_rect_key(state['current_rect'])
-                try:
-                    state['current_rect'].setName(state['current_label'])
-                except Exception:
-                    pass
-                if state['current_annotation']:
-                    try:
-                        state['current_annotation'].setText(state['current_label'])
-                    except Exception:
-                        pass
-                new_key = _get_rect_key(state['current_rect'])
-                if old_key and new_key and old_key != new_key:
-                    if old_key in state['rect_audio_paths']:
-                        state['rect_audio_paths'][new_key] = state['rect_audio_paths'].pop(old_key)
-                    if old_key in state['rect_base_scales']:
-                        state['rect_base_scales'][new_key] = state['rect_base_scales'].pop(old_key)
-                state['last_rect'] = state['current_rect']
-            state['last_audio_path'] = state.get('current_audio_path')
-            state['current_rect'] = None
-            state['current_annotation'] = None
-            state['current_audio_path'] = None
-            state['current_label'] = None
-
-        class VoiceNotes:
             def __init__(self):
+                # ── VRED devices ──
                 self.leftController = vrDeviceService.getVRDevice("left-controller")
                 self.rightController = vrDeviceService.getVRDevice("right-controller")
                 self.leftController.setVisualizationMode(Visualization_ControllerAndHand)
                 self.rightController.setVisualizationMode(Visualization_ControllerAndHand)
                 vrImmersiveInteractionService.setDefaultInteractionsActive(1)
+
+                # ── interaction group ──
                 self.multi = vrDeviceService.createInteraction("MultiButtonPadVoice")
-                self.multi.setSupportedInteractionGroups(["NotesGroup"])
+                self.multi.setSupportedInteractionGroups(["VoiceNotesGroup"])
                 self.pointer = vrDeviceService.getInteraction("Pointer")
-                self.pointer.addSupportedInteractionGroup("NotesGroup")
-                self.triggerRightPressed = self.multi.createControllerAction("right-trigger-pressed")
-                self.executeAction = None
-                self.timer = vrTimer()
+                self.pointer.addSupportedInteractionGroup("VoiceNotesGroup")
+
+                # ── button actions ──
+                self.bPressedAction = self.multi.createControllerAction("right-b-pressed")
+                self.bReleasedAction = self.multi.createControllerAction("right-b-released")
+                self.gripPressedAction = self.multi.createControllerAction(
+                    "right-{}-pressed".format(_grip_input))
+                self.gripReleasedAction = self.multi.createControllerAction(
+                    "right-{}-released".format(_grip_input))
+                _grip_alt = 'squeeze' if _grip_input == 'grip' else 'grip'
+                self.gripPressedActionAlt = self.multi.createControllerAction(
+                    "right-{}-pressed".format(_grip_alt))
+                self.gripReleasedActionAlt = self.multi.createControllerAction(
+                    "right-{}-released".format(_grip_alt))
+                print("[VoiceNotes] grip actions: right-{0}-*/released + right-{1}-*/released".format(
+                    _grip_input, _grip_alt))
+
+                # ── audio ──
+                self._recorder = None
+                self._player = None
+                self._audio_input = None
+                self._audio_output = None
+                self._capture_session = None
+
+                # ── recording state ──
+                self._is_recording = False
+                self._current_rect = None
+                self._current_annotation = None
+                self._current_audio_path = None
+                self._current_label = None
+                self._last_audio_path = None
+                self._last_rect = None
+
+                # ── annotation data ──
+                self._rect_audio_paths = {}   # key → wav path
+                self._rect_base_scales = {}   # key → QVector3D base scale
+                self._rect_annotations = {}   # key → vrAnnotation
+                self._rect_labels = {}        # key → display label
+                self._voice_note_nodes = {}   # key → scene node
+
+                # ── hover ──
+                self._hover_rect = None
+                self._hover_scale = 1.2
+
+                # ── template ──
+                self._voice_player_template = None
+
+                # ── drag / touch ──
+                self._touched_nodes = set()
+                self._grip_held = False
+                self._dragging_node = None
+                self._drag_constraint = None
+
+                # ── misc ──
+                self.isEnabled = False
                 self.registry_key = "tool_voice_note"
+                self.timer = vrTimer()
+                self._timerConnected = False
                 self.newRightCon = None
                 self.voiceControllerConstraint = None
+                self.teleport = None
+
+            # ── audio / media ──────────────────────────────────────────────
+
+            def _ensure_recorder(self):
+                if self._recorder is not None:
+                    return self._recorder
+                self._audio_input = QtMultimedia.QAudioInput()
+                try:
+                    inputs = QtMultimedia.QMediaDevices.audioInputs()
+                    preferred = os.getenv("VOICE_NOTE_AUDIO_INPUT", "").strip().lower()
+                    chosen = None
+                    keywords = [
+                        "alvr", "virtual audio", "virtual-audio", "virtualaudio",
+                        "audio cable", "virtual audio cable", "cable", "vb-audio", "vac",
+                        "microphone", "mic", "virtual desktop", "virtual desktop audio"
+                    ]
+                    for dev in inputs:
+                        try:
+                            name = ""
+                            try:
+                                name = dev.description()
+                            except Exception:
+                                pass
+                            if not name:
+                                try:
+                                    name = dev.deviceName()
+                                except Exception:
+                                    name = ""
+                            lowered = name.lower() if name else ""
+                            if preferred and lowered and preferred in lowered:
+                                chosen = dev
+                                break
+                            if lowered and any(k in lowered for k in keywords):
+                                chosen = dev
+                                break
+                        except Exception:
+                            pass
+                    if chosen is None:
+                        for dev in inputs:
+                            try:
+                                if dev.isDefault():
+                                    chosen = dev
+                                    break
+                            except Exception:
+                                pass
+                    if chosen is None and len(inputs) == 1:
+                        chosen = inputs[0]
+                    if chosen:
+                        try:
+                            self._audio_input.setDevice(chosen)
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+                self._recorder = QtMultimedia.QMediaRecorder()
+                self._capture_session = QtMultimedia.QMediaCaptureSession()
+                self._capture_session.setAudioInput(self._audio_input)
+                self._capture_session.setRecorder(self._recorder)
+                return self._recorder
+
+            def _ensure_player(self):
+                self._player = QtMultimedia.QMediaPlayer()
+                self._audio_output = QtMultimedia.QAudioOutput()
+                try:
+                    outputs = QtMultimedia.QMediaDevices.audioOutputs()
+                    preferred = os.getenv("VOICE_NOTE_AUDIO_DEVICE", "").strip().lower()
+                    chosen = None
+                    keywords = [
+                        "alvr", "virtual audio", "virtual-audio", "virtualaudio",
+                        "audio cable", "virtual audio cable", "cable", "vb-audio", "vac",
+                        "vr", "vive", "valve", "index", "oculus", "rift", "openxr",
+                        "reverb", "wmr", "headset", "headphones"
+                    ]
+                    for dev in outputs:
+                        try:
+                            name = ""
+                            try:
+                                name = dev.description()
+                            except Exception:
+                                pass
+                            if not name:
+                                try:
+                                    name = dev.deviceName()
+                                except Exception:
+                                    name = ""
+                            lowered = name.lower() if name else ""
+                            if preferred and lowered and preferred in lowered:
+                                chosen = dev
+                                break
+                            if lowered and any(k in lowered for k in keywords):
+                                chosen = dev
+                                break
+                        except Exception:
+                            pass
+                    if chosen is None:
+                        for dev in outputs:
+                            try:
+                                if dev.isDefault():
+                                    chosen = dev
+                                    break
+                            except Exception:
+                                pass
+                    if chosen is None and len(outputs) == 1:
+                        chosen = outputs[0]
+                    if chosen:
+                        try:
+                            self._audio_output.setDevice(chosen)
+                        except Exception:
+                            pass
+                    try:
+                        self._audio_output.setVolume(1.0)
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
+                self._player.setAudioOutput(self._audio_output)
+                return self._player
+
+            def _play_audio(self, path):
+                if not path or not os.path.exists(path):
+                    return False
+                player = self._ensure_player()
+                url = QtCore.QUrl.fromLocalFile(path)
+                if hasattr(QtMultimedia.QMediaPlayer, "setSource"):
+                    player.setSource(url)
+                else:
+                    player.setMedia(QtMultimedia.QMediaContent(url))
+                player.play()
+                return True
+
+            # ── scale helpers ──────────────────────────────────────────────
+
+            @staticmethod
+            def _norm_scale(raw):
+                if raw is None:
+                    return QtGui.QVector3D(1.0, 1.0, 1.0)
+                try:
+                    return QtGui.QVector3D(raw.x(), raw.y(), raw.z())
+                except Exception:
+                    pass
+                try:
+                    return QtGui.QVector3D(float(raw[0]), float(raw[1]), float(raw[2]))
+                except Exception:
+                    pass
+                return QtGui.QVector3D(1.0, 1.0, 1.0)
+
+            def _apply_rect_scale(self, rect, scale):
+                if not rect or not scale:
+                    return
+                try:
+                    rect.setScale(scale)
+                    return
+                except Exception:
+                    pass
+                try:
+                    rect.setScale([scale.x(), scale.y(), scale.z()])
+                    return
+                except Exception:
+                    pass
+                try:
+                    setTransformNodeScale(rect, scale.x(), scale.y(), scale.z(), False)
+                except Exception:
+                    pass
+
+            # ── node helpers ───────────────────────────────────────────────
+
+            @staticmethod
+            def _get_rect_key(node):
+                if not node:
+                    return None
+                try:
+                    oid = node.getObjectId()
+                    if oid is not None:
+                        return "oid_" + str(int(oid))
+                except Exception:
+                    pass
+                try:
+                    key = node.getUniquePath()
+                    if key:
+                        return key
+                except Exception:
+                    pass
+                try:
+                    name = node.getName()
+                    if name:
+                        return name
+                except Exception:
+                    pass
+                return str(id(node))
+
+            def _store_rect_scale(self, rect):
+                if not rect:
+                    return
+                key = self._get_rect_key(rect)
+                if not key or key in self._rect_base_scales:
+                    return
+                try:
+                    raw = rect.getScale()
+                except Exception:
+                    raw = None
+                self._rect_base_scales[key] = self._norm_scale(raw)
+
+            def _set_hover_rect(self, node):
+                if node == self._hover_rect:
+                    return
+                if self._hover_rect:
+                    base = self._rect_base_scales.get(self._get_rect_key(self._hover_rect))
+                    if base:
+                        self._apply_rect_scale(self._hover_rect, base)
+                self._hover_rect = node
+                if node:
+                    key = self._get_rect_key(node)
+                    base = self._rect_base_scales.get(key)
+                    if not base:
+                        try:
+                            raw = node.getScale()
+                        except Exception:
+                            raw = None
+                        base = self._norm_scale(raw)
+                        self._rect_base_scales[key] = base
+                    s = self._hover_scale
+                    self._apply_rect_scale(node, QtGui.QVector3D(
+                        base.x() * s, base.y() * s, base.z() * s))
+
+            def _get_all_voice_note_nodes(self):
+                if self._voice_note_nodes:
+                    return list(self._voice_note_nodes.values())
+                result = []
+                try:
+                    for node in getAllNodes():
+                        try:
+                            if node.getName().startswith("VNR_"):
+                                result.append(node)
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+                return result
+
+            # ── template / node creation ───────────────────────────────────
+
+            def _ensure_voice_player_template(self):
+                if self._voice_player_template is not None:
+                    try:
+                        if not self._voice_player_template.isNull():
+                            return self._voice_player_template
+                    except Exception:
+                        pass
+                try:
+                    vred_dir = _get_vred_documents_dir()
+                    if not vred_dir:
+                        return None
+                    osb_path = os.path.join(vred_dir, 'VoicePlayer.osb')
+                    if not os.path.exists(osb_path):
+                        return None
+                    tmpl = loadGeometry(osb_path)
+                    if tmpl:
+                        try:
+                            tmpl.setName('__VoicePlayer_Template__')
+                        except Exception:
+                            pass
+                        try:
+                            tmpl.setActive(False)
+                        except Exception:
+                            pass
+                        try:
+                            setIsVRNode(tmpl, True)
+                        except Exception:
+                            pass
+                        self._voice_player_template = tmpl
+                        print('[VoiceNotes] VoicePlayer template loaded')
+                        return tmpl
+                except Exception as e:
+                    print('[VoiceNotes] VoicePlayer template load failed: ' + str(e))
+                return None
+
+            def _create_note_node(self, label, position=None):
+                """Clone the VoicePlayer template, place it in the scene and register it."""
+                if self._voice_player_template is None:
+                    print("[VoiceNotes] _create_note_node: VoicePlayer template not loaded")
+                    return None, None
+                rect = cloneNode(self._voice_player_template, False)
+                rect.setActive(True)
+                setIsVRNode(rect, True)
+                rect.setName("VNR_" + (label if label else "VoiceNode"))
+                self._store_rect_scale(rect)
+                if position:
+                    setTransformNodeTranslation(rect, position.x(), position.y(), position.z(), 1)
+                key = self._get_rect_key(rect)
+                if key:
+                    self._voice_note_nodes[key] = rect
+                    if label:
+                        self._rect_labels[key] = label
+                annotation = None
+                if label:
+                    try:
+                        ann_pos = position if position else getTransformNodeTranslation(rect, 1)
+                        annotation = vrAnnotationService.createAnnotation(label)
+                        annotation.setText(label)
+                        annotation.setSceneNode(rect)
+                        annotation.setPosition(QtGui.QVector3D(
+                            ann_pos.x(), ann_pos.y(), ann_pos.z()))
+                        annotation.setAnchored(True)
+                        annotation.setVisible(True)
+                        if key:
+                            self._rect_annotations[key] = annotation
+                        print("[VoiceNotes] Annotation created: " + str(label))
+                    except Exception as e:
+                        print("[VoiceNotes] Annotation creation failed: " + str(e))
+                return rect, annotation
+
+            # ── recording ─────────────────────────────────────────────────
+
+            def _start_recording(self, position=None):
+                base_dir = os.path.join(tempfile.gettempdir(), "vred_voice_notes")
+                if not os.path.exists(base_dir):
+                    os.makedirs(base_dir)
+                ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                path = os.path.join(base_dir, "voice_note_" + ts + ".wav")
+                recorder = self._ensure_recorder()
+                recorder.setOutputLocation(QtCore.QUrl.fromLocalFile(path))
+                rect, annotation = self._create_note_node(ts + " Recording", position)
+                recorder.record()
+                self._is_recording = True
+                self._current_rect = rect
+                self._current_annotation = annotation
+                self._current_audio_path = path
+                self._current_label = ts
+                if rect:
+                    key = self._get_rect_key(rect)
+                    if key:
+                        self._rect_audio_paths[key] = path
+
+            def _stop_recording(self):
+                self._ensure_recorder().stop()
+                self._is_recording = False
+                rect = self._current_rect
+                if rect:
+                    old_key = self._get_rect_key(rect)
+                    label = self._current_label
+                    try:
+                        rect.setName("VNR_" + label)
+                    except Exception:
+                        pass
+                    if self._current_annotation:
+                        try:
+                            self._current_annotation.setText(label)
+                        except Exception:
+                            pass
+                    new_key = self._get_rect_key(rect)
+                    if old_key and new_key and old_key != new_key:
+                        for d in (self._rect_audio_paths, self._rect_base_scales,
+                                  self._rect_annotations, self._rect_labels,
+                                  self._voice_note_nodes):
+                            if old_key in d:
+                                d[new_key] = d.pop(old_key)
+                    final_key = new_key or old_key
+                    if final_key:
+                        self._rect_labels[final_key] = label
+                    self._last_rect = rect
+                self._last_audio_path = self._current_audio_path
+                self._current_rect = None
+                self._current_annotation = None
+                self._current_audio_path = None
+                self._current_label = None
+
+            # ── controller position helpers ────────────────────────────────
+
+            def _get_controller_position(self, controller):
+                try:
+                    return getTransformNodeTranslation(controller.getNode(), 1)
+                except Exception:
+                    pass
+                try:
+                    matrix = controller.getTrackingMatrix()
+                    if matrix:
+                        col = matrix.column(3)
+                        return Vec3f(col.x(), col.y(), col.z())
+                except Exception:
+                    pass
+                return None
+
+            def _get_controller_forward_position(self, controller):
+                px, py, pz = None, None, None
+                try:
+                    pos = getTransformNodeTranslation(controller.getNode(), 1)
+                    px, py, pz = pos.x(), pos.y(), pos.z()
+                except Exception:
+                    pass
+                if px is None:
+                    try:
+                        matrix = controller.getTrackingMatrix()
+                        if matrix:
+                            col = matrix.column(3)
+                            px, py, pz = col.x(), col.y(), col.z()
+                    except Exception:
+                        pass
+                if px is None:
+                    return None
+                offset = VoiceNotes._FORWARD_OFFSET
+                try:
+                    hit = controller.pick()
+                    if hit and hit.hasHit():
+                        pt = hit.getPoint()
+                        dx, dy, dz = pt.x() - px, pt.y() - py, pt.z() - pz
+                        dist = math.sqrt(dx*dx + dy*dy + dz*dz)
+                        if dist > 1.0:
+                            s = offset / dist
+                            return Vec3f(px + dx*s, py + dy*s, pz + dz*s)
+                except Exception:
+                    pass
+                try:
+                    matrix = controller.getTrackingMatrix()
+                    if matrix:
+                        col2 = matrix.column(2)
+                        fx, fy, fz = -col2.x(), -col2.y(), -col2.z()
+                        length = math.sqrt(fx*fx + fy*fy + fz*fz)
+                        if length > 0.0001:
+                            s = offset / length
+                            return Vec3f(px + fx*s, py + fy*s, pz + fz*s)
+                except Exception:
+                    pass
+                return Vec3f(px, py, pz)
+
+            # ── custom controller ──────────────────────────────────────────
 
             def _find_or_load_voice_controller(self):
                 try:
@@ -2648,26 +2764,17 @@ else:
                     except Exception:
                         pass
                     try:
-                        self.rightController.setEnabled(0)
-                    except Exception:
-                        pass
-                    try:
                         self.newRightCon.setActive(1)
                     except Exception:
                         pass
                     try:
                         self.voiceControllerConstraint = vrConstraintService.createParentConstraint(
-                            [self.rightController.getNode()], self.newRightCon, False
-                        )
+                            [self.rightController.getNode()], self.newRightCon, False)
                     except Exception:
                         self.voiceControllerConstraint = None
                 else:
                     try:
                         self.rightController.setVisible(1)
-                    except Exception:
-                        pass
-                    try:
-                        self.rightController.setEnabled(1)
                     except Exception:
                         pass
 
@@ -2685,65 +2792,160 @@ else:
                     pass
                 try:
                     self.rightController.setVisible(1)
-                except Exception:
-                    pass
-                try:
                     self.rightController.setEnabled(1)
                 except Exception:
                     pass
 
-            def distanceFunc(self):
-                hover_node = None
-                try:
-                    hit = self.rightController.pick()
-                except Exception:
-                    hit = None
-                if hit and hit.hasHit():
-                    try:
-                        node = hit.getNode()
-                    except Exception:
-                        node = None
-                    if node:
-                        try:
-                            if vrMetadataService.hasTag(node, "voice_note_rect"):
-                                hover_node = node
-                        except Exception:
-                            hover_node = None
-                _set_hover_rect(hover_node)
+            # ── math helpers ───────────────────────────────────────────────
 
-            def on_trigger(self, action_obj=None, device_obj=None):
-                _ = action_obj
-                device = device_obj if device_obj else self.rightController
-                if device:
+            @staticmethod
+            def _vec3_xyz(v):
+                try:
+                    return (v.x(), v.y(), v.z())
+                except Exception:
+                    pass
+                try:
+                    return (v[0], v[1], v[2])
+                except Exception:
+                    pass
+                return None
+
+            @staticmethod
+            def _vec3_distance(a, b):
+                ca = VoiceNotes._vec3_xyz(a)
+                cb = VoiceNotes._vec3_xyz(b)
+                if ca is None or cb is None:
+                    return float('inf')
+                dx, dy, dz = ca[0] - cb[0], ca[1] - cb[1], ca[2] - cb[2]
+                return math.sqrt(dx*dx + dy*dy + dz*dz)
+
+            # ── timer callback ─────────────────────────────────────────────
+
+            def distanceFunc(self):
+                # Sync annotation label positions to their scene nodes every frame
+                for key, ann in list(self._rect_annotations.items()):
                     try:
-                        hit = device.pick()
+                        node = ann.getSceneNode()
+                        if node and not node.isNull():
+                            p = getTransformNodeTranslation(node, 1)
+                            ann.setPosition(QtGui.QVector3D(p.x(), p.y(), p.z()))
                     except Exception:
-                        hit = None
-                    if hit and hit.hasHit():
+                        pass
+
+                if self._is_recording:
+                    self._set_hover_rect(None)
+                    return
+
+                if self._grip_held and self._dragging_node:
+                    self._set_hover_rect(self._dragging_node)
+                    return
+
+                right_pos = self._get_controller_position(self.rightController)
+                left_pos = self._get_controller_position(self.leftController)
+                touched_now = set()
+                hover_node = None
+
+                for node in self._get_all_voice_note_nodes():
+                    key = self._get_rect_key(node)
+                    if not key:
+                        continue
+                    try:
+                        node_pos = getTransformNodeTranslation(node, 1)
+                    except Exception:
+                        continue
+                    in_range = (
+                        (right_pos and self._vec3_distance(right_pos, node_pos) <= VoiceNotes._TOUCH_DIST) or
+                        (left_pos  and self._vec3_distance(left_pos,  node_pos) <= VoiceNotes._TOUCH_DIST)
+                    )
+                    if in_range:
+                        touched_now.add(key)
+                        hover_node = node
+                        if key not in self._touched_nodes:
+                            path = self._rect_audio_paths.get(key)
+                            if path:
+                                self._play_audio(path)
+                                print("[VoiceNotes] 触碰播放: " + str(path))
+                            else:
+                                print("[VoiceNotes] 触碰标注球，未找到音频 key=" + str(key))
+                            ann = self._rect_annotations.get(key)
+                            if ann:
+                                try:
+                                    ann.setText("Playing")
+                                except Exception:
+                                    pass
+
+                for key in self._touched_nodes - touched_now:
+                    ann = self._rect_annotations.get(key)
+                    if ann:
                         try:
-                            node = hit.getNode()
+                            ann.setText(self._rect_labels.get(key, key))
                         except Exception:
-                            node = None
-                        if node:
-                            try:
-                                if vrMetadataService.hasTag(node, "voice_note_rect"):
-                                    if state['is_recording'] and state.get('current_rect') == node:
-                                        _stop_recording()
-                                    else:
-                                        key = _get_rect_key(node)
-                                        path = state['rect_audio_paths'].get(key)
-                                        _play_audio(path)
-                                    return
-                            except Exception:
-                                pass
-                pos = _get_device_target_position(device)
-                if state['is_recording']:
-                    _stop_recording()
-                else:
-                    _start_recording(pos)
+                            pass
+
+                self._set_hover_rect(hover_node)
+                self._touched_nodes = touched_now
+
+            # ── event handlers ─────────────────────────────────────────────
+
+            def on_b_pressed(self, action_obj=None, device_obj=None):
+                if self._is_recording:
+                    return
+                pos = self._get_controller_forward_position(self.rightController)
+                self._start_recording(pos)
+                print("[VoiceNotes] B pressed → 开始录音，位置: " + str(pos))
+
+            def on_b_released(self, action_obj=None, device_obj=None):
+                if self._is_recording:
+                    self._stop_recording()
+                    print("[VoiceNotes] B released → 结束录音")
+
+            def on_grip_pressed(self, action_obj=None, device_obj=None):
+                if self._grip_held:
+                    return
+                if self._drag_constraint is not None:
+                    try:
+                        vrConstraintService.deleteConstraint(self._drag_constraint)
+                    except Exception:
+                        pass
+                    self._drag_constraint = None
+                right_pos = self._get_controller_position(self.rightController)
+                best_node, best_dist = None, float('inf')
+                for node in self._get_all_voice_note_nodes():
+                    try:
+                        d = self._vec3_distance(right_pos,
+                                                getTransformNodeTranslation(node, 1))
+                        if d < best_dist:
+                            best_dist, best_node = d, node
+                    except Exception:
+                        pass
+                if best_node is None:
+                    print("[VoiceNotes] Grip: 未找到可拖动的球体")
+                    return
+                try:
+                    self._drag_constraint = vrConstraintService.createParentConstraint(
+                        [self.rightController.getNode()], best_node, True)
+                    self._grip_held = True
+                    self._dragging_node = best_node
+                    print("[VoiceNotes] Grip → 开始拖动，dist={:.1f}mm".format(best_dist))
+                except Exception as e:
+                    print("[VoiceNotes] Grip → createParentConstraint 失败: " + str(e))
+
+            def on_grip_released(self, action_obj=None, device_obj=None):
+                if self._drag_constraint is not None:
+                    try:
+                        vrConstraintService.deleteConstraint(self._drag_constraint)
+                    except Exception:
+                        pass
+                    self._drag_constraint = None
+                self._grip_held = False
+                self._dragging_node = None
+                print("[VoiceNotes] Grip released → 停止拖动")
+
+            # ── lifecycle ──────────────────────────────────────────────────
 
             def enable(self):
                 self.isEnabled = True
+                self._touched_nodes = set()
                 try:
                     for k, obj in list(vred_tool_registry.items()):
                         if obj is not self and hasattr(obj, 'disable'):
@@ -2754,29 +2956,41 @@ else:
                 except Exception:
                     pass
                 vred_tool_registry[self.registry_key] = self
-                self.multi.setSupportedInteractionGroups(["NotesGroup"])
-                vrDeviceService.setActiveInteractionGroup("NotesGroup")
+                self.multi.setSupportedInteractionGroups(["VoiceNotesGroup"])
+                vrDeviceService.setActiveInteractionGroup("VoiceNotesGroup")
                 self.teleport = vrDeviceService.getInteraction("Teleport")
-                self.teleport.addSupportedInteractionGroup("NotesGroup")
-                self.teleport.setControllerActionMapping("prepare", "right-{}-touched".format(_pad_input))
-                self.teleport.setControllerActionMapping("abort", "right-{}-untouched".format(_pad_input))
-                self.teleport.setControllerActionMapping("execute", "right-{}-pressed".format(_pad_input))
-                self.pointer.setControllerActionMapping("prepare", "right-customtrigger-touched")
-                self.pointer.setControllerActionMapping("abort", "disable")
-                self.pointer.setControllerActionMapping("start", "right-trigger-pressed")
-                self.pointer.setControllerActionMapping("execute", "right-trigger-released")
-                try:
-                    self.executeAction = self.pointer.getControllerAction("execute")
-                    self.executeAction.signal().triggered.connect(self.on_trigger)
-                except Exception:
-                    self.executeAction = None
+                self.teleport.addSupportedInteractionGroup("VoiceNotesGroup")
+                self.teleport.setControllerActionMapping("prepare", "left-{}-touched".format(_pad_input))
+                self.teleport.setControllerActionMapping("abort",   "left-{}-untouched".format(_pad_input))
+                self.teleport.setControllerActionMapping("execute",  "left-{}-pressed".format(_pad_input))
+                self.bPressedAction.signal().triggered.connect(self.on_b_pressed)
+                self.bReleasedAction.signal().triggered.connect(self.on_b_released)
+                for act_p, act_r, lbl in [
+                    (self.gripPressedAction,    self.gripReleasedAction,    _grip_input),
+                    (self.gripPressedActionAlt, self.gripReleasedActionAlt,
+                     'squeeze' if _grip_input == 'grip' else 'grip'),
+                ]:
+                    try:
+                        act_p.signal().triggered.connect(self.on_grip_pressed)
+                        print("[VoiceNotes] grip-pressed ('{}') connected".format(lbl))
+                    except Exception as e:
+                        print("[VoiceNotes] grip-pressed ('{}') FAILED: {}".format(lbl, e))
+                    try:
+                        act_r.signal().triggered.connect(self.on_grip_released)
+                        print("[VoiceNotes] grip-released ('{}') connected".format(lbl))
+                    except Exception as e:
+                        print("[VoiceNotes] grip-released ('{}') FAILED: {}".format(lbl, e))
+                self._ensure_voice_player_template()
+                if not self._timerConnected:
+                    self.timer.connect(self.distanceFunc)
+                    self._timerConnected = True
                 self.timer.setActive(1)
-                self.timer.connect(self.distanceFunc)
                 self._activate_voice_controller()
-                print("[AllTools] VoiceNotes enabled")
+                print("[AllTools] VoiceNotes enabled (B=录音, 触碰球=播放)")
 
             def disable(self):
                 self.isEnabled = False
+                self._touched_nodes = set()
                 try:
                     self.multi.setSupportedInteractionGroups([])
                 except Exception:
@@ -2788,31 +3002,47 @@ else:
                     pass
                 try:
                     self.teleport.setControllerActionMapping("prepare", "any-{}-touched".format(_pad_input))
-                    self.teleport.setControllerActionMapping("abort", "any-{}-untouched".format(_pad_input))
-                    self.teleport.setControllerActionMapping("execute", "any-{}-pressed".format(_pad_input))
+                    self.teleport.setControllerActionMapping("abort",   "any-{}-untouched".format(_pad_input))
+                    self.teleport.setControllerActionMapping("execute",  "any-{}-pressed".format(_pad_input))
                 except Exception:
                     pass
                 try:
-                    self.pointer.setControllerActionMapping("prepare", "any-customtrigger-touched")
-                    self.pointer.setControllerActionMapping("abort", "any-customtrigger-untouched")
-                    self.pointer.setControllerActionMapping("start", "any-customtrigger-pressed")
-                    self.pointer.setControllerActionMapping("execute", "any-customtrigger-released")
+                    self.bPressedAction.signal().triggered.disconnect(self.on_b_pressed)
                 except Exception:
                     pass
                 try:
-                    if self.executeAction:
-                        self.executeAction.signal().triggered.disconnect(self.on_trigger)
+                    self.bReleasedAction.signal().triggered.disconnect(self.on_b_released)
                 except Exception:
                     pass
+                for act in (self.gripPressedAction, self.gripPressedActionAlt):
+                    try:
+                        if act:
+                            act.signal().triggered.disconnect(self.on_grip_pressed)
+                    except Exception:
+                        pass
+                for act in (self.gripReleasedAction, self.gripReleasedActionAlt):
+                    try:
+                        if act:
+                            act.signal().triggered.disconnect(self.on_grip_released)
+                    except Exception:
+                        pass
+                if self._drag_constraint is not None:
+                    try:
+                        vrConstraintService.deleteConstraint(self._drag_constraint)
+                    except Exception:
+                        pass
+                    self._drag_constraint = None
+                self._grip_held = False
+                self._dragging_node = None
                 try:
                     self.timer.setActive(0)
                 except Exception:
                     pass
-                try:
-                    if state.get('is_recording'):
-                        _stop_recording()
-                except Exception:
-                    pass
+                if self._is_recording:
+                    try:
+                        self._stop_recording()
+                    except Exception:
+                        pass
                 self._deactivate_voice_controller()
 
     # ======================================================================
@@ -2898,14 +3128,21 @@ else:
     except Exception as e:
         print("[AllTools] Failed to register FlashlightTool: " + str(e))
 
-    if _voice_notes_available:
-        try:
-            _tool_manager.register("voice_note", VoiceNotes())
-            print("[AllTools] VoiceNotes registered")
-        except Exception as e:
-            print("[AllTools] Failed to register VoiceNotes: " + str(e))
-    else:
-        print("[AllTools] VoiceNotes skipped (PySide6 not available)")
+    try:
+        _tool_manager.register("voice_note", VoiceNotes())
+        print("[AllTools] VoiceNotes registered")
+    except Exception as e:
+        print("[AllTools] Failed to register VoiceNotes: " + str(e))
+
+    # --- 全局摇杆 Teleport 绑定（左右手柄均适用）---
+    try:
+        _jump_tele = vrDeviceService.getInteraction("Teleport")
+        _jump_tele.setControllerActionMapping("prepare", "any-{}-touched".format(_pad_input))
+        _jump_tele.setControllerActionMapping("abort",   "any-{}-untouched".format(_pad_input))
+        _jump_tele.setControllerActionMapping("execute",  "any-{}-pressed".format(_pad_input))
+        print("[AllTools] 全局 Teleport 已绑定 (any-{})".format(_pad_input))
+    except Exception as e:
+        print("[AllTools] 全局 Teleport 绑定失败: " + str(e))
 
     _all_tools_initialized = True
     print("[AllTools] All tools initialized. Use switch_tool(name) to activate.")

@@ -239,19 +239,19 @@ module.exports = createCoreController('api::process.process', ({ strapi }) => ({
             if (!machine) return ctx.notFound('Machine not found');
             if (!project) return ctx.notFound('Project not found');
 
-            // Check for existing running/starting process and terminate it
-            const existingProcesses = await strapi.entityService.findMany('api::process.process', {
-                filters: {
-                    machine: machineId,
-                    status: { $in: ['running', 'starting'] }
-                },
-                populate: ['machine']
-            });
+            // // Check for existing running/starting process and terminate it
+            // const existingProcesses = await strapi.entityService.findMany('api::process.process', {
+            //     filters: {
+            //         machine: machineId,
+            //         status: { $in: ['running', 'starting'] }
+            //     },
+            //     populate: ['machine']
+            // });
 
-            if (existingProcesses && existingProcesses.length > 0) {
-                console.log(`Found ${existingProcesses.length} existing processes for machine ${machineId}, terminating...`);
-                await Promise.all(existingProcesses.map(p => terminateProcess(strapi, p)));
-            }
+            // if (existingProcesses && existingProcesses.length > 0) {
+            //     console.log(`Found ${existingProcesses.length} existing processes for machine ${machineId}, terminating...`);
+            //     await Promise.all(existingProcesses.map(p => terminateProcess(strapi, p)));
+            // }
 
             // Construct Command
             const vredPort = machine.port || 8888;
@@ -262,7 +262,7 @@ module.exports = createCoreController('api::process.process', ({ strapi }) => ({
             const isWireFile = sanitizedPath.toLowerCase().endsWith('.wire');
             const pythonCommand = isWireFile
                 ? `vrLiveReferenceService.importFile("${sanitizedPath}")`
-                : `vrFileIOService.loadFile("${sanitizedPath}")`;
+                : `vrFileIOService.newFile()\nvrFileIOService.loadFile("${sanitizedPath}")`;
 
             console.log(`Loading project on ${machine.ip}:${vredPort}: ${pythonCommand}`);
 

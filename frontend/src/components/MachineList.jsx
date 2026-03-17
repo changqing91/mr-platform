@@ -1,6 +1,6 @@
 import { 
     Monitor, Layers2, Copy, CheckSquare, Power, Trash2, Plus, 
-    Play, RefreshCw, Link, Rocket, Server, RotateCcw, Square, Edit2, Wrench
+    Play, RefreshCw, Link, Rocket, Server, RotateCcw, Square, Edit2
 } from 'lucide-react';
 import ProjectThumbnail from './ProjectThumbnail';
 import { THEME_COLOR } from '../constants';
@@ -30,7 +30,6 @@ const MachineList = ({
     setActiveMachineId,
     setShowMonitorWall,
     setIsBatchMode,
-    openScriptTools,
     collaborationMachineIds,
     toggleMachineCollaboration
 }) => {
@@ -175,19 +174,7 @@ const MachineList = ({
                                          </div>
                                      )}
                                      
-                                     {/* Add Script Tool Button */}
-                                    <button 
-                                        onClick={(e) => { 
-                                            e.stopPropagation(); 
-                                            openScriptTools(machine);
-                                        }} 
-                                        className={`absolute bottom-1 right-1 p-1 rounded-md z-20 transition-colors ${isActiveInSingle ? `bg-[${THEME_COLOR}] text-white` : 'bg-black/40 text-white/70 hover:bg-[#39C5BB] hover:text-white'}`}
-                                        title="添加脚本工具"
-                                    >
-                                        <Wrench size={12} />
-                                    </button>
-
-                                     {/* Batch Selection Overlay */}
+                                    {/* Batch Selection Overlay */}
                                      {isBatchMode && isClickable && (
                                          <div className={`absolute inset-0 bg-white/50 backdrop-blur-[1px] flex items-center justify-center transition-opacity ${isSelectedInBatch ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
                                              <div className={`w-8 h-8 rounded-full flex items-center justify-center shadow-lg transform transition-transform ${isSelectedInBatch ? `bg-primary scale-110` : 'bg-white scale-100'}`} style={{ backgroundColor: isSelectedInBatch ? THEME_COLOR : undefined }}>
@@ -216,18 +203,18 @@ const MachineList = ({
                                      </div>
                                  </div>
 
-                                 <div className="flex items-center justify-end gap-1.5 mt-2">
+                                 <div className="flex items-center justify-end gap-2 mt-2">
                                      {!isBatchMode && (
                                          <>
                                              {isRunning && (
                                                  <label 
-                                                    className="flex items-center gap-1 px-2 py-1 rounded bg-emerald-50 text-emerald-700 hover:bg-emerald-100 transition-colors text-[10px] font-bold cursor-pointer"
+                                                    className="flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-100 transition-colors text-sm font-bold cursor-pointer"
                                                     onClick={(e) => e.stopPropagation()}
                                                     title="加入VRED协作"
                                                  >
                                                     <input
                                                         type="checkbox"
-                                                        className="w-3.5 h-3.5 accent-emerald-500"
+                                                        className="w-4 h-4 accent-emerald-500"
                                                         checked={!!isInCollaboration}
                                                         onChange={(e) => toggleMachineCollaboration(machine, e.target.checked)}
                                                     />
@@ -236,14 +223,14 @@ const MachineList = ({
                                              )}
                                              {isRunning ? (
                                                  <>
-                                                     <button onClick={(e) => restartNode(machine, e)} className="p-1.5 bg-blue-50 text-blue-500 rounded hover:bg-blue-100 transition-colors" title="重启项目"><RotateCcw size={14} /></button>
-                                                     <button onClick={(e) => { e.stopPropagation(); setKillCandidate(machine); }} className="p-1.5 bg-red-50 text-red-500 rounded hover:bg-red-100 transition-colors" title="停止进程"><Square size={14} fill="currentColor" /></button>
+                                                     <button onClick={(e) => restartNode(machine, e)} className="p-2.5 bg-blue-50 text-blue-500 rounded-lg hover:bg-blue-100 transition-colors" title="重启项目"><RotateCcw size={18} /></button>
+                                                     <button onClick={(e) => { e.stopPropagation(); setKillCandidate(machine); }} className="p-2.5 bg-red-50 text-red-500 rounded-lg hover:bg-red-100 transition-colors" title="停止进程"><Square size={18} fill="currentColor" /></button>
                                                  </>
                                              ) : (
                                                  !isBooting && (
                                                      <>
-                                                         <button onClick={(e) => openEditModal(machine, e)} className="p-1.5 hover:bg-gray-100 text-gray-400 hover:text-gray-600 rounded transition-colors" title="编辑"><Edit2 size={14} /></button>
-                                                         <button onClick={(e) => promptDeleteNode(machine, e)} className="p-1.5 hover:bg-red-50 text-gray-400 hover:text-red-500 rounded transition-colors" title="删除"><Trash2 size={14} /></button>
+                                                         <button onClick={(e) => openEditModal(machine, e)} className="p-2.5 hover:bg-gray-100 text-gray-400 hover:text-gray-600 rounded-lg transition-colors" title="编辑"><Edit2 size={18} /></button>
+                                                         <button onClick={(e) => promptDeleteNode(machine, e)} className="p-2.5 hover:bg-red-50 text-gray-400 hover:text-red-500 rounded-lg transition-colors" title="删除"><Trash2 size={18} /></button>
                                                      </>
                                                  )
                                              )}

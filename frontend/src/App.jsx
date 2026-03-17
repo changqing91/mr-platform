@@ -1,7 +1,6 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import LoginScreen from './components/LoginScreen';
-import { THEME_COLOR, MR_TOOLS } from './constants';
-import { ALL_TOOLS_SCRIPT, getSwitchToolCommand, getDisableAllCommand, getCleanupAllCommand } from './utils/vredPy';
+import { THEME_COLOR } from './constants';
 import { api } from './services/api';
 import { uploadFile, TUSD_PATH_PREFIX } from './services/upload';
 
@@ -11,7 +10,6 @@ import StreamingView from './components/StreamingView';
 import MachineList from './components/MachineList';
 import Header from './components/Header';
 import ProjectWorkspace from './components/ProjectWorkspace';
-import ScriptToolsPanel from './components/ScriptToolsPanel';
 import NotificationToast from './components/NotificationToast';
 import MachineModal from './components/MachineModal';
 import ProjectModal from './components/ProjectModal';
@@ -62,10 +60,6 @@ const App = () => {
     const [bootingMachines, setBootingMachines] = useState(new Set()); // Set<machineId>
     const [pendingLaunches, setPendingLaunches] = useState({}); // { machineId: projectId } (Staged for batch launch)
     const [streamingMachineId, setStreamingMachineId] = useState(null);
-    const [machineScripts, setMachineScripts] = useState({}); // { machineId: Set<scriptId> }
-    const [machineToolsInjected, setMachineToolsInjected] = useState(new Set()); // Set<machineId> - tracks which machines have all_tools.py injected
-    const [machineActiveTool, setMachineActiveTool] = useState({}); // { machineId: toolId }
-    const [showScriptTools, setShowScriptTools] = useState(false);
     const [collaborationMachineIds, setCollaborationMachineIds] = useState(new Set());
 
     // --- State: Modals ---
@@ -275,6 +269,34 @@ const App = () => {
         } catch (e) {
             console.error(e);
             addNotification('重命名失败', 'error');
+        }
+    };
+
+    const handleUpdateProject = async (projectId, { name, tags, thumbnail }) => {
+        const project = projects.find(p => p.id === projectId);
+        if (!project) return;
+        const trimmedName = name?.trim();
+        if (!trimmedName) return;
+
+        const tagsArray = typeof tags === 'string'
+            ? tags.split(',').map(t => t.trim()).filter(Boolean)
+            : (Array.isArray(tags) ? tags : []);
+
+        const updateData = { name: trimmedName, tags: tagsArray };
+        if (thumbnail !== undefined) updateData.thumbnail = thumbnail;
+
+        try {
+            const updated = await api.projects.update(project.documentId, updateData);
+            setProjects(projects.map(p => p.id === projectId ? {
+                ...p,
+                name: updated.name,
+                tags: updated.tags ?? tagsArray,
+                thumbnail: thumbnail !== undefined ? thumbnail : p.thumbnail
+            } : p));
+            addNotification(`项目已更新`, 'success');
+        } catch (e) {
+            console.error(e);
+            addNotification('更新失败', 'error');
         }
     };
 
@@ -524,14 +546,6 @@ const App = () => {
         }
     };
 
-    const openScriptTools = (machine) => {
-        setActiveMachineId(machine.id);
-        setStreamingMachineId(null);
-        setShowMonitorWall(false);
-        setIsBatchMode(false);
-        setShowScriptTools(true);
-
-    };
 
     const escapePythonString = (value) => String(value || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 
@@ -621,123 +635,6 @@ except Exception as e:
         }
     };
 
-    const handleSwitchTool = async (toolId, fallbackMachineId = null) => {
-        if (isBatchMode && selectedBatchIds.size > 0) {
-            // Batch: inject + switch on all selected machines
-            const targets = machines.filter(m => selectedBatchIds.has(m.id));
-            const results = await Promise.allSettled(
-                targets.map(async (m) => {
-                    let code = '';
-                    if (!machineToolsInjected.has(m.id)) {
-                        code = ALL_TOOLS_SCRIPT + '\n';
-                    }
-                    code += getSwitchToolCommand(toolId);
-                    return api.processes.executePython(m.ip, m.port || 8888, code);
-                })
-            );
-            // Update injected state
-            setMachineToolsInjected(prev => {
-                const next = new Set(prev);
-                selectedBatchIds.forEach(id => next.add(id));
-                return next;
-            });
-            // Update active tool
-            setMachineActiveTool(prev => {
-                const next = { ...prev };
-                selectedBatchIds.forEach(id => { next[id] = toolId; });
-                return next;
-            });
-            const failedCount = results.filter(r => r.status === 'rejected').length;
-            if (failedCount > 0) {
-                addNotification(`工具切换部分失败（失败 ${failedCount} 台）`, 'warning');
-            } else {
-                const toolName = MR_TOOLS.find(t => t.id === toolId)?.name || toolId;
-                addNotification(`已在 ${selectedBatchIds.size} 台机器上切换到 ${toolName}`, 'success');
-            }
-        } else {
-            const targetMachineId = activeMachineId || fallbackMachineId;
-            if (!targetMachineId) {
-                addNotification('未选择目标机器', 'warning');
-                return;
-            }
-            const machine = machines.find(m => m.id === targetMachineId);
-            if (!machine) {
-                addNotification('目标机器不存在', 'error');
-                return;
-            }
-            // Build code: inject all_tools.py if first time, then switch
-            let code = '';
-            if (!machineToolsInjected.has(targetMachineId)) {
-                code = ALL_TOOLS_SCRIPT + '\n';
-            }
-            code += getSwitchToolCommand(toolId);
-            try {
-                await api.processes.executePython(machine.ip, machine.port || 8888, code);
-                setMachineToolsInjected(prev => new Set([...prev, targetMachineId]));
-                setMachineActiveTool(prev => ({ ...prev, [targetMachineId]: toolId }));
-                const toolName = MR_TOOLS.find(t => t.id === toolId)?.name || toolId;
-                addNotification(`已切换到 ${toolName}`, 'success');
-            } catch (e) {
-                console.error(`Failed to switch tool on ${machine.name}`, e);
-                addNotification('工具切换失败，请检查节点连接状态', 'error');
-            }
-        }
-    };
-
-    const handleResetScripts = async () => {
-        const cleanupCode = getCleanupAllCommand();
-        if (isBatchMode && selectedBatchIds.size > 0) {
-            const targets = machines.filter(m => selectedBatchIds.has(m.id) && machineToolsInjected.has(m.id));
-            if (targets.length > 0) {
-                await Promise.allSettled(
-                    targets.map(m => api.processes.executePython(m.ip, m.port || 8888, cleanupCode))
-                );
-            }
-            setMachineActiveTool(prev => {
-                const next = { ...prev };
-                selectedBatchIds.forEach(id => delete next[id]);
-                return next;
-            });
-            setMachineScripts(prev => {
-                const next = { ...prev };
-                selectedBatchIds.forEach(id => delete next[id]);
-                return next;
-            });
-            setMachineToolsInjected(prev => {
-                const next = new Set(prev);
-                selectedBatchIds.forEach(id => next.delete(id));
-                return next;
-            });
-            addNotification('已清除选中机器的工具注入与场景节点', 'info');
-        } else if (activeMachineId) {
-            if (machineToolsInjected.has(activeMachineId)) {
-                const machine = machines.find(m => m.id === activeMachineId);
-                if (machine) {
-                    try {
-                        await api.processes.executePython(machine.ip, machine.port || 8888, cleanupCode);
-                    } catch (e) {
-                        console.error('Failed to cleanup tools:', e);
-                    }
-                }
-            }
-            setMachineActiveTool(prev => {
-                const next = { ...prev };
-                delete next[activeMachineId];
-                return next;
-            });
-            setMachineScripts(prev => {
-                const next = { ...prev };
-                delete next[activeMachineId];
-                return next;
-            });
-            setMachineToolsInjected(prev => {
-                const next = new Set(prev);
-                next.delete(activeMachineId);
-                return next;
-            });
-            addNotification('已清除当前机器的工具注入与场景节点', 'info');
-        }
-    };
 
     // --- Handlers: Process Control ---
     const commitLaunches = async () => {
@@ -984,18 +881,6 @@ except Exception as e:
                             handleGlobalKillClick={handleGlobalKillClick}
                             setKillCandidate={setKillCandidate}
                         />
-                    ) : showScriptTools ? (
-                        <ScriptToolsPanel 
-                            machine={machines.find(m => m.id === activeMachineId)}
-                            isBatchMode={isBatchMode}
-                            selectedBatchCount={selectedBatchIds.size}
-                            onBack={() => setShowScriptTools(false)}
-                            onSwitchTool={handleSwitchTool}
-                            onReset={handleResetScripts}
-                            onKill={() => killProcess(isBatchMode ? Array.from(selectedBatchIds) : activeMachineId)}
-                            activeTool={activeMachineId ? machineActiveTool[activeMachineId] : null}
-                            isToolsInjected={activeMachineId ? machineToolsInjected.has(activeMachineId) : false}
-                        />
                     ) : (
                         /* Main Content Area */
                         <ProjectWorkspace 
@@ -1020,7 +905,7 @@ except Exception as e:
                             handleProjectClick={handleProjectClick}
                             runningMachines={runningMachines}
                             handleDeleteProject={handleDeleteProject}
-                            handleRenameProject={handleRenameProject}
+                            handleUpdateProject={handleUpdateProject}
                             handleReplaceClick={handleReplaceClick}
                             isUploading={isUploading}
                             uploadProgress={uploadProgress}
@@ -1053,7 +938,6 @@ except Exception as e:
                         setActiveMachineId={setActiveMachineId}
                         setShowMonitorWall={setShowMonitorWall}
                         setIsBatchMode={setIsBatchMode}
-                        openScriptTools={openScriptTools}
                         collaborationMachineIds={collaborationMachineIds}
                         toggleMachineCollaboration={toggleMachineCollaboration}
                     />

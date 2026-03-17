@@ -1,8 +1,10 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { ArrowLeft, Activity, Glasses, SplitSquareHorizontal, ImageIcon, Headset, FolderOpen, Monitor } from 'lucide-react';
+import { ArrowLeft, Activity, Glasses, SplitSquareHorizontal, ImageIcon, Headset, FolderOpen, Monitor, RotateCcw, Power, Zap } from 'lucide-react';
 import ProjectThumbnail from './ProjectThumbnail';
 import { api } from '../services/api';
 import { api as vredApi } from '../services/vredPython';
+import { MR_TOOLS } from '../constants';
+import { ALL_TOOLS_SCRIPT, getSwitchToolCommand, getCleanupAllCommand } from '../utils/vredPy';
 
 // --- Camera helpers ---
 const parseVec3 = (v) => {
@@ -254,7 +256,7 @@ const StreamingView = ({
         if (!machine) return;
         try {
             // 网络路径需要使用正斜杠或双反斜杠
-            const floorImagePath = '//192.168.7.80/upload/blue.jpg';
+            const floorImagePath = `//${import.meta.env.VITE_UPLOAD_HOST}/upload/blue.jpg`;
             
             // 使用 Python 脚本创建场景板底板
             const pythonScript = `
@@ -394,6 +396,38 @@ vrOSGWidget.enableSceneplates(False)
         }
     };
 
+    // --- Tab & MR Tools state ---
+    const [activeTab, setActiveTab] = useState(0); // 0: 控制面板, 1: MR 工具
+    const [activeTool, setActiveTool] = useState(null);
+    const [isToolsInjected, setIsToolsInjected] = useState(false);
+
+    const handleSwitchTool = async (tool) => {
+        if (!machine) return;
+        try {
+            let code = '';
+            if (!isToolsInjected) {
+                code = ALL_TOOLS_SCRIPT + '\n';
+            }
+            code += getSwitchToolCommand(tool.id);
+            await api.processes.executePython(machine.ip, machine.port || 8888, code);
+            setIsToolsInjected(true);
+            setActiveTool(tool.id);
+        } catch (e) {
+            console.error('Failed to switch MR tool:', e);
+        }
+    };
+
+    const handleResetTools = async () => {
+        if (!machine || !isToolsInjected) return;
+        try {
+            await api.processes.executePython(machine.ip, machine.port || 8888, getCleanupAllCommand());
+            setActiveTool(null);
+            setIsToolsInjected(false);
+        } catch (e) {
+            console.error('Failed to reset MR tools:', e);
+        }
+    };
+
     const [iframeLoading, setIframeLoading] = useState(true);
 
     const onIframeLoad = () => {
@@ -478,130 +512,165 @@ vrOSGWidget.enableSceneplates(False)
 
                     {streamParams.showCalibration && <div className="absolute inset-0 pointer-events-none" style={{ backgroundImage: 'linear-gradient(rgba(57, 197, 187, 0.3) 1px, transparent 1px), linear-gradient(90deg, rgba(57, 197, 187, 0.3) 1px, transparent 1px)', backgroundSize: '50px 50px' }}></div>}
                 </div>
-                <div className="w-80 bg-gray-900 border-l border-gray-800 flex flex-col p-6 overflow-y-auto custom-scrollbar">
-                    {/* 1. HMD View Tracking */}
-                    <div className="mb-6 p-4 bg-gray-800/50 rounded-xl border border-gray-700">
-                        <h3 className="text-sm font-bold text-gray-300 mb-3 flex items-center gap-2"><Glasses size={16} className="text-[#39C5BB]" />HMD 视角追踪</h3>
-                        <div className="space-y-3">
-                            <div className="grid grid-cols-3 gap-2">
-                                <div className="col-span-2">
-                                    <label className="block text-[10px] text-gray-500 mb-1">SCREEN IP</label>
-                                    <input type="text" placeholder="192.168.x.x" value={streamParams.hmdIp} onChange={(e) => updateStreamParam('hmdIp', e.target.value)} className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-xs text-white focus:border-[#39C5BB] outline-none" />
-                                </div>
-                                <div>
-                                    <label className="block text-[10px] text-gray-500 mb-1">Port</label>
-                                    <input type="text" placeholder="8888" value={streamParams.hmdPort} onChange={(e) => updateStreamParam('hmdPort', e.target.value)} className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-xs text-white focus:border-[#39C5BB] outline-none" />
-                                </div>
-                            </div>
-                            <div>
-                                <label className="block text-[10px] text-gray-500 mb-1">追踪间隔 (s)</label>
-                                <input type="text" placeholder="2.0" value={streamParams.trackingInterval} onChange={(e) => updateStreamParam('trackingInterval', e.target.value)} onBlur={() => validateStreamParam('trackingInterval')} className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-xs text-white focus:border-[#39C5BB] outline-none" />
-                            </div>
-                            <div>
-                                <label className="block text-[10px] text-gray-500 mb-1">FOV 倍数 (0.5-10.0)</label>
-                                <input type="text" placeholder="3.0" value={streamParams.fovMultiplier} onChange={(e) => updateStreamParam('fovMultiplier', e.target.value)} onBlur={() => validateStreamParam('fovMultiplier')} className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-xs text-white focus:border-[#39C5BB] outline-none" />
-                            </div>
-
-                            <div className="flex rounded-lg overflow-hidden border border-gray-700 w-full">
-                                <button
-                                    onClick={() => handleAutoTracking(true)}
-                                    className={`flex-1 py-2 text-xs font-bold transition-colors ${streamParams.isTracking ? 'bg-[#39C5BB] text-white' : 'bg-gray-800 text-gray-500 hover:bg-gray-700'}`}
-                                >
-                                    开启追踪
-                                </button>
-                                <div className="w-[1px] bg-gray-700"></div>
-                                <button
-                                    onClick={() => handleAutoTracking(false)}
-                                    className={`flex-1 py-2 text-xs font-bold transition-colors ${!streamParams.isTracking ? 'bg-gray-700 text-white' : 'bg-gray-800 text-gray-500 hover:bg-gray-700'}`}
-                                >
-                                    停止追踪
-                                </button>
-                            </div>
-                        </div>
+                <div className="w-80 bg-gray-900 border-l border-gray-800 flex flex-col overflow-hidden">
+                    {/* Tab Bar */}
+                    <div className="flex shrink-0 border-b border-gray-800">
+                        <button
+                            onClick={() => setActiveTab(0)}
+                            className={`flex-1 py-3 text-xs font-bold tracking-wide transition-colors border-b-2 ${activeTab === 0 ? 'text-[#39C5BB] border-[#39C5BB]' : 'text-gray-500 border-transparent hover:text-gray-300'}`}
+                        >
+                            控制面板
+                        </button>
+                        <button
+                            onClick={() => setActiveTab(1)}
+                            className={`flex-1 py-3 text-xs font-bold tracking-wide transition-colors border-b-2 ${activeTab === 1 ? 'text-[#39C5BB] border-[#39C5BB]' : 'text-gray-500 border-transparent hover:text-gray-300'}`}
+                        >
+                            MR 工具
+                        </button>
                     </div>
 
-                    {/* 2. Scheme Compare */}
-                    <div className="mb-6 p-4 bg-gray-800/50 rounded-xl border border-gray-700">
-                        <h3 className="text-sm font-bold text-gray-300 mb-3 flex items-center gap-2"><SplitSquareHorizontal size={16} className="text-[#39C5BB]" />方案对比</h3>
-                        <div className="space-y-3">
-                            <div className="grid grid-cols-3 gap-2"><div className="col-span-2"><label className="block text-[10px] text-gray-500 mb-1">Node IP</label><input type="text" placeholder="192.168.x.x" value={streamParams.schemeIp} onChange={(e) => updateStreamParam('schemeIp', e.target.value)} className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-xs text-white focus:border-[#39C5BB] outline-none" /></div><div><label className="block text-[10px] text-gray-500 mb-1">Port</label><input type="text" placeholder="8888" value={streamParams.schemePort} onChange={(e) => updateStreamParam('schemePort', e.target.value)} className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-xs text-white focus:border-[#39C5BB] outline-none" /></div></div>
-
-                            <div className="flex rounded-lg overflow-hidden border border-gray-700 w-full">
-                                <button
-                                    onClick={handleStartCompare}
-                                    className={`flex-1 py-2 text-xs font-bold transition-colors ${streamParams.schemeCompareActive ? 'bg-[#39C5BB] text-white' : 'bg-gray-800 text-gray-500 hover:bg-gray-700'}`}
-                                >
-                                    开启对比
-                                </button>
-                                <div className="w-[1px] bg-gray-700"></div>
-                                <button
-                                    onClick={handleStopCompare}
-                                    className={`flex-1 py-2 text-xs font-bold transition-colors ${!streamParams.schemeCompareActive ? 'bg-gray-700 text-white' : 'bg-gray-800 text-gray-500 hover:bg-gray-700'}`}
-                                >
-                                    关闭对比
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* 3. Realtime Reference */}
-                    <div className="mb-6 p-4 bg-gray-800/50 rounded-xl border border-gray-700">
-                        <h3 className="text-sm font-bold text-gray-300 mb-3 flex items-center gap-2"><ImageIcon size={16} className="text-[#39C5BB]" />实时参照</h3>
-                        <div className="space-y-3">
-                            <div>
-                                <label className="block text-[10px] text-gray-500 mb-1">参照图片目录</label>
-                                <div className="flex gap-2">
-                                    <input type="text" placeholder="C:/Reference/..." value={streamParams.liveRefFolder} onChange={(e) => updateStreamParam('liveRefFolder', e.target.value)} className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-xs text-white focus:border-[#39C5BB] outline-none" />
-                                    <button className="px-2 bg-gray-700 hover:bg-gray-600 rounded text-white border border-gray-600"><FolderOpen size={14} /></button>
+                    {/* Tab 1: 控制面板 */}
+                    {activeTab === 0 && (
+                        <div className="flex-1 flex flex-col p-4 overflow-y-auto custom-scrollbar">
+                            {/* 1. HMD View Tracking */}
+                            <div className="mb-6 p-4 bg-gray-800/50 rounded-xl border border-gray-700">
+                                <h3 className="text-sm font-bold text-gray-300 mb-3 flex items-center gap-2"><Glasses size={16} className="text-[#39C5BB]" />HMD 视角追踪</h3>
+                                <div className="space-y-3">
+                                    <div className="grid grid-cols-3 gap-2">
+                                        <div className="col-span-2">
+                                            <label className="block text-[10px] text-gray-500 mb-1">SCREEN IP</label>
+                                            <input type="text" placeholder="192.168.x.x" value={streamParams.hmdIp} onChange={(e) => updateStreamParam('hmdIp', e.target.value)} className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-xs text-white focus:border-[#39C5BB] outline-none" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-[10px] text-gray-500 mb-1">Port</label>
+                                            <input type="text" placeholder="8888" value={streamParams.hmdPort} onChange={(e) => updateStreamParam('hmdPort', e.target.value)} className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-xs text-white focus:border-[#39C5BB] outline-none" />
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label className="block text-[10px] text-gray-500 mb-1">追踪间隔 (s)</label>
+                                        <input type="text" placeholder="2.0" value={streamParams.trackingInterval} onChange={(e) => updateStreamParam('trackingInterval', e.target.value)} onBlur={() => validateStreamParam('trackingInterval')} className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-xs text-white focus:border-[#39C5BB] outline-none" />
+                                    </div>
+                                    <div>
+                                        <label className="block text-[10px] text-gray-500 mb-1">FOV 倍数 (0.5-10.0)</label>
+                                        <input type="text" placeholder="3.0" value={streamParams.fovMultiplier} onChange={(e) => updateStreamParam('fovMultiplier', e.target.value)} onBlur={() => validateStreamParam('fovMultiplier')} className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-xs text-white focus:border-[#39C5BB] outline-none" />
+                                    </div>
+                                    <div className="flex rounded-lg overflow-hidden border border-gray-700 w-full">
+                                        <button onClick={() => handleAutoTracking(true)} className={`flex-1 py-2 text-xs font-bold transition-colors ${streamParams.isTracking ? 'bg-[#39C5BB] text-white' : 'bg-gray-800 text-gray-500 hover:bg-gray-700'}`}>开启追踪</button>
+                                        <div className="w-[1px] bg-gray-700"></div>
+                                        <button onClick={() => handleAutoTracking(false)} className={`flex-1 py-2 text-xs font-bold transition-colors ${!streamParams.isTracking ? 'bg-gray-700 text-white' : 'bg-gray-800 text-gray-500 hover:bg-gray-700'}`}>停止追踪</button>
+                                    </div>
                                 </div>
                             </div>
 
-                            <div className="flex rounded-lg overflow-hidden border border-gray-700 w-full">
-                                <button
-                                    onClick={() => handleRealtimeReference(true)}
-                                    className={`flex-1 py-2 text-xs font-bold transition-colors ${streamParams.realtimeRefActive ? 'bg-[#39C5BB] text-white' : 'bg-gray-800 text-gray-500 hover:bg-gray-700'}`}
-                                >
-                                    开启参照
-                                </button>
-                                <div className="w-[1px] bg-gray-700"></div>
-                                <button
-                                    onClick={() => handleRealtimeReference(false)}
-                                    className={`flex-1 py-2 text-xs font-bold transition-colors ${!streamParams.realtimeRefActive ? 'bg-gray-700 text-white' : 'bg-gray-800 text-gray-500 hover:bg-gray-700'}`}
-                                >
-                                    关闭参照
-                                </button>
+                            {/* 2. Scheme Compare */}
+                            <div className="mb-6 p-4 bg-gray-800/50 rounded-xl border border-gray-700">
+                                <h3 className="text-sm font-bold text-gray-300 mb-3 flex items-center gap-2"><SplitSquareHorizontal size={16} className="text-[#39C5BB]" />方案对比</h3>
+                                <div className="space-y-3">
+                                    <div className="grid grid-cols-3 gap-2">
+                                        <div className="col-span-2"><label className="block text-[10px] text-gray-500 mb-1">Node IP</label><input type="text" placeholder="192.168.x.x" value={streamParams.schemeIp} onChange={(e) => updateStreamParam('schemeIp', e.target.value)} className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-xs text-white focus:border-[#39C5BB] outline-none" /></div>
+                                        <div><label className="block text-[10px] text-gray-500 mb-1">Port</label><input type="text" placeholder="8888" value={streamParams.schemePort} onChange={(e) => updateStreamParam('schemePort', e.target.value)} className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-xs text-white focus:border-[#39C5BB] outline-none" /></div>
+                                    </div>
+                                    <div className="flex rounded-lg overflow-hidden border border-gray-700 w-full">
+                                        <button onClick={handleStartCompare} className={`flex-1 py-2 text-xs font-bold transition-colors ${streamParams.schemeCompareActive ? 'bg-[#39C5BB] text-white' : 'bg-gray-800 text-gray-500 hover:bg-gray-700'}`}>开启对比</button>
+                                        <div className="w-[1px] bg-gray-700"></div>
+                                        <button onClick={handleStopCompare} className={`flex-1 py-2 text-xs font-bold transition-colors ${!streamParams.schemeCompareActive ? 'bg-gray-700 text-white' : 'bg-gray-800 text-gray-500 hover:bg-gray-700'}`}>关闭对比</button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* 3. Realtime Reference */}
+                            <div className="mb-6 p-4 bg-gray-800/50 rounded-xl border border-gray-700">
+                                <h3 className="text-sm font-bold text-gray-300 mb-3 flex items-center gap-2"><ImageIcon size={16} className="text-[#39C5BB]" />实时参照</h3>
+                                <div className="space-y-3">
+                                    <div>
+                                        <label className="block text-[10px] text-gray-500 mb-1">参照图片目录</label>
+                                        <div className="flex gap-2">
+                                            <input type="text" placeholder="C:/Reference/..." value={streamParams.liveRefFolder} onChange={(e) => updateStreamParam('liveRefFolder', e.target.value)} className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-xs text-white focus:border-[#39C5BB] outline-none" />
+                                            <button className="px-2 bg-gray-700 hover:bg-gray-600 rounded text-white border border-gray-600"><FolderOpen size={14} /></button>
+                                        </div>
+                                    </div>
+                                    <div className="flex rounded-lg overflow-hidden border border-gray-700 w-full">
+                                        <button onClick={() => handleRealtimeReference(true)} className={`flex-1 py-2 text-xs font-bold transition-colors ${streamParams.realtimeRefActive ? 'bg-[#39C5BB] text-white' : 'bg-gray-800 text-gray-500 hover:bg-gray-700'}`}>开启参照</button>
+                                        <div className="w-[1px] bg-gray-700"></div>
+                                        <button onClick={() => handleRealtimeReference(false)} className={`flex-1 py-2 text-xs font-bold transition-colors ${!streamParams.realtimeRefActive ? 'bg-gray-700 text-white' : 'bg-gray-800 text-gray-500 hover:bg-gray-700'}`}>关闭参照</button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="mt-auto pt-4 border-t border-gray-800 space-y-3">
+                                <h3 className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">显示模式</h3>
+                                <div className="grid grid-cols-3 gap-2">
+                                    <button onClick={handleStandardDisplay} className={`py-3 rounded-lg font-bold text-sm flex items-center justify-center gap-2 transition-all ${streamParams.displayMode === 'standard' ? 'text-white shadow-lg' : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white'}`} style={{ backgroundColor: streamParams.displayMode === 'standard' ? THEME_COLOR : '' }}>
+                                        <Monitor size={18} /> 标准
+                                    </button>
+                                    <button onClick={handleEnterXR} className={`py-3 rounded-lg font-bold text-sm flex items-center justify-center gap-2 transition-all ${streamParams.displayMode === 'xr' ? 'text-white shadow-lg' : 'bg-gray-800 border border-gray-700 text-gray-400 hover:bg-gray-700 hover:text-white'}`} style={{ backgroundColor: streamParams.displayMode === 'xr' ? THEME_COLOR : '' }}>
+                                        <Glasses size={18} /> XR
+                                    </button>
+                                    <button onClick={handleEnterMR} className={`py-3 rounded-lg font-bold text-sm flex items-center justify-center gap-2 transition-all ${streamParams.displayMode === 'mr' ? 'text-white shadow-lg' : 'bg-gray-800 border border-gray-700 text-gray-400 hover:bg-gray-700 hover:text-white'}`} style={{ backgroundColor: streamParams.displayMode === 'mr' ? THEME_COLOR : '' }}>
+                                        <Headset size={18} /> MR
+                                    </button>
+                                </div>
                             </div>
                         </div>
-                    </div>
+                    )}
 
-                    <div className="mt-auto pt-4 border-t border-gray-800 space-y-3">
-                        <h3 className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">显示模式</h3>
-                        <div className="grid grid-cols-3 gap-2">
-                            <button
-                                onClick={handleStandardDisplay}
-                                className={`py-3 rounded-lg font-bold text-sm flex items-center justify-center gap-2 transition-all ${streamParams.displayMode === 'standard' ? `text-white shadow-lg` : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white'}`}
-                                style={{ backgroundColor: streamParams.displayMode === 'standard' ? THEME_COLOR : '' }}
-                            >
-                                <Monitor size={18} /> 标准
-                            </button>
+                    {/* Tab 2: MR 工具 */}
+                    {activeTab === 1 && (
+                        <div className="flex-1 flex flex-col p-4 overflow-y-auto custom-scrollbar">
+                            {/* Header */}
+                            <div className="flex items-center justify-between mb-4">
+                                <div className="flex items-center gap-2">
+                                    <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">MR工具菜单</span>
+                                    {isToolsInjected && (
+                                        <div className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#39C5BB]/10 border border-[#39C5BB]/30">
+                                            <Zap size={10} className="text-[#39C5BB]" />
+                                            <span className="text-[10px] font-bold text-[#39C5BB]">已注入</span>
+                                        </div>
+                                    )}
+                                </div>
+                                <button
+                                    onClick={handleResetTools}
+                                    disabled={!isToolsInjected}
+                                    className="text-[10px] px-2 py-1 rounded border border-red-800 text-red-400 bg-red-900/20 hover:bg-red-900/40 transition-all font-bold flex items-center gap-1 disabled:opacity-30 disabled:cursor-not-allowed"
+                                >
+                                    <RotateCcw size={10} /> 清除
+                                </button>
+                            </div>
 
-                            <button
-                                onClick={handleEnterXR}
-                                className={`py-3 rounded-lg font-bold text-sm flex items-center justify-center gap-2 transition-all ${streamParams.displayMode === 'xr' ? `text-white shadow-lg` : 'bg-gray-800 border border-gray-700 text-gray-400 hover:bg-gray-700 hover:text-white'}`}
-                                style={{ backgroundColor: streamParams.displayMode === 'xr' ? THEME_COLOR : '' }}
-                            >
-                                <Glasses size={18} /> XR
-                            </button>
-
-                            <button
-                                onClick={handleEnterMR}
-                                className={`py-3 rounded-lg font-bold text-sm flex items-center justify-center gap-2 transition-all ${streamParams.displayMode === 'mr' ? `text-white shadow-lg` : 'bg-gray-800 border border-gray-700 text-gray-400 hover:bg-gray-700 hover:text-white'}`}
-                                style={{ backgroundColor: streamParams.displayMode === 'mr' ? THEME_COLOR : '' }}
-                            >
-                                <Headset size={18} /> MR
-                            </button>
+                            {/* Tools Grid */}
+                            <div className="grid grid-cols-2 gap-3">
+                                {MR_TOOLS.map(tool => {
+                                    const isActive = activeTool === tool.id;
+                                    return (
+                                        <button
+                                            key={tool.id}
+                                            onClick={() => handleSwitchTool(tool)}
+                                            className={`relative flex flex-col items-center p-4 rounded-xl border transition-all ${
+                                                isActive
+                                                    ? 'border-[#39C5BB] bg-[#39C5BB]/10 shadow-lg shadow-[#39C5BB]/10'
+                                                    : 'border-gray-700 bg-gray-800/50 hover:border-gray-600 hover:bg-gray-800'
+                                            }`}
+                                        >
+                                            {isActive && (
+                                                <div className="absolute top-2 right-2 w-4 h-4 rounded-full bg-[#39C5BB] flex items-center justify-center animate-pulse">
+                                                    <Power size={8} className="text-white" />
+                                                </div>
+                                            )}
+                                            <div className={`w-10 h-10 rounded-lg flex items-center justify-center mb-2 ${isActive ? 'bg-[#39C5BB]/20' : 'bg-gray-700/50'}`}>
+                                                <tool.icon size={20} style={{ color: isActive ? '#39C5BB' : '#9ca3af' }} />
+                                            </div>
+                                            <span className="text-xs font-bold" style={{ color: isActive ? '#39C5BB' : '#d1d5db' }}>
+                                                {tool.name}
+                                            </span>
+                                            <span className="text-[10px] text-center mt-0.5" style={{ color: isActive ? '#6ee7e3' : '#6b7280' }}>
+                                                {isActive ? '当前生效' : tool.description}
+                                            </span>
+                                        </button>
+                                    );
+                                })}
+                            </div>
                         </div>
-                    </div>
+                    )}
                 </div>
             </div>
         </div>
