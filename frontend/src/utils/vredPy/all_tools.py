@@ -71,7 +71,6 @@ else:
     except Exception:
         refObject = None
 
-    noteCount = 0
     try:
         Cloned_ref_obj = findNode("Cloned_ref_obj")
         moveNode(Cloned_ref_obj, Cloned_ref_obj.getParent(), getRootNode())
@@ -457,30 +456,35 @@ else:
     # ------------------------------------------------------------------
     class Notes:
         """
-        标注工具:
-          Right trigger: 放置标注 / 删除模式下删除标注
-          Left trigger:  切换标注样式
-          Left grip:     切换放置模式 (手持 <-> 射线)
-          Right grip:    切换删除模式
-          摇杆上拨:       放大标注
-          摇杆下拨:       缩小标注
+        图形标注工具:
+          Trigger: 默认模式 -> TagAdd_R；再次点击 -> 放置当前标注
+          B:       在 TagAdd_R 模式下循环切换标注样式
+          A:       切换删除模式
         """
+        _NOTE_TEMPLATE_NAMES = [
+            "tag_Move",
+            "tag_AlignCenter",
+            "tag_Smile",
+            "tag_Passed",
+            "tag_Notice",
+            "tag_AlignTo",
+            "tag_Good",
+            "tag_Flag",
+            "tag_Cancel",
+            "tag_MoreCurve",
+        ]
+
         def __init__(self):
             self.isEnabled = False
-            self.activeNode = None
-            self.timer = vrTimer()
-            self.orientationConstraint = None
+            self.deleteNoteIsActive = False
+            self.isAddMode = False
+            self.currentNoteIndex = 0
 
             self.leftController = vrDeviceService.getVRDevice("left-controller")
             self.rightController = vrDeviceService.getVRDevice("right-controller")
             self.leftController.setVisualizationMode(Visualization_ControllerAndHand)
             self.rightController.setVisualizationMode(Visualization_ControllerAndHand)
             vrImmersiveInteractionService.setDefaultInteractionsActive(1)
-
-            padUp = vrdVirtualTouchpadButton('padup', 0.5, 1.0, 330.0, 30.0)
-            padDown = vrdVirtualTouchpadButton('paddown', 0.5, 1.0, 150.0, 210.0)
-            self.rightController.addVirtualButton(padUp, _pad_input)
-            self.rightController.addVirtualButton(padDown, _pad_input)
 
             self.multiButtonPad = vrDeviceService.createInteraction("MultiButtonPadNotes")
             self.multiButtonPad.setSupportedInteractionGroups(["NotesGroup"])
@@ -491,43 +495,179 @@ else:
             teleport.setControllerActionMapping("abort", "left-{}-untouched".format(_pad_input))
             teleport.setControllerActionMapping("execute", "left-{}-pressed".format(_pad_input))
 
-            self.pointer = vrDeviceService.getInteraction("Pointer")
-            self.pointer.addSupportedInteractionGroup("NotesGroup")
-
             self.triggerRightPressed = self.multiButtonPad.createControllerAction("right-trigger-pressed")
-            self.gripPressed = self.multiButtonPad.createControllerAction("right-{}-pressed".format(_grip_input))
-            self.gripReleasedAction = self.multiButtonPad.createControllerAction("right-{}-released".format(_grip_input))
             self.aPressedAction = self.multiButtonPad.createControllerAction("right-a-pressed")
             self.bPressedAction = self.multiButtonPad.createControllerAction("right-b-pressed")
 
-            self.deleteNoteIsActive = False
-            self.grabConstraint = None
+            self.pointer = vrDeviceService.getInteraction("Pointer")
+            self.pointer.addSupportedInteractionGroup("NotesGroup")
 
             self.registry_key = "tool_draw_note"
 
-        def distanceFunc(self):
-            global refObject
-            handPos = getTransformNodeTranslation(self.rightController.getNode(), 1)
-            refObject.setActive(0)
-            intersectionRay = self.rightController.pick()
-            hitpoint = intersectionRay.getPoint()
-            hitNormal = intersectionRay.getNormal()
-            hitNode = intersectionRay.getNode()
-            hitNode = toNode(hitNode.getObjectId())
-            interPosRay = Pnt3f(hitpoint.x(), hitpoint.y(), hitpoint.z())
-            refObject.setActive(1)
+        def _set_controller_choice(self, choice):
+            try:
+                findNode("CtrllrR_UI").fields().setInt32("choice", choice)
+            except Exception:
+                pass
 
-            self.activeNode = hitNode
-            if self.orientationConstraint:
+        def _node_exists(self, node):
+            if not node:
+                return False
+            try:
+                is_null_fn = getattr(node, "isNull", None)
+                if callable(is_null_fn):
+                    return not is_null_fn()
+            except Exception:
+                return False
+            return True
+
+        def _get_note_templates(self):
+            templates = []
+            # 优先从 MR_Stuff 下取模板，避免拿到同名的非模板节点
+            mr_stuff = None
+            try:
+                mr_stuff = findNode("MR_Stuff")
+            except Exception:
+                mr_stuff = None
+
+            if self._node_exists(mr_stuff):
+                for name in self._NOTE_TEMPLATE_NAMES:
+                    child = None
+                    try:
+                        child = mr_stuff.findChild(name)
+                    except Exception:
+                        child = None
+                    if self._node_exists(child):
+                        templates.append(child)
+
+            # 兜底：按名称全局查找
+            if not templates:
+                for name in self._NOTE_TEMPLATE_NAMES:
+                    try:
+                        node = findNode(name)
+                        if self._node_exists(node):
+                            templates.append(node)
+                    except Exception:
+                        pass
+            return templates
+
+        def _sync_tag_icon_switch(self, index):
+            # 精确同步 TagAdd_R/TagAdd/TagIconSwitch
+            tag_switch = None
+            try:
+                tag_add_r = findNode("TagAdd_R")
+                if self._node_exists(tag_add_r):
+                    tag_add = tag_add_r.findChild("TagAdd")
+                    if self._node_exists(tag_add):
+                        tag_switch = tag_add.findChild("TagIconSwitch")
+            except Exception:
+                tag_switch = None
+
+            # 兜底全局查找
+            if not tag_switch:
                 try:
-                    vrConstraintService.deleteConstraint(self.orientationConstraint)
+                    tag_switch = findNode("TagIconSwitch")
+                except Exception:
+                    tag_switch = None
+
+            try:
+                if self._node_exists(tag_switch):
+                    tag_switch.fields().setInt32("choice", index)
+            except Exception:
+                pass
+
+        def _set_note_style(self, index):
+            global refObject
+            templates = self._get_note_templates()
+            if not templates:
+                refObject = None
+                return False
+            self.currentNoteIndex = index % len(templates)
+            refObject = templates[self.currentNoteIndex]
+            self._sync_tag_icon_switch(self.currentNoteIndex)
+            return True
+
+        def _enter_default_mode(self):
+            self.isAddMode = False
+            self.deleteNoteIsActive = False
+            self._set_controller_choice(1)
+
+        def _enter_add_mode(self, reset_style=False):
+            self.deleteNoteIsActive = False
+            self.isAddMode = True
+            if reset_style or not self._set_note_style(self.currentNoteIndex):
+                self._set_note_style(0)
+            self._set_controller_choice(2)
+
+        def _enter_delete_mode(self):
+            self.isAddMode = False
+            self.deleteNoteIsActive = True
+            self._set_controller_choice(3)
+
+        def _get_cloned_note_root(self, node):
+            while node:
+                if not self._node_exists(node):
+                    return None
+                try:
+                    if hasNodeTag(node, 'Cloned Note'):
+                        return node
                 except Exception:
                     pass
-            self.orientationConstraint = vrConstraintService.createOrientationConstraint([self.rightController.getNode()], refObject)
-            setTransformNodeTranslation(refObject, handPos.x(), handPos.y(), handPos.z(), 1)
+                try:
+                    node = node.getParent()
+                except Exception:
+                    return None
+            return None
+
+        def _on_pointer_start(self, action, device):
+            """Pointer interaction callback – used for picking in delete mode."""
+            if not self.deleteNoteIsActive:
+                return
+            try:
+                picked = device.pick().getNode()
+                if not picked or picked.isNull():
+                    return
+                target = self._get_cloned_note_root(picked)
+                if not target:
+                    return
+                node_name = "%s" % target.getName()
+                vrSessionService.sendPython('deleteNode(findNode("' + node_name + '"),True)')
+            except Exception:
+                pass
+
+        def _spawn_current_note(self):
+            global refObject
+            global Cloned_ref_obj
+            templates = self._get_note_templates()
+            if not templates:
+                return
+            try:
+                # 使用当前样式对应模板作为克隆源
+                refObject = templates[self.currentNoteIndex % len(templates)]
+                tag_add_r = findNode("TagAdd_R")
+                if not self._node_exists(tag_add_r):
+                    return
+                node_num = random.randint(0, 1000000)
+                current_position = getTransformNodeTranslation(tag_add_r, True)
+                current_rotation = getTransformNodeRotation(tag_add_r)
+                current_scale = getTransformNodeScale(refObject)
+
+                name_string = "%s" % refObject.getName()
+                pos_string = "%f,%f,%f" % (current_position.x(), current_position.y(), current_position.z())
+                rot_string = "%f,%f,%f" % (current_rotation.x(), current_rotation.y(), current_rotation.z())
+                scale_string = "%f,%f,%f" % (current_scale.x(), current_scale.y(), current_scale.z())
+
+                vrSessionService.sendPython('clonedRef = cloneNode(findNode("' + name_string + '"), False)')
+                vrSessionService.sendPython('clonedRef.setName("' + name_string + '_' + str(node_num) + '")')
+                vrSessionService.sendPython('moveNode(clonedRef, clonedRef.getParent(), getRootNode())')
+                vrSessionService.sendPython('setTransformNodeRotation(clonedRef, ' + rot_string + ')')
+                vrSessionService.sendPython('setTransformNodeTranslation(clonedRef, ' + pos_string + ', True)')
+                vrSessionService.sendPython('setTransformNodeScale(clonedRef, ' + scale_string + ')')
+                vrSessionService.sendPython('addNodeTag(clonedRef, "Cloned Note")')
+            except Exception:
+                pass
 
         def enable(self):
-            global refObject
             self.isEnabled = True
 
             try:
@@ -546,11 +686,9 @@ else:
             self.triggerRightPressed.signal().triggered.connect(self.trigger_right_pressed)
             self.aPressedAction.signal().triggered.connect(self.toggleDeleteMode)
             self.bPressedAction.signal().triggered.connect(self.ChangeNote)
-            self.gripPressed.signal().triggered.connect(self.grabNote)
-            self.gripReleasedAction.signal().triggered.connect(self.releaseNote)
-
-            if refObject:
-                refObject = findNode("MR_Stuff").getChild(0)
+            self.pointer.getControllerAction("start").signal().triggered.connect(self._on_pointer_start)
+            self.currentNoteIndex = 0
+            self._set_note_style(0)
 
             self.newRightCon = findNode("MRcontrollerRight")
             findNode("CtrllrR_UI").fields().setInt32("choice", 1)
@@ -561,14 +699,7 @@ else:
             self.NoteControllerConstraint = vrConstraintService.createParentConstraint(
                 [self.rightController.getNode()], self.newRightCon, False)
 
-            self.deleteNoteIsActive = False
-            self.iconsNotesTrashOff()
-            self.timer.setActive(1)
-            self.timer.connect(self.distanceFunc)
-
-            if refObject:
-                refObject_node = vrNodeService.getNodeFromId(refObject.getID())
-                refObject_node.getParent().setVisibilityFlag(True)
+            self._enter_default_mode()
             print("[AllTools] Notes enabled")
 
         def disable(self):
@@ -595,21 +726,7 @@ else:
             except Exception:
                 pass
             try:
-                self.gripPressed.signal().triggered.disconnect(self.grabNote)
-            except Exception:
-                pass
-            try:
-                self.gripReleasedAction.signal().triggered.disconnect(self.releaseNote)
-            except Exception:
-                pass
-            try:
-                self.timer.setActive(0)
-            except Exception:
-                pass
-            try:
-                if self.orientationConstraint:
-                    vrConstraintService.deleteConstraint(self.orientationConstraint)
-                    self.orientationConstraint = None
+                self.pointer.getControllerAction("start").signal().triggered.disconnect(self._on_pointer_start)
             except Exception:
                 pass
             try:
@@ -627,114 +744,31 @@ else:
                 self.rightController.setVisible(1)
             except Exception:
                 pass
+            self._enter_default_mode()
 
         def trigger_right_pressed(self):
-            global refObject
-            global Cloned_ref_obj
-            nodeNum = random.randint(0, 1000000)
-            if not self.activeNode.getName() == "VRMenuPanel":
-                if self.deleteNoteIsActive:
-                    node = self.activeNode.getParent().getParent()
-                    nodeName = "%s" % node.getName()
-                    if hasNodeTag(node.getParent(), 'Cloned Note'):
-                        vrSessionService.sendPython('deleteNode(findNode("' + nodeName + '"),True)')
-                else:
-                    nameRefObject = refObject.getName()
-                    current_position = getTransformNodeTranslation(refObject, True)
-                    current_rotation = getTransformNodeRotation(refObject)
-                    current_scale = getTransformNodeScale(refObject)
-
-                    nameString = "%s" % nameRefObject
-                    posString = "%f,%f,%f" % (current_position.x(), current_position.y(), current_position.z())
-                    rotString = "%f,%f,%f" % (current_rotation.x(), current_rotation.y(), current_rotation.z())
-                    scaleString = "%f,%f,%f" % (current_scale.x(), current_scale.y(), current_scale.z())
-
-                    vrSessionService.sendPython('clonedRef = cloneNode(findNode("' + nameString + '"), False)')
-                    clonedNewName = nameString + '_' + str(nodeNum)
-                    vrSessionService.sendPython('clonedRef.setName("' + clonedNewName + '")')
-                    vrSessionService.sendPython('moveNode(clonedRef, refObject, Cloned_ref_obj)')
-                    vrSessionService.sendPython('setTransformNodeRotation(clonedRef, ' + rotString + ')')
-                    vrSessionService.sendPython('setTransformNodeTranslation(clonedRef, ' + posString + ', True)')
-                    vrSessionService.sendPython('setTransformNodeScale(clonedRef, ' + scaleString + ')')
-                    vrSessionService.sendPython('addNodeTag(Cloned_ref_obj, "Cloned Note")')
+            if self.deleteNoteIsActive:
+                return  # deletion handled by Pointer interaction callback (_on_pointer_start)
+            if not self.isAddMode:
+                self._enter_add_mode(reset_style=True)
+                return
+            self._spawn_current_note()
+            # 保持添加模式，支持连续Trigger放置
+            self._enter_add_mode(reset_style=False)
 
         def toggleDeleteMode(self):
-            global refObject
-            refObject_node = vrNodeService.getNodeFromId(refObject.getID())
             if not self.deleteNoteIsActive:
-                self.deleteNoteIsActive = True
-                findNode("CtrllrR_UI").fields().setInt32("choice", 3)
-                refObject_node.getParent().setVisibilityFlag(False)
+                self._enter_delete_mode()
             else:
-                self.deleteNoteIsActive = False
-                findNode("CtrllrR_UI").fields().setInt32("choice", 1)
-                refObject_node.getParent().setVisibilityFlag(True)
-
-        def sizeUp(self):
-            global refObject
-            currentsize = getTransformNodeScale(refObject)
-            ref_Parent = vrNodeService.getNodeFromId(refObject.getParent().getID())
-            switch_child = ref_Parent.getChildren()
-            for current_note in switch_child:
-                setTransformNodeScale(current_note, currentsize.x() * 1.2, currentsize.y() * 1.2, currentsize.z() * 1.2)
-
-        def sizeDown(self):
-            global refObject
-            currentsize = getTransformNodeScale(refObject)
-            ref_Parent = vrNodeService.getNodeFromId(refObject.getParent().getID())
-            switch_child = ref_Parent.getChildren()
-            for current_note in switch_child:
-                setTransformNodeScale(current_note, currentsize.x() / 1.2, currentsize.y() / 1.2, currentsize.z() / 1.2)
+                self._enter_default_mode()
 
         def ChangeNote(self):
-            global refObject
-        def ChangeNote(self):
-            global refObject
-            global noteCount
-            _mr_stuff = findNode("MR_Stuff")
-            _tag_nodes = [_mr_stuff.getChild(i) for i in range(_mr_stuff.getNChildren())
-                          if _mr_stuff.getChild(i).getName().startswith("tag_")]
-            if _tag_nodes:
-                index = noteCount % len(_tag_nodes)
-                noteCount += 1
-                refObject = _tag_nodes[index]
-
-        def iconsNotesTrashOn(self):
-            findNode("CtrllrR_UI").fields().setInt32("choice", 3)
-
-        def iconsNotesTrashOff(self):
-            findNode("CtrllrR_UI").fields().setInt32("choice", 1)
-
-        def iconsNotesConstraint(self):
-            findNode("CtrllrR_UI").fields().setInt32("choice", 1)
-
-        def iconsNotesRay(self):
-            findNode("CtrllrR_UI").fields().setInt32("choice", 2)
-
-        def grabNote(self, action=None, device=None):
-            global Cloned_ref_obj
-            right_node = self.rightController.getNode()
-            best, best_dist = None, float('inf')
-            try:
-                for i in range(Cloned_ref_obj.getNChildren()):
-                    child = Cloned_ref_obj.getChild(i)
-                    pos = getTransformNodeTranslation(child, 1)
-                    hand = getTransformNodeTranslation(right_node, 1)
-                    dx = pos.x()-hand.x(); dy = pos.y()-hand.y(); dz = pos.z()-hand.z()
-                    d = math.sqrt(dx*dx+dy*dy+dz*dz)
-                    if d < best_dist:
-                        best_dist, best = d, child
-            except Exception:
-                pass
-            if best:
-                self.grabConstraint = vrConstraintService.createParentConstraint([right_node], best, True)
-                findNode("CtrllrR_UI").fields().setInt32("choice", 4)
-
-        def releaseNote(self, action=None, device=None):
-            if self.grabConstraint:
-                vrConstraintService.deleteConstraint(self.grabConstraint)
-                self.grabConstraint = None
-            findNode("CtrllrR_UI").fields().setInt32("choice", 3 if self.deleteNoteIsActive else 1)
+            if self.deleteNoteIsActive or not self.isAddMode:
+                return
+            templates = self._get_note_templates()
+            if not templates:
+                return
+            self._set_note_style(self.currentNoteIndex + 1)
 
     # ------------------------------------------------------------------
     # SectionTool - 剖面工具
@@ -2777,7 +2811,7 @@ def cleanup_all_tools():
     """完全清除: 禁用所有工具 + 删除脚本创建的所有场景节点 + 重置状态"""
     global _tool_manager, _all_tools_initialized
     global vred_tool_registry
-    global refObject, Cloned_ref_obj, noteCount
+    global refObject, Cloned_ref_obj
 
     # 1. 禁用所有工具
     try:
@@ -2847,7 +2881,6 @@ def cleanup_all_tools():
     try:
         refObject = None
         Cloned_ref_obj = None
-        noteCount = 0
     except Exception:
         pass
 
