@@ -1182,12 +1182,15 @@ else:
     class TurntableTool:
         def __init__(self):
             self.isEnabled = False
-            self.direction = 1
-            self.speed = 1.0
             self.node = None
             self.nodeRefReady = False
-            self.rotating = False
+            self.aHeld = False
             self.currentAngle = 0.0
+            self.originalAngle = 0.0
+            self._sessionOriginalAngleSaved = False
+            self.dragStartX = 0.0
+            self.rotationStartAngle = 0.0
+            self.rotationSensitivity = 0.2   # degrees per mm of controller X movement
             self.timer = vrTimer()
             self.timerConnected = False
             self.newRightCon = None
@@ -1216,12 +1219,9 @@ else:
             self.pointer = vrDeviceService.getInteraction("Pointer")
             self.pointer.addSupportedInteractionGroup("TurntableGroup")
 
-            self.leftTouched = self.multiButtonPad.createControllerAction("right-padleft-touched")
-            self.rightTouched = self.multiButtonPad.createControllerAction("right-padright-touched")
             self.aPressedAction = self.multiButtonPad.createControllerAction("right-a-pressed")
             self.aReleasedAction = self.multiButtonPad.createControllerAction("right-a-released")
             self.bPressedAction = self.multiButtonPad.createControllerAction("right-b-pressed")
-            self.originalAngle = 0.0
 
             self.registry_key = "tool_turntable"
 
@@ -1322,8 +1322,8 @@ else:
             self.aPressedAction.signal().triggered.connect(self.start_rotation)
             self.aReleasedAction.signal().triggered.connect(self.stop_rotation)
             self.bPressedAction.signal().triggered.connect(self.restore_rotation)
-            self.leftTouched.signal().triggered.connect(self.set_counterclockwise)
-            self.rightTouched.signal().triggered.connect(self.set_clockwise)
+
+            self._sessionOriginalAngleSaved = False
 
             self.newRightCon = findNode("MRcontrollerRight")
             findNode("CtrllrR_UI").fields().setInt32("choice", 13)
@@ -1333,11 +1333,6 @@ else:
             setTransformNodeTranslation(self.newRightCon, controllerPos.x(), controllerPos.y(), controllerPos.z(), True)
             self.RotationControllerConstraint = vrConstraintService.createParentConstraint(
                 [self.rightController.getNode()], self.newRightCon, False)
-            if self.node:
-                try:
-                    self.originalAngle = getTransformNodeRotation(self.node).z()
-                except Exception:
-                    self.originalAngle = 0.0
             print("[AllTools] TurntableTool enabled")
 
         def disable(self):
@@ -1361,14 +1356,6 @@ else:
             except Exception:
                 pass
             try:
-                self.leftTouched.signal().triggered.disconnect(self.set_counterclockwise)
-            except Exception:
-                pass
-            try:
-                self.rightTouched.signal().triggered.disconnect(self.set_clockwise)
-            except Exception:
-                pass
-            try:
                 self.rightController.setVisible(1)
             except Exception:
                 pass
@@ -1384,22 +1371,29 @@ else:
             except Exception:
                 pass
 
-        def set_clockwise(self, action=None, device=None):
-            self.direction = 1
-
-        def set_counterclockwise(self, action=None, device=None):
-            self.direction = -1
-
         def restore_rotation(self, action=None, device=None):
-            if self.node:
+            if not self.node:
+                return
+            try:
+                if self.node.isNull():
+                    return
+            except Exception:
+                return
+            try:
+                rot = getTransformNodeRotation(self.node)
+                setTransformNodeRotation(self.node, rot.x(), rot.y(), self.originalAngle)
+                self.currentAngle = self.originalAngle
+            except Exception:
+                pass
+            if self.nodeRefReady:
                 try:
                     rot = getTransformNodeRotation(self.node)
-                    setTransformNodeRotation(self.node, rot.x(), rot.y(), self.originalAngle)
-                    self.currentAngle = self.originalAngle
+                    r = "%f,%f,%f" % (rot.x(), rot.y(), self.originalAngle)
+                    vrSessionService.sendPython('setTransformNodeRotation(nodeRef, ' + r + ')')
                 except Exception:
                     pass
 
-        def start_rotation(self):
+        def start_rotation(self, action=None, device=None):
             self.node = self._resolve_target()
             if not self.node:
                 return
@@ -1409,20 +1403,33 @@ else:
             except Exception:
                 pass
             self._prepare_node_ref()
+            # Save original angle once per enable session (before any rotation)
+            if not self._sessionOriginalAngleSaved:
+                try:
+                    self.originalAngle = getTransformNodeRotation(self.node).z()
+                except Exception:
+                    self.originalAngle = 0.0
+                self._sessionOriginalAngleSaved = True
+            # Capture drag baseline for this press
             try:
-                rot = getTransformNodeRotation(self.node)
-                self.currentAngle = rot.z()
+                ctrl_pos = getTransformNodeTranslation(self.rightController.getNode(), 1)
+                self.dragStartX = ctrl_pos.x()
             except Exception:
-                self.currentAngle = 0.0
-            self.rotating = True
+                self.dragStartX = 0.0
+            try:
+                self.rotationStartAngle = getTransformNodeRotation(self.node).z()
+            except Exception:
+                self.rotationStartAngle = self.currentAngle
+            self.currentAngle = self.rotationStartAngle
+            self.aHeld = True
             self._start_timer()
 
-        def stop_rotation(self):
-            self.rotating = False
+        def stop_rotation(self, action=None, device=None):
+            self.aHeld = False
             self._stop_timer()
 
         def updateRotation(self):
-            if not self.rotating or not self.node:
+            if not self.aHeld or not self.node:
                 return
             try:
                 if self.node.isNull():
@@ -1430,7 +1437,12 @@ else:
                     return
             except Exception:
                 pass
-            self.currentAngle += self.speed * self.direction
+            try:
+                ctrl_pos = getTransformNodeTranslation(self.rightController.getNode(), 1)
+                deltaX = ctrl_pos.x() - self.dragStartX
+            except Exception:
+                return
+            self.currentAngle = self.rotationStartAngle + deltaX * self.rotationSensitivity
             try:
                 rot = getTransformNodeRotation(self.node)
                 setTransformNodeRotation(self.node, rot.x(), rot.y(), self.currentAngle)
