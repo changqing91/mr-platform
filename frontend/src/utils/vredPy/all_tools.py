@@ -131,11 +131,7 @@ else:
             multiButtonPad = vrDeviceService.createInteraction("MultiButtonPadAdjust")
             multiButtonPad.setSupportedInteractionGroups(["AdjustGroup"])
 
-            teleport = vrDeviceService.getInteraction("Teleport")
-            teleport.addSupportedInteractionGroup("AdjustGroup")
-            teleport.setControllerActionMapping("prepare", "left-{}-touched".format(_pad_input))
-            teleport.setControllerActionMapping("abort", "left-{}-untouched".format(_pad_input))
-            teleport.setControllerActionMapping("execute", "left-{}-pressed".format(_pad_input))
+            vrDeviceService.getInteraction("Teleport").addSupportedInteractionGroup("AdjustGroup")
 
             self.pointer = vrDeviceService.getInteraction("Pointer")
             self.pointer.addSupportedInteractionGroup("AdjustGroup")
@@ -583,11 +579,7 @@ else:
             self.multiButtonPad = vrDeviceService.createInteraction("MultiButtonPadNotes")
             self.multiButtonPad.setSupportedInteractionGroups(["NotesGroup"])
 
-            teleport = vrDeviceService.getInteraction("Teleport")
-            teleport.addSupportedInteractionGroup("NotesGroup")
-            teleport.setControllerActionMapping("prepare", "left-{}-touched".format(_pad_input))
-            teleport.setControllerActionMapping("abort", "left-{}-untouched".format(_pad_input))
-            teleport.setControllerActionMapping("execute", "left-{}-pressed".format(_pad_input))
+            vrDeviceService.getInteraction("Teleport").addSupportedInteractionGroup("NotesGroup")
 
             self.triggerRightPressed = self.multiButtonPad.createControllerAction("right-trigger-pressed")
             self.aPressedAction = self.multiButtonPad.createControllerAction("right-a-pressed")
@@ -891,11 +883,7 @@ else:
             multiButtonPadClip = vrDeviceService.createInteraction("MultiButtonPadClip")
             multiButtonPadClip.setSupportedInteractionGroups(["ClipGroup"])
 
-            teleport = vrDeviceService.getInteraction("Teleport")
-            teleport.addSupportedInteractionGroup("ClipGroup")
-            teleport.setControllerActionMapping("prepare", "left-{}-touched".format(_pad_input))
-            teleport.setControllerActionMapping("abort", "left-{}-untouched".format(_pad_input))
-            teleport.setControllerActionMapping("execute", "left-{}-pressed".format(_pad_input))
+            vrDeviceService.getInteraction("Teleport").addSupportedInteractionGroup("ClipGroup")
 
             self.pointer = vrDeviceService.getInteraction("Pointer")
             self.pointer.addSupportedInteractionGroup("ClipGroup")
@@ -1180,11 +1168,7 @@ else:
             self.multiButtonPad = vrDeviceService.createInteraction("MultiButtonPadTurntable")
             self.multiButtonPad.setSupportedInteractionGroups(["TurntableGroup"])
 
-            teleport = vrDeviceService.getInteraction("Teleport")
-            teleport.addSupportedInteractionGroup("TurntableGroup")
-            teleport.setControllerActionMapping("prepare", "left-{}-touched".format(_pad_input))
-            teleport.setControllerActionMapping("abort", "left-{}-untouched".format(_pad_input))
-            teleport.setControllerActionMapping("execute", "left-{}-pressed".format(_pad_input))
+            vrDeviceService.getInteraction("Teleport").addSupportedInteractionGroup("TurntableGroup")
 
             self.pointer = vrDeviceService.getInteraction("Pointer")
             self.pointer.addSupportedInteractionGroup("TurntableGroup")
@@ -1616,11 +1600,7 @@ else:
             self.multiButtonPad = vrDeviceService.createInteraction("MultiButtonPadFlashlight")
             self.multiButtonPad.setSupportedInteractionGroups(["FlashlightGroup"])
 
-            teleport = vrDeviceService.getInteraction("Teleport")
-            teleport.addSupportedInteractionGroup("FlashlightGroup")
-            teleport.setControllerActionMapping("prepare", "left-{}-touched".format(_pad_input))
-            teleport.setControllerActionMapping("abort", "left-{}-untouched".format(_pad_input))
-            teleport.setControllerActionMapping("execute", "left-{}-pressed".format(_pad_input))
+            vrDeviceService.getInteraction("Teleport").addSupportedInteractionGroup("FlashlightGroup")
 
             self.pointer = vrDeviceService.getInteraction("Pointer")
             self.pointer.addSupportedInteractionGroup("FlashlightGroup")
@@ -1884,6 +1864,7 @@ else:
                 self.multi.setSupportedInteractionGroups(["VoiceNotesGroup"])
                 self.pointer = vrDeviceService.getInteraction("Pointer")
                 self.pointer.addSupportedInteractionGroup("VoiceNotesGroup")
+                vrDeviceService.getInteraction("Teleport").addSupportedInteractionGroup("VoiceNotesGroup")
 
                 # ── button actions ──
                 self.aPressedAction = self.multi.createControllerAction("right-a-pressed")
@@ -1947,7 +1928,6 @@ else:
                 self.registry_key = "tool_voice_note"
                 self.newRightCon = None
                 self.voiceControllerConstraint = None
-                self.teleport = None
 
             # ── audio / media ──────────────────────────────────────────────
 
@@ -2586,11 +2566,6 @@ else:
                 vred_tool_registry[self.registry_key] = self
                 self.multi.setSupportedInteractionGroups(["VoiceNotesGroup"])
                 vrDeviceService.setActiveInteractionGroup("VoiceNotesGroup")
-                self.teleport = vrDeviceService.getInteraction("Teleport")
-                self.teleport.addSupportedInteractionGroup("VoiceNotesGroup")
-                self.teleport.setControllerActionMapping("prepare", "left-{}-touched".format(_pad_input))
-                self.teleport.setControllerActionMapping("abort",   "left-{}-untouched".format(_pad_input))
-                self.teleport.setControllerActionMapping("execute",  "left-{}-pressed".format(_pad_input))
                 self.aPressedAction.signal().triggered.connect(self.on_a_pressed)
                 self.aReleasedAction.signal().triggered.connect(self.on_a_released)
                 self.bPressedAction.signal().triggered.connect(self.on_b_pressed)
@@ -2615,12 +2590,6 @@ else:
                 try:
                     if vred_tool_registry.get(self.registry_key) is self:
                         del vred_tool_registry[self.registry_key]
-                except Exception:
-                    pass
-                try:
-                    self.teleport.setControllerActionMapping("prepare", "any-{}-touched".format(_pad_input))
-                    self.teleport.setControllerActionMapping("abort",   "any-{}-untouched".format(_pad_input))
-                    self.teleport.setControllerActionMapping("execute",  "any-{}-pressed".format(_pad_input))
                 except Exception:
                     pass
                 try:
@@ -2759,7 +2728,7 @@ else:
     except Exception as e:
         print("[AllTools] Failed to register VoiceNotes: " + str(e))
 
-    # --- 全局摇杆 Teleport 绑定（左右手柄均适用）---
+    # --- 全局 Teleport 绑定（仅左手柄）---
     try:
         _jump_tele = vrDeviceService.getInteraction("Teleport")
         _jump_tele.setControllerActionMapping("prepare", "any-{}-touched".format(_pad_input))
