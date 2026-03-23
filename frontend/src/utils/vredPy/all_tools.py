@@ -909,6 +909,21 @@ else:
             self.newRightCon = None
             self.ClipControllerConstraint = None
 
+            # grip 飞行模式（与 AdjustTool 一致）
+            self._flyHeld = False
+            self._flyBasePos = None
+            self._flyVelX = 0.0
+            self._flyVelY = 0.0
+            self._flyVelZ = 0.0
+            self.flySpeed = 3.0
+            self._flyAlpha = 0.3
+            self._flyDeadZone = 20.0
+            self._flyMaxStep = 50.0
+            self._gripHeld = False
+            self._GRIP_THRESHOLD = 0.5
+            self._gripTimer = vrTimer()
+            self._gripTimerConnected = False
+
         def _apply_clipping_plane(self):
             try:
                 node = self.newRightCon if self.newRightCon else self.rightController.getNode()
@@ -926,9 +941,70 @@ else:
             except Exception as e:
                 print("[SectionTool] _apply_clipping_plane ERROR: " + str(e))
 
+        def on_grip_pressed(self, action=None, device=None):
+            self._flyHeld = True
+            self._flyDbgFrame = 0
+            try:
+                mat = self.rightController.getTrackingMatrix()
+                col = mat.column(3)
+                self._flyBasePos = (col.x(), col.y(), col.z())
+                print("[Fly][SectionTool][PRESS] base_t=(%.1f,%.1f,%.1f)" % self._flyBasePos)
+            except Exception as e:
+                print("[Fly][SectionTool][PRESS] ERROR: " + str(e))
+                self._flyBasePos = None
+
+        def on_grip_released(self, action=None, device=None):
+            self._flyHeld = False
+            self._flyBasePos = None
+            self._flyVelX = 0.0
+            self._flyVelY = 0.0
+            self._flyVelZ = 0.0
+
+        def _poll_grip(self):
+            try:
+                state = self.rightController.getButtonState("grip")
+                pressed = state.isPressed() or state.getPosition().x() >= self._GRIP_THRESHOLD
+                if pressed and not self._gripHeld:
+                    self._gripHeld = True
+                    self.on_grip_pressed()
+                elif not pressed and self._gripHeld:
+                    self._gripHeld = False
+                    self.on_grip_released()
+            except Exception:
+                pass
+
         def _update_loop(self):
             if self.triggerHeld and self.clipping:
                 self._apply_clipping_plane()
+
+            # --- Grip fly（与 AdjustTool 逻辑一致）---
+            if self._flyHeld and self._flyBasePos is not None:
+                try:
+                    mat = self.rightController.getTrackingMatrix()
+                    col = mat.column(3)
+                    cx, cy, cz = col.x(), col.y(), col.z()
+                    dx = cx - self._flyBasePos[0]
+                    dy = cy - self._flyBasePos[1]
+                    dz = cz - self._flyBasePos[2]
+                    dist = math.sqrt(dx * dx + dy * dy + dz * dz)
+                    self._flyDbgFrame = getattr(self, '_flyDbgFrame', 0) + 1
+                    if self._flyDbgFrame % 30 == 1:
+                        print("[Fly][SectionTool] cur=(%.1f,%.1f,%.1f) base=(%.1f,%.1f,%.1f) dist=%.1f" % (
+                            cx, cy, cz,
+                            self._flyBasePos[0], self._flyBasePos[1], self._flyBasePos[2],
+                            dist))
+                    if dist > self._flyDeadZone:
+                        speed = min((dist - self._flyDeadZone) * self.flySpeed, self._flyMaxStep)
+                        nx, ny, nz = dx / dist, dy / dist, dz / dist
+                        origin = vrDeviceService.getTrackingOrigin()
+                        new_o = QVector3D(
+                            origin.x() - nx * speed,
+                            origin.y() - ny * speed,
+                            origin.z() - nz * speed
+                        )
+                        vrDeviceService.setTrackingOrigin(new_o)
+                except Exception as e:
+                    print("[SectionTool][Fly] ERROR: " + str(e))
 
         def on_trigger_pressed(self, action=None, device=None):
             self.triggerHeld = True
@@ -947,6 +1023,13 @@ else:
                 vrSessionService.sendPython("enableClippingPlane(%d)" % state)
             except Exception:
                 pass
+            if self.clipping:
+                try:
+                    setClippingContourVisualization(0, Vec3f(0, 0, 0))
+                    setClippingPlaneVisualization(0, Vec3f(0, 0, 0))
+                    setClippingGridVisualization(0, Vec3f(0, 0, 0))
+                except Exception:
+                    pass
             print("[SectionTool] clipping=%s" % self.clipping)
 
         def toggle_flipped(self, action=None, device=None):
@@ -974,6 +1057,10 @@ else:
                 pass
             vred_tool_registry[self.registry_key] = self
             setClippingShowManipulator(0)
+            try:
+                setClippingContourVisualization(0, Vec3f(0, 0, 0), 0)
+            except Exception:
+                pass
             vrDeviceService.setActiveInteractionGroup("ClipGroup")
 
             self.triggerRightPressed.signal().triggered.connect(self.on_trigger_pressed)
@@ -985,6 +1072,13 @@ else:
                 self.timer.connect(self._update_loop)
                 self.timerConnected = True
             self.timer.setActive(1)
+
+            # grip 轮询 timer
+            if not self._gripTimerConnected:
+                self._gripTimer.connect(self._poll_grip)
+                self._gripTimerConnected = True
+            self._gripTimer.setActive(1)
+            print("[SectionTool] grip polling timer active")
 
             self.newRightCon = findNode("MRcontrollerRight")
             findNode("CtrllrR_UI").fields().setInt32("choice", 5)
@@ -999,6 +1093,9 @@ else:
         def disable(self):
             self.isEnabled = False
             self.triggerHeld = False
+            self._flyHeld = False
+            self._flyBasePos = None
+            self._gripHeld = False
             try:
                 if vred_tool_registry.get(self.registry_key) is self:
                     del vred_tool_registry[self.registry_key]
@@ -1022,6 +1119,10 @@ else:
                 pass
             try:
                 self.timer.setActive(0)
+            except Exception:
+                pass
+            try:
+                self._gripTimer.setActive(0)
             except Exception:
                 pass
             try:
@@ -1789,18 +1890,12 @@ else:
                 self.aReleasedAction = self.multi.createControllerAction("right-a-released")
                 self.bPressedAction = self.multi.createControllerAction("right-b-pressed")
                 self.bReleasedAction = self.multi.createControllerAction("right-b-released")
-                self.gripPressedAction = self.multi.createControllerAction(
-                    "right-{}-pressed".format(_grip_input))
-                self.gripReleasedAction = self.multi.createControllerAction(
-                    "right-{}-released".format(_grip_input))
-                _grip_alt = 'squeeze' if _grip_input == 'grip' else 'grip'
-                self.gripPressedActionAlt = self.multi.createControllerAction(
-                    "right-{}-pressed".format(_grip_alt))
-                self.gripReleasedActionAlt = self.multi.createControllerAction(
-                    "right-{}-released".format(_grip_alt))
-                print("[VoiceNotes] grip actions: right-{0}-*/released + right-{1}-*/released".format(
-                    _grip_input, _grip_alt))
                 self.triggerPressedAction = self.multi.createControllerAction("right-trigger-pressed")
+
+                # grip 通过 getButtonState 轮询（与 AdjustTool / SectionTool 一致）
+                self._GRIP_THRESHOLD = 0.5
+                self._gripTimer = vrTimer()
+                self._gripTimerConnected = False
 
                 # ── audio ──
                 self._recorder = None
@@ -1833,7 +1928,8 @@ else:
                 self._voice_player_template = None
 
                 # ── drag / touch ──
-                self._grip_held = False
+                self._gripHeld = False    # polling state tracker
+                self._grip_held = False   # drag-in-progress state
                 self._dragging_node = None
                 self._drag_constraint = None
                 self._eraser_held = False
@@ -2407,6 +2503,19 @@ else:
                 else:
                     print("[VoiceNotes] B released → 未达长按阈值，忽略")
 
+            def _poll_grip(self):
+                try:
+                    state = self.rightController.getButtonState("grip")
+                    pressed = state.isPressed() or state.getPosition().x() >= self._GRIP_THRESHOLD
+                    if pressed and not self._gripHeld:
+                        self._gripHeld = True
+                        self.on_grip_pressed()
+                    elif not pressed and self._gripHeld:
+                        self._gripHeld = False
+                        self.on_grip_released()
+                except Exception:
+                    pass
+
             def on_grip_pressed(self, action_obj=None, device_obj=None):
                 if self._grip_held:
                     return
@@ -2416,21 +2525,28 @@ else:
                     except Exception:
                         pass
                     self._drag_constraint = None
-                # Use pick() raycast to find a VNR_ node under the controller pointer
+                # 使用近距离接触检测（与橡皮擦模式一致），不依赖射线命中
                 best_node = None
+                best_dist = VoiceNotes._TOUCH_DIST
                 try:
-                    hit = self.rightController.pick()
-                    if hit and hit.hasHit():
-                        node = hit.getNode()
-                        while node and not node.isNull():
-                            if node.getName().startswith("VNR_"):
+                    ctrl_pos = getTransformNodeTranslation(self.rightController.getNode(), 1)
+                    cx, cy, cz = ctrl_pos.x(), ctrl_pos.y(), ctrl_pos.z()
+                    for node in self._get_all_voice_note_nodes():
+                        try:
+                            p = getTransformNodeTranslation(node, 1)
+                            dx = p.x() - cx
+                            dy = p.y() - cy
+                            dz = p.z() - cz
+                            dist = math.sqrt(dx*dx + dy*dy + dz*dz)
+                            if dist <= best_dist:
+                                best_dist = dist
                                 best_node = node
-                                break
-                            node = node.getParent()
+                        except Exception:
+                            pass
                 except Exception as e:
-                    print("[VoiceNotes] Grip pick failed: " + str(e))
+                    print("[VoiceNotes] Grip proximity check failed: " + str(e))
                 if best_node is None:
-                    print("[VoiceNotes] Grip: 射线未命中可拖动节点")
+                    print("[VoiceNotes] Grip: 范围内无可拖动节点 (TOUCH_DIST=%.1f mm)" % VoiceNotes._TOUCH_DIST)
                     return
                 try:
                     self._drag_constraint = vrConstraintService.createParentConstraint(
@@ -2480,21 +2596,12 @@ else:
                 self.bPressedAction.signal().triggered.connect(self.on_b_pressed)
                 self.bReleasedAction.signal().triggered.connect(self.on_b_released)
                 self.triggerPressedAction.signal().triggered.connect(self.on_trigger_pressed)
-                for act_p, act_r, lbl in [
-                    (self.gripPressedAction,    self.gripReleasedAction,    _grip_input),
-                    (self.gripPressedActionAlt, self.gripReleasedActionAlt,
-                     'squeeze' if _grip_input == 'grip' else 'grip'),
-                ]:
-                    try:
-                        act_p.signal().triggered.connect(self.on_grip_pressed)
-                        print("[VoiceNotes] grip-pressed ('{}') connected".format(lbl))
-                    except Exception as e:
-                        print("[VoiceNotes] grip-pressed ('{}') FAILED: {}".format(lbl, e))
-                    try:
-                        act_r.signal().triggered.connect(self.on_grip_released)
-                        print("[VoiceNotes] grip-released ('{}') connected".format(lbl))
-                    except Exception as e:
-                        print("[VoiceNotes] grip-released ('{}') FAILED: {}".format(lbl, e))
+                # grip 轮询 timer（与 AdjustTool / SectionTool 一致）
+                if not self._gripTimerConnected:
+                    self._gripTimer.connect(self._poll_grip)
+                    self._gripTimerConnected = True
+                self._gripTimer.setActive(1)
+                print("[VoiceNotes] grip polling timer active")
                 self._ensure_voice_player_template()
                 self._activate_voice_controller()
                 print("[AllTools] VoiceNotes enabled (A=录音, B长按=橡皮擦, Grip+射线=移动, Trigger+射线=播放)")
@@ -2536,18 +2643,11 @@ else:
                     self.triggerPressedAction.signal().triggered.disconnect(self.on_trigger_pressed)
                 except Exception:
                     pass
-                for act in (self.gripPressedAction, self.gripPressedActionAlt):
-                    try:
-                        if act:
-                            act.signal().triggered.disconnect(self.on_grip_pressed)
-                    except Exception:
-                        pass
-                for act in (self.gripReleasedAction, self.gripReleasedActionAlt):
-                    try:
-                        if act:
-                            act.signal().triggered.disconnect(self.on_grip_released)
-                    except Exception:
-                        pass
+                try:
+                    self._gripTimer.setActive(0)
+                except Exception:
+                    pass
+                self._gripHeld = False
                 if self._drag_constraint is not None:
                     try:
                         vrConstraintService.deleteConstraint(self._drag_constraint)
