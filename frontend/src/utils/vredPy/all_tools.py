@@ -868,35 +868,25 @@ else:
     # SectionTool - 剖面工具
     # ------------------------------------------------------------------
     class SectionTool:
+        """
+        剖面工具:
+          A:       循环启用 / 禁用截面
+          Trigger: 按住时截面实时跟随手柄位置和朝向（垂直于手柄轴线），松开后停在当前位置
+          B:       切换截面正/反面 (flipped)
+        手柄样式: ClipPositive_R (choice=5)
+        """
         def __init__(self):
             self.isEnabled = False
             self.clipping = False
-            self.gridVis = False
-            self.contourVis = False
-            self.planeVis = False
-            self.constXPressed = False
-            self.constYPressed = False
-            self.constZPressed = False
+            self.flipped = False
+            self.triggerHeld = False
             self.timer = vrTimer()
+            self.timerConnected = False
+
             self.leftController = vrDeviceService.getVRDevice("left-controller")
             self.rightController = vrDeviceService.getVRDevice("right-controller")
             self.leftController.setVisualizationMode(Visualization_ControllerAndHand)
             self.rightController.setVisualizationMode(Visualization_ControllerAndHand)
-
-            padCenter = vrdVirtualTouchpadButton('padcenter', 0.0, 0.5, 0.0, 360.0)
-            padUpperLeft = vrdVirtualTouchpadButton('padupleft', 0.5, 1.0, 270.0, 330.0)
-            padLowerLeft = vrdVirtualTouchpadButton('paddownleft', 0.5, 1.0, 210.0, 270.0)
-            padUp = vrdVirtualTouchpadButton('padup', 0.5, 1.0, 330.0, 30.0)
-            padUpperRight = vrdVirtualTouchpadButton('padupright', 0.5, 1.0, 30.0, 90.0)
-            padLowerRight = vrdVirtualTouchpadButton('paddownright', 0.5, 1.0, 90.0, 150.0)
-            padDown = vrdVirtualTouchpadButton('paddown', 0.5, 1.0, 150.0, 210.0)
-            self.rightController.addVirtualButton(padCenter, _pad_input)
-            self.rightController.addVirtualButton(padUpperLeft, _pad_input)
-            self.rightController.addVirtualButton(padLowerLeft, _pad_input)
-            self.rightController.addVirtualButton(padUp, _pad_input)
-            self.rightController.addVirtualButton(padUpperRight, _pad_input)
-            self.rightController.addVirtualButton(padLowerRight, _pad_input)
-            self.rightController.addVirtualButton(padDown, _pad_input)
 
             multiButtonPadClip = vrDeviceService.createInteraction("MultiButtonPadClip")
             multiButtonPadClip.setSupportedInteractionGroups(["ClipGroup"])
@@ -910,13 +900,6 @@ else:
             self.pointer = vrDeviceService.getInteraction("Pointer")
             self.pointer.addSupportedInteractionGroup("ClipGroup")
 
-            self.leftUpperActionClip = multiButtonPadClip.createControllerAction("right-padupleft-pressed")
-            self.leftDownActionClip = multiButtonPadClip.createControllerAction("right-paddownleft-pressed")
-            self.upActionClip = multiButtonPadClip.createControllerAction("right-padup-pressed")
-            self.downActionClip = multiButtonPadClip.createControllerAction("right-paddown-pressed")
-            self.rightUpperActionClip = multiButtonPadClip.createControllerAction("right-padupright-pressed")
-            self.rightDownActionClip = multiButtonPadClip.createControllerAction("right-paddownright-pressed")
-            self.centerActionClip = multiButtonPadClip.createControllerAction("right-padcenter-pressed")
             self.triggerRightPressed = multiButtonPadClip.createControllerAction("right-trigger-pressed")
             self.triggerRightReleased = multiButtonPadClip.createControllerAction("right-trigger-released")
             self.aPressedAction = multiButtonPadClip.createControllerAction("right-a-pressed")
@@ -925,6 +908,58 @@ else:
             self.registry_key = "tool_section"
             self.newRightCon = None
             self.ClipControllerConstraint = None
+
+        def _apply_clipping_plane(self):
+            try:
+                node = self.newRightCon if self.newRightCon else self.rightController.getNode()
+                icosa = findNode("Icosahedron")
+                pos = getTransformNodeTranslation(icosa, 1)
+                p = "%f,%f,%f" % (pos.x(), pos.y(), pos.z())
+                vrSessionService.sendPython("point = Pnt3f(" + p + ")")
+                vrSessionService.sendPython("setClippingPlanePosition(point)")
+                try:
+                    rot = getTransformNodeRotation(node)
+                    r = "%f,%f,%f" % (rot.x() + 90 - 36.48, rot.y(), rot.z())
+                    vrSessionService.sendPython("setClippingPlaneRotation(" + r + ")")
+                except Exception:
+                    pass
+            except Exception as e:
+                print("[SectionTool] _apply_clipping_plane ERROR: " + str(e))
+
+        def _update_loop(self):
+            if self.triggerHeld and self.clipping:
+                self._apply_clipping_plane()
+
+        def on_trigger_pressed(self, action=None, device=None):
+            self.triggerHeld = True
+            if self.clipping:
+                self._apply_clipping_plane()
+
+        def on_trigger_released(self, action=None, device=None):
+            self.triggerHeld = False
+
+        def toggle_clipping(self, action=None, device=None):
+            """A 键：循环启用/禁用截面。"""
+            self.clipping = not self.clipping
+            state = 1 if self.clipping else 0
+            enableClippingPlane(state)
+            try:
+                vrSessionService.sendPython("enableClippingPlane(%d)" % state)
+            except Exception:
+                pass
+            print("[SectionTool] clipping=%s" % self.clipping)
+
+        def toggle_flipped(self, action=None, device=None):
+            """B 键：切换截面正/反面。"""
+            self.flipped = not self.flipped
+            if self.clipping:
+                try:
+                    cur_pos = getClippingPlanePosition()
+                    cur_normal = getClippingPlaneNormal()
+                    setClippingPlane(cur_pos, cur_normal, self.flipped)
+                except Exception:
+                    pass
+            print("[SectionTool] flipped=%s" % self.flipped)
 
         def enable(self):
             self.isEnabled = True
@@ -941,17 +976,15 @@ else:
             setClippingShowManipulator(0)
             vrDeviceService.setActiveInteractionGroup("ClipGroup")
 
-            self.leftUpperActionClip.signal().triggered.connect(self.GridVis)
-            self.leftDownActionClip.signal().triggered.connect(self.constX)
-            self.upActionClip.signal().triggered.connect(self.PlaneVis)
-            self.downActionClip.signal().triggered.connect(self.constY)
-            self.rightUpperActionClip.signal().triggered.connect(self.ContourVis)
-            self.rightDownActionClip.signal().triggered.connect(self.constZ)
-            self.centerActionClip.signal().triggered.connect(self.ClippingState)
-            self.aPressedAction.signal().triggered.connect(self.ClippingState)
-            self.bPressedAction.signal().triggered.connect(self.toggleClipDir)
-            self.triggerRightPressed.signal().triggered.connect(self.trigger_right_pressed)
-            self.triggerRightReleased.signal().triggered.connect(self.trigger_right_released)
+            self.triggerRightPressed.signal().triggered.connect(self.on_trigger_pressed)
+            self.triggerRightReleased.signal().triggered.connect(self.on_trigger_released)
+            self.aPressedAction.signal().triggered.connect(self.toggle_clipping)
+            self.bPressedAction.signal().triggered.connect(self.toggle_flipped)
+
+            if not self.timerConnected:
+                self.timer.connect(self._update_loop)
+                self.timerConnected = True
+            self.timer.setActive(1)
 
             self.newRightCon = findNode("MRcontrollerRight")
             findNode("CtrllrR_UI").fields().setInt32("choice", 5)
@@ -961,70 +994,34 @@ else:
             setTransformNodeTranslation(self.newRightCon, controllerPos.x(), controllerPos.y(), controllerPos.z(), True)
             self.ClipControllerConstraint = vrConstraintService.createParentConstraint(
                 [self.rightController.getNode()], self.newRightCon, False)
-            try:
-                node = self.newRightCon if self.newRightCon else self.rightController.getNode()
-                self.originalPos = getTransformNodeTranslation(node, 1)
-            except Exception:
-                pass
             print("[AllTools] SectionTool enabled")
 
         def disable(self):
             self.isEnabled = False
+            self.triggerHeld = False
             try:
                 if vred_tool_registry.get(self.registry_key) is self:
                     del vred_tool_registry[self.registry_key]
             except Exception:
                 pass
             try:
-                self.leftUpperActionClip.signal().triggered.disconnect(self.GridVis)
+                self.triggerRightPressed.signal().triggered.disconnect(self.on_trigger_pressed)
             except Exception:
                 pass
             try:
-                self.leftDownActionClip.signal().triggered.disconnect(self.constX)
+                self.triggerRightReleased.signal().triggered.disconnect(self.on_trigger_released)
             except Exception:
                 pass
             try:
-                self.upActionClip.signal().triggered.disconnect(self.PlaneVis)
+                self.aPressedAction.signal().triggered.disconnect(self.toggle_clipping)
             except Exception:
                 pass
             try:
-                self.downActionClip.signal().triggered.disconnect(self.constY)
-            except Exception:
-                pass
-            try:
-                self.rightUpperActionClip.signal().triggered.disconnect(self.ContourVis)
-            except Exception:
-                pass
-            try:
-                self.rightDownActionClip.signal().triggered.disconnect(self.constZ)
-            except Exception:
-                pass
-            try:
-                self.centerActionClip.signal().triggered.disconnect(self.ClippingState)
-            except Exception:
-                pass
-            try:
-                self.aPressedAction.signal().triggered.disconnect(self.ClippingState)
-            except Exception:
-                pass
-            try:
-                self.bPressedAction.signal().triggered.disconnect(self.toggleClipDir)
-            except Exception:
-                pass
-            try:
-                self.triggerRightPressed.signal().triggered.disconnect(self.trigger_right_pressed)
-            except Exception:
-                pass
-            try:
-                self.triggerRightReleased.signal().triggered.disconnect(self.trigger_right_released)
+                self.bPressedAction.signal().triggered.disconnect(self.toggle_flipped)
             except Exception:
                 pass
             try:
                 self.timer.setActive(0)
-            except Exception:
-                pass
-            try:
-                vrDeviceService.setActiveInteractionGroup("Locomotion")
             except Exception:
                 pass
             try:
@@ -1045,228 +1042,6 @@ else:
                 if self.ClipControllerConstraint:
                     vrConstraintService.deleteConstraint(self.ClipControllerConstraint)
                     self.ClipControllerConstraint = None
-            except Exception:
-                pass
-
-        def GridVis(self):
-            if not self.gridVis:
-                try:
-                    setClippingGridVisualization(1, Vec3f(1, 1, 1))
-                except Exception:
-                    pass
-                try:
-                    vrSessionService.sendPython("setClippingGridVisualization(1, Vec3f(1,1,1))")
-                except Exception:
-                    pass
-                self.gridVis = True
-            else:
-                self.gridVis = False
-                try:
-                    setClippingGridVisualization(0, Vec3f(1, 1, 1))
-                except Exception:
-                    pass
-                try:
-                    vrSessionService.sendPython("setClippingGridVisualization(0, Vec3f(1,1,1))")
-                except Exception:
-                    pass
-            if not self.planeVis:
-                try:
-                    setClippingPlaneVisualization(1, Vec3f(0.16, 0.16, 0.28))
-                except Exception:
-                    pass
-                try:
-                    vrSessionService.sendPython("setClippingPlaneVisualization(1, Vec3f(0.16,0.16,0.28))")
-                except Exception:
-                    pass
-                self.planeVis = True
-            else:
-                self.planeVis = False
-                try:
-                    setClippingPlaneVisualization(0, Vec3f(0.16, 0.16, 0.28))
-                except Exception:
-                    pass
-                try:
-                    vrSessionService.sendPython("setClippingPlaneVisualization(0, Vec3f(0.16,0.16,0.28))")
-                except Exception:
-                    pass
-            if not self.contourVis:
-                try:
-                    setClippingContourVisualization(1, Vec3f(0, 0, 0), 5)
-                except Exception:
-                    pass
-                try:
-                    vrSessionService.sendPython("setClippingContourVisualization(1, Vec3f(0,0,0),5)")
-                except Exception:
-                    pass
-                self.contourVis = True
-            else:
-                self.contourVis = False
-                try:
-                    setClippingContourVisualization(0, Vec3f(0, 0, 0), 5)
-                except Exception:
-                    pass
-                try:
-                    vrSessionService.sendPython("setClippingContourVisualization(0, Vec3f(0,0,0),5)")
-                except Exception:
-                    pass
-            if not self.constXPressed:
-                self.constXPressed = True
-                try:
-                    self.clipXConstraintON()
-                except Exception:
-                    pass
-                try:
-                    vrSessionService.sendPython("setClippingPlaneRotation(0,0,90)")
-                except Exception:
-                    pass
-            else:
-                self.constXPressed = False
-                try:
-                    self.clipXConstraintOFF()
-                except Exception:
-                    pass
-
-        def constY(self):
-            if not self.constYPressed:
-                self.constYPressed = True
-                try:
-                    self.clipYConstraintON()
-                except Exception:
-                    pass
-                try:
-                    vrSessionService.sendPython("setClippingPlaneRotation(0,90,0)")
-                except Exception:
-                    pass
-            else:
-                self.constYPressed = False
-                try:
-                    self.clipYConstraintOFF()
-                except Exception:
-                    pass
-
-        def constZ(self):
-            if not self.constZPressed:
-                self.constZPressed = True
-                try:
-                    self.clipZConstraintON()
-                except Exception:
-                    pass
-                try:
-                    vrSessionService.sendPython("setClippingPlaneRotation(90,0,0)")
-                except Exception:
-                    pass
-            else:
-                self.constZPressed = False
-                try:
-                    self.clipZConstraintOFF()
-                except Exception:
-                    pass
-
-        def ClippingState(self):
-            if not self.clipping:
-                enableClippingPlane(1)
-                try:
-                    vrSessionService.sendPython("enableClippingPlane(1)")
-                except Exception:
-                    pass
-                self.clipping = True
-            else:
-                enableClippingPlane(0)
-                try:
-                    vrSessionService.sendPython("enableClippingPlane(0)")
-                except Exception:
-                    pass
-                self.clipping = False
-
-        def trigger_right_pressed(self):
-            if self.clipping:
-                self.timer.setActive(1)
-                self.timer.connect(self.trigger_right_pressed)
-                try:
-                    node = self.newRightCon if self.newRightCon else self.rightController.getNode()
-                except Exception:
-                    node = None
-                if not node:
-                    return
-                self.currentPos = getTransformNodeTranslation(node, 1)
-                if self.constXPressed:
-                    p = "%f,%f,%f" % (self.currentPos.x(), self.originalPos.y(), self.originalPos.z())
-                    vrSessionService.sendPython("point = Pnt3f(" + p + ")")
-                    vrSessionService.sendPython("setClippingPlanePosition(point)")
-                elif self.constYPressed:
-                    p = "%f,%f,%f" % (self.originalPos.x(), self.currentPos.y(), self.originalPos.z())
-                    vrSessionService.sendPython("point = Pnt3f(" + p + ")")
-                    vrSessionService.sendPython("setClippingPlanePosition(point)")
-                elif self.constZPressed:
-                    p = "%f,%f,%f" % (self.originalPos.x(), self.originalPos.y(), self.currentPos.z())
-                    vrSessionService.sendPython("point = Pnt3f(" + p + ")")
-                    vrSessionService.sendPython("setClippingPlanePosition(point)")
-                else:
-                    self.originalPos = getTransformNodeTranslation(node, 1)
-                    p = "%f,%f,%f" % (self.originalPos.x(), self.originalPos.y(), self.originalPos.z())
-                    vrSessionService.sendPython("point = Pnt3f(" + p + ")")
-                    vrSessionService.sendPython("setClippingPlanePosition(point)")
-                    try:
-                        self.originalRot = getTransformNodeRotation(node)
-                        r = "%f,%f,%f" % (self.originalRot.x() + 90, self.originalRot.y(), self.originalRot.z())
-                        vrSessionService.sendPython("setClippingPlaneRotation(" + r + ")")
-                    except Exception:
-                        pass
-
-        def trigger_right_released(self):
-            if self.clipping:
-                self.timer.setActive(0)
-                if self.constXPressed and self.constYPressed:
-                    p = "%f,%f,%f" % (self.currentPos.x(), self.currentPos.y(), self.originalPos.z())
-                    vrSessionService.sendPython("point = Pnt3f(" + p + ")")
-                    vrSessionService.sendPython("setClippingPlanePosition(point)")
-                elif self.constYPressed and self.constZPressed:
-                    p = "%f,%f,%f" % (self.originalPos.x(), self.currentPos.y(), self.currentPos.z())
-                    vrSessionService.sendPython("point = Pnt3f(" + p + ")")
-                    vrSessionService.sendPython("setClippingPlanePosition(point)")
-                elif self.constXPressed and self.constZPressed:
-                    p = "%f,%f,%f" % (self.currentPos.x(), self.originalPos.y(), self.currentPos.z())
-                    vrSessionService.sendPython("point = Pnt3f(" + p + ")")
-                    vrSessionService.sendPython("setClippingPlanePosition(point)")
-                elif self.constXPressed:
-                    p = "%f,%f,%f" % (self.currentPos.x(), self.originalPos.y(), self.originalPos.z())
-                    vrSessionService.sendPython("point = Pnt3f(" + p + ")")
-                    vrSessionService.sendPython("setClippingPlanePosition(point)")
-                elif self.constYPressed:
-                    p = "%f,%f,%f" % (self.originalPos.x(), self.currentPos.y(), self.originalPos.z())
-                    vrSessionService.sendPython("point = Pnt3f(" + p + ")")
-                    vrSessionService.sendPython("setClippingPlanePosition(point)")
-                elif self.constZPressed:
-                    p = "%f,%f,%f" % (self.originalPos.x(), self.originalPos.y(), self.currentPos.z())
-                    vrSessionService.sendPython("point = Pnt3f(" + p + ")")
-                    vrSessionService.sendPython("setClippingPlanePosition(point)")
-                else:
-                    try:
-                        node = self.newRightCon if self.newRightCon else self.rightController.getNode()
-                        self.originalPos = getTransformNodeTranslation(node, 1)
-                    except Exception:
-                        return
-                    p = "%f,%f,%f" % (self.originalPos.x(), self.originalPos.y(), self.originalPos.z())
-                    vrSessionService.sendPython("point = Pnt3f(" + p + ")")
-                    vrSessionService.sendPython("setClippingPlanePosition(point)")
-
-        def clipXConstraintON(self):
-            pass
-        def clipXConstraintOFF(self):
-            pass
-        def clipYConstraintON(self):
-            pass
-        def clipYConstraintOFF(self):
-            pass
-        def clipZConstraintON(self):
-            pass
-        def clipZConstraintOFF(self):
-            pass
-
-        def toggleClipDir(self, action=None, device=None):
-            try:
-                cur = findNode("CtrllrR_UI").fields().getInt32("choice")
-                findNode("CtrllrR_UI").fields().setInt32("choice", 6 if cur == 5 else 5)
             except Exception:
                 pass
 
