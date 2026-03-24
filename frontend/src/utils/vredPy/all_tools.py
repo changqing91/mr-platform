@@ -1564,39 +1564,25 @@ else:
             self._deactivate_measure_controller()
 
     # ------------------------------------------------------------------
-    # FlashlightTool - 手电筒工具 (适配统一 enable/disable 模式)
+    # FlashlightTool - 手电筒工具
+    #   A: 开启手电筒   B: 关闭手电筒
+    #   右手柄样式: Flashlight_R (choice=12)
     # ------------------------------------------------------------------
     class FlashlightTool:
         def __init__(self):
             self.isEnabled = False
             self.registry_key = "tool_flashlight"
-            self.geo = None
-            self.trans = None
-            self.flashlight_handle = None
-            self.on = False
-            self.hand_node = None
-            self.active_controller = None
-            self.is_left_side = False
-            self.visualization_mode = None
-            self.constraint = None
-            self.rightController = None
-            self.newRightCon = None
-            self.flashlightControllerConstraint = None
             self.lightNode = None
             self.lightSceneNode = None
             self.lightOn = False
             self.lightTimer = vrTimer()
             self.lightTimerConnected = False
-            try:
-                self.rightController = vrDeviceService.getVRDevice("right-controller")
-                self.hand_node = self.rightController.getNode()
-                self.active_controller = self.rightController
-            except Exception:
-                self.hand_node = None
-                self.active_controller = None
-                self.rightController = None
+            self.newRightCon = None
+            self.flashlightControllerConstraint = None
 
-            # --- 创建交互组和 trigger 动作 ---
+            self.rightController = vrDeviceService.getVRDevice("right-controller")
+            self.rightController.setVisualizationMode(Visualization_ControllerAndHand)
+
             self.multiButtonPad = vrDeviceService.createInteraction("MultiButtonPadFlashlight")
             self.multiButtonPad.setSupportedInteractionGroups(["FlashlightGroup"])
 
@@ -1605,93 +1591,32 @@ else:
             self.pointer = vrDeviceService.getInteraction("Pointer")
             self.pointer.addSupportedInteractionGroup("FlashlightGroup")
 
-            self.triggerRightPressed = self.multiButtonPad.createControllerAction("right-trigger-pressed")
-
-        def get_geo(self):
-            if self.geo is not None:
-                try:
-                    if self.geo.isValid():
-                        return self.geo
-                except Exception:
-                    pass
-            self.create_geo()
-            return self.geo
-
-        def create_geo(self):
-            try:
-                for node in findNodes("VR_Flashlight"):
-                    node.getParent().subChild(node)
-            except Exception:
-                pass
-            root_node = getInternalRootNode()
-            self.geo = createNode("Transform3D", "VR_Flashlight", root_node, False)
-            self.trans = createNode("Transform3D", "FlashlightPos", self.geo, False)
-            self.geo.setActive(False)
-            try:
-                setIsVRNode(self.trans, True)
-                setIsVRNode(self.geo, True)
-            except Exception:
-                pass
-
-        def update_flashlight(self, device):
-            try:
-                if device.getVisualizationMode() != self.visualization_mode:
-                    self.adjust_flashlight(device)
-                    self.visualization_mode = device.getVisualizationMode()
-            except Exception:
-                pass
-
-        def adjust_flashlight(self, device):
-            try:
-                if device.getVisualizationMode() == 1:
-                    self.set_hand_transform()
-                    if self.flashlight_handle:
-                        self.flashlight_handle.setVisibilityFlag(True)
-                else:
-                    self.set_controller_transform()
-                    if self.flashlight_handle:
-                        self.flashlight_handle.setVisibilityFlag(False)
-            except Exception:
-                pass
-
-        def set_hand_transform(self):
-            if self.is_left_side:
-                setTransformNodeTranslation(self.trans, -17, -5, 60, False)
-                setTransformNodeRotation(self.trans, 180, 10, 0)
-            else:
-                setTransformNodeTranslation(self.trans, 17, -5, 60, False)
-                setTransformNodeRotation(self.trans, 180, -10, 0)
-
-        def set_controller_transform(self):
-            setTransformNodeTranslation(self.trans, 0, -50, 50, False)
-            setTransformNodeRotation(self.trans, 110, 0, 0)
+            self.aPressedAction = self.multiButtonPad.createControllerAction("right-a-pressed")
+            self.bPressedAction = self.multiButtonPad.createControllerAction("right-b-pressed")
 
         def _create_spotlight(self):
-            """创建聚光灯，通过 timer 跟踪手电筒朝向。"""
             if self.lightNode is not None:
                 return
             try:
                 self.lightNode = vrLightService.createLight(
                     "VR_Flashlight_Spot", vrLightTypes.LightType.Spot)
                 self.lightNode.setOn(False)
-                self.lightNode.setIntensity(30000.0)
+                self.lightNode.setIntensity(500.0)
                 self.lightNode.setDiffuseColor(QVector3D(1.0, 0.98, 0.95))
                 self.lightNode.setConeAngle(25.0)
                 self.lightNode.setPenumbraAngle(5.0)
                 self.lightNode.setVisualizationVisible(False)
-            except Exception:
+            except Exception as e:
+                print("[FlashlightTool] _create_spotlight 失败: " + str(e))
                 self.lightNode = None
                 return
-            # 获取灯光在场景图中的节点，用于同步世界变换
             try:
                 self.lightSceneNode = vrNodeService.findNode("VR_Flashlight_Spot")
             except Exception:
                 self.lightSceneNode = None
-            # 启动 timer 持续同步灯光位置和方向
             self._start_light_timer()
 
         def _remove_spotlight(self):
-            """移除聚光灯及其 timer。"""
             self._stop_light_timer()
             try:
                 if self.lightNode:
@@ -1703,15 +1628,37 @@ else:
             self.lightSceneNode = None
             self.lightOn = False
 
+        # 聚光灯相对手柄的局部变换（单位: mm / degree）
+        _LIGHT_LOCAL_TRANSLATION = QVector3D(3.12888, -72.0161, -10.7245)
+        _LIGHT_LOCAL_ROTATION_EULER = QVector3D(-34.617, -2.95854, 2.04049)
+
         def _update_light_transform(self):
-            """Timer 回调：将聚光灯的世界变换同步到手电筒几何体。"""
-            if not self.lightSceneNode or not self.geo:
+            """Timer 回调：将聚光灯姿态同步到手柄，并叠加局部平移/旋转偏移。"""
+            if not self.lightSceneNode:
                 return
             try:
-                worldMatrix = self.geo.getWorldTransform()
-                self.lightSceneNode.setWorldTransform(worldMatrix)
+                node = self.newRightCon if self.newRightCon else self.rightController.getNode()
+                mat = node.getWorldTransform()
+
+                # 先构建局部偏移矩阵，再乘到手柄世界矩阵上
+                local = QMatrix4x4()
+                t = self._LIGHT_LOCAL_TRANSLATION
+                r = self._LIGHT_LOCAL_ROTATION_EULER
+                local.translate(t.x(), t.y(), t.z())
+                local.rotate(r.x(), 1.0, 0.0, 0.0)
+                local.rotate(r.y(), 0.0, 1.0, 0.0)
+                local.rotate(r.z(), 0.0, 0.0, 1.0)
+
+                out = QMatrix4x4(mat)
+                out *= local
+                self.lightSceneNode.setWorldTransform(out)
             except Exception:
-                pass
+                # 降级：直接跟随手柄
+                try:
+                    node = self.newRightCon if self.newRightCon else self.rightController.getNode()
+                    self.lightSceneNode.setWorldTransform(node.getWorldTransform())
+                except Exception:
+                    pass
 
         def _start_light_timer(self):
             self.lightTimer.setActive(0)
@@ -1723,72 +1670,30 @@ else:
         def _stop_light_timer(self):
             self.lightTimer.setActive(0)
 
-        def switch_on_light(self, action=None, device=None):
+        def toggle_light(self, action=None, device=None):
+            """A 键切换手电筒开/关。"""
             if self.lightNode is None:
                 self._create_spotlight()
-            if self.lightNode:
-                self.lightNode.setOn(True)
-                self.lightOn = True
-
-        def switch_off_light(self, action=None, device=None):
-            if self.lightNode:
+            if not self.lightNode:
+                return
+            if self.lightOn:
                 self.lightNode.setOn(False)
                 self.lightOn = False
-
-        def switch_on(self):
-            if self.on:
-                return
-            if not self.hand_node:
-                return
-            self.get_geo().setActive(True)
-            self.on = True
-            self.constraint = vrConstraintService.createParentConstraint([self.hand_node], self.geo, False)
-            try:
-                self.constraint.setVisualizationVisible(False)
-            except Exception:
-                pass
-            if self.active_controller:
-                self.active_controller.signal().moved.connect(self.update_flashlight)
-                self.visualization_mode = self.active_controller.getVisualizationMode()
-                self.adjust_flashlight(self.active_controller)
-            # 创建聚光灯（默认关闭，等待 trigger 打开）
-            self._create_spotlight()
-
-        def switch_off(self):
-            if not self.on:
-                return
-            # 先移除聚光灯
-            self._remove_spotlight()
-            try:
-                self.get_geo().setActive(False)
-            except Exception:
-                pass
-            self.on = False
-            try:
-                if self.constraint:
-                    vrConstraintService.deleteConstraint(self.constraint)
-                    self.constraint = None
-            except Exception:
-                pass
-            if self.active_controller:
-                try:
-                    self.active_controller.signal().moved.disconnect(self.update_flashlight)
-                except Exception:
-                    pass
-
-        def _find_or_load_flashlight_controller(self):
-            return findNode("MRcontrollerRight")
+                print("[FlashlightTool] 手电筒关闭")
+            else:
+                self.lightNode.setOn(True)
+                self.lightOn = True
+                print("[FlashlightTool] 手电筒开启")
 
         def _activate_flashlight_controller(self):
-            self.newRightCon = self._find_or_load_flashlight_controller()
+            self.newRightCon = findNode("MRcontrollerRight")
             controllerPos = getTransformNodeTranslation(self.rightController.getNode(), 1)
             findNode("CtrllrR_UI").fields().setInt32("choice", 12)
             self.rightController.setVisible(0)
             self.newRightCon.setActive(1)
             setTransformNodeTranslation(self.newRightCon, controllerPos.x(), controllerPos.y(), controllerPos.z(), True)
             self.flashlightControllerConstraint = vrConstraintService.createParentConstraint(
-                [self.rightController.getNode()], self.newRightCon, False
-            )
+                [self.rightController.getNode()], self.newRightCon, False)
 
         def _deactivate_flashlight_controller(self):
             try:
@@ -1820,11 +1725,16 @@ else:
                 pass
             vred_tool_registry[self.registry_key] = self
             vrDeviceService.setActiveInteractionGroup("FlashlightGroup")
-            self.aPressedAction.signal().triggered.connect(self.switch_on_light)
-            self.bPressedAction.signal().triggered.connect(self.switch_off_light)
-            self.switch_on()
+            # 只连接 aPressedAction；bPressedAction 在此 VRED 环境中与 A 键共用同一物理信号，
+            # 不连接 bPressedAction 可确保每次 A 键只触发一次 toggle。
+            try:
+                self.aPressedAction.signal().triggered.disconnect(self.toggle_light)
+            except Exception:
+                pass
+            self.aPressedAction.signal().triggered.connect(self.toggle_light)
+            self._create_spotlight()
             self._activate_flashlight_controller()
-            print("[AllTools] FlashlightTool enabled")
+            print("[AllTools] FlashlightTool enabled (A=开启, B=关闭)")
 
         def disable(self):
             self.isEnabled = False
@@ -1834,15 +1744,12 @@ else:
             except Exception:
                 pass
             try:
-                self.aPressedAction.signal().triggered.disconnect(self.switch_on_light)
+                self.aPressedAction.signal().triggered.disconnect(self.toggle_light)
             except Exception:
                 pass
-            try:
-                self.bPressedAction.signal().triggered.disconnect(self.switch_off_light)
-            except Exception:
-                pass
-            self.switch_off()
+            self._remove_spotlight()
             self._deactivate_flashlight_controller()
+            print("[AllTools] FlashlightTool disabled")
 
     # ------------------------------------------------------------------
     # VoiceNotes - 语音标注工具
