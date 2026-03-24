@@ -82,9 +82,112 @@ else:
     # ======================================================================
 
     # ------------------------------------------------------------------
+    # GripFlyMixin - Grip 飞行模式公共 Mixin
+    # ------------------------------------------------------------------
+    class GripFlyMixin:
+        """
+        右手 Grip 飞行模式公共 Mixin。
+        子类 __init__ 中调用 self._fly_init()；
+        enable() 中调用 self._fly_enable()；
+        disable() 中调用 self._fly_disable()；
+        每帧 timer 回调中调用 self._fly_tick()。
+        """
+
+        def _fly_init(self):
+            """初始化飞行模式状态。在子类 __init__ 中调用。"""
+            self._flyHeld = False
+            self._flyBasePos = None
+            self._flyVelX = 0.0
+            self._flyVelY = 0.0
+            self._flyVelZ = 0.0
+            self.flySpeed = 0.35
+            self._flyAccel = 0.015
+            self._flyAlpha = 0.3
+            self._flyDeadZone = 20.0
+            self._flyMaxStep = 45.0
+            self._gripHeld = False
+            self._GRIP_THRESHOLD = 0.5
+            self._gripTimer = vrTimer()
+            self._gripTimerConnected = False
+
+        def _fly_enable(self):
+            """启动 grip 轮询 timer。在子类 enable() 中调用。"""
+            if not self._gripTimerConnected:
+                self._gripTimer.connect(self._poll_grip)
+                self._gripTimerConnected = True
+            self._gripTimer.setActive(1)
+
+        def _fly_disable(self):
+            """重置飞行状态并停止 grip timer。在子类 disable() 中调用。"""
+            self._flyHeld = False
+            self._flyBasePos = None
+            self._gripHeld = False
+            try:
+                self._gripTimer.setActive(0)
+            except Exception:
+                pass
+
+        def on_grip_pressed(self, action=None, device=None):
+            self._flyHeld = True
+            try:
+                mat = self.rightController.getTrackingMatrix()
+                col = mat.column(3)
+                self._flyBasePos = (col.x(), col.y(), col.z())
+            except Exception as e:
+                print("[GripFly][PRESS] ERROR: " + str(e))
+                self._flyBasePos = None
+
+        def on_grip_released(self, action=None, device=None):
+            self._flyHeld = False
+            self._flyBasePos = None
+            self._flyVelX = 0.0
+            self._flyVelY = 0.0
+            self._flyVelZ = 0.0
+
+        def _poll_grip(self):
+            try:
+                state = self.rightController.getButtonState("grip")
+                pressed = state.isPressed() or state.getPosition().x() >= self._GRIP_THRESHOLD
+                if pressed and not self._gripHeld:
+                    self._gripHeld = True
+                    self.on_grip_pressed()
+                elif not pressed and self._gripHeld:
+                    self._gripHeld = False
+                    self.on_grip_released()
+            except Exception:
+                pass
+
+        def _fly_tick(self):
+            """每帧飞行逻辑，在 timer 回调中调用。"""
+            if not (self._flyHeld and self._flyBasePos is not None):
+                return
+            try:
+                mat = self.rightController.getTrackingMatrix()
+                col = mat.column(3)
+                cx, cy, cz = col.x(), col.y(), col.z()
+                dx = cx - self._flyBasePos[0]
+                dy = cy - self._flyBasePos[1]
+                dz = cz - self._flyBasePos[2]
+                dist = math.sqrt(dx * dx + dy * dy + dz * dz)
+                if dist > self._flyDeadZone:
+                    d = dist - self._flyDeadZone
+                    speed = self.flySpeed + d * self._flyAccel + d * d * 0.0006
+                    speed = min(speed, self._flyMaxStep)
+                    nx, ny, nz = dx / dist, dy / dist, dz / dist
+                    origin = vrDeviceService.getTrackingOrigin()
+                    new_o = QVector3D(
+                        origin.x() - nx * speed,
+                        origin.y() - ny * speed,
+                        origin.z() - nz * speed
+                    )
+                    vrDeviceService.setTrackingOrigin(new_o)
+            except Exception as e:
+                print("[GripFly] ERROR: " + str(e))
+
+    # ------------------------------------------------------------------
     # AdjustTool - 地平面移动工具
     # ------------------------------------------------------------------
-    class AdjustTool:
+    class AdjustTool(GripFlyMixin):
         """
         地平面移动工具 (XY 为地平面, Z 为上下)
         - 右手trigger 按住 + 移动控制器: 物体跟随控制器在地平面上移动
@@ -103,15 +206,7 @@ else:
             self.stickRight = False
             self.moveSpeed = 3.0
             self.rotateSpeed = 0.8
-            self._flyHeld = False
-            self._flyBasePos = None
-            self._flyVelX = 0.0
-            self._flyVelY = 0.0
-            self._flyVelZ = 0.0
-            self.flySpeed = 3.0    # 手柄位移放大倍率（可调）
-            self._flyAlpha = 0.3   # EMA 平滑系数
-            self._flyDeadZone = 20.0  # mm，低于此值视为抖动（2mm 太小易被手颤触发）
-            self._flyMaxStep = 50.0  # 单帧最大位移 clamp（防飞出）
+            self._fly_init()
 
             self.leftController = vrDeviceService.getVRDevice("left-controller")
             self.rightController = vrDeviceService.getVRDevice("right-controller")
@@ -144,12 +239,6 @@ else:
             self.padLeftUntouched = multiButtonPad.createControllerAction("right-padleft-untouched")
             self.padRightTouched = multiButtonPad.createControllerAction("right-padright-touched")
             self.padRightUntouched = multiButtonPad.createControllerAction("right-padright-untouched")
-
-            # grip 通过 getButtonState 轮询（OpenXR squeeze 轴，运行时动态注册 action 无效）
-            self._gripHeld = False
-            self._GRIP_THRESHOLD = 0.5
-            self._gripTimer = vrTimer()
-            self._gripTimerConnected = False
 
             self.registry_key = "tool_adjust"
             self.newRightCon = None
@@ -267,39 +356,7 @@ else:
                 self._sync_transform()
                 return
 
-            # --- Grip fly: 以握持起点为摇杆零点，手柄偏移方向即飞行方向 ---
-            # getTrackingMatrix() 返回硬件原始追踪数据，不受 setTrackingOrigin 影响。
-            # _flyBasePos 固定在按下 grip 时的手柄位置（摇杆中心），不随飞行更新。
-            # 只要手柄保持偏离 base 超过死区，就持续飞行；松开 grip 才停止。
-            if self._flyHeld and self._flyBasePos is not None:
-                try:
-                    mat = self.rightController.getTrackingMatrix()
-                    col = mat.column(3)
-                    cx, cy, cz = col.x(), col.y(), col.z()
-                    dx = cx - self._flyBasePos[0]
-                    dy = cy - self._flyBasePos[1]
-                    dz = cz - self._flyBasePos[2]
-                    dist = math.sqrt(dx * dx + dy * dy + dz * dz)
-                    self._flyDbgFrame = getattr(self, '_flyDbgFrame', 0) + 1
-                    if self._flyDbgFrame % 30 == 1:
-                        print("[Fly][DBG] cur_t=(%.1f,%.1f,%.1f)" % (cx, cy, cz))
-                        print("[Fly][DBG] base_t=(%.1f,%.1f,%.1f)" % self._flyBasePos)
-                        print("[Fly][DBG] delta=(%.1f,%.1f,%.1f)  dist=%.1f  deadzone=%.1f" % (dx, dy, dz, dist, self._flyDeadZone))
-                    if dist > self._flyDeadZone:
-                        speed = min((dist - self._flyDeadZone) * self.flySpeed, self._flyMaxStep)
-                        nx, ny, nz = dx / dist, dy / dist, dz / dist
-                        origin = vrDeviceService.getTrackingOrigin()
-                        new_o = QVector3D(
-                            origin.x() - nx * speed,
-                            origin.y() - ny * speed,
-                            origin.z() - nz * speed
-                        )
-                        if self._flyDbgFrame % 30 == 1:
-                            print("[Fly][DBG] MOVE: speed=%.2f dir=(%.3f,%.3f,%.3f)" % (speed, nx, ny, nz))
-                        vrDeviceService.setTrackingOrigin(new_o)
-                        # base 不更新：手柄偏离 base 的量始终代表飞行意图，持续飞行
-                except Exception as e:
-                    print("[AdjustTool][Fly] ERROR: " + str(e))
+            self._fly_tick()
 
             if not self.node:
                 return
@@ -324,41 +381,6 @@ else:
                 moved = True
             if moved:
                 self._sync_transform()
-
-            # (fly logic moved above node guard)
-
-        def on_grip_pressed(self, action=None, device=None):
-            self._flyHeld = True
-            self._flyDbgFrame = 0
-            try:
-                mat = self.rightController.getTrackingMatrix()
-                col = mat.column(3)
-                # 以 tracking Y-Up 坐标作为 base，与 origin 同坐标系
-                self._flyBasePos = (col.x(), col.y(), col.z())
-                print("[Fly][PRESS] base_t=(%.1f,%.1f,%.1f)" % self._flyBasePos)
-            except Exception as e:
-                print("[Fly][PRESS] ERROR: " + str(e))
-                self._flyBasePos = None
-
-        def on_grip_released(self, action=None, device=None):
-            self._flyHeld = False
-            self._flyBasePos = None
-            self._flyVelX = 0.0
-            self._flyVelY = 0.0
-            self._flyVelZ = 0.0
-
-        def _poll_grip(self):
-            try:
-                state = self.rightController.getButtonState("grip")
-                pressed = state.isPressed() or state.getPosition().x() >= self._GRIP_THRESHOLD
-                if pressed and not self._gripHeld:
-                    self._gripHeld = True
-                    self.on_grip_pressed()
-                elif not pressed and self._gripHeld:
-                    self._gripHeld = False
-                    self.on_grip_released()
-            except Exception:
-                pass
 
         def startMove(self, action, device):
             self.node = self.getMovable(device.pick().getNode())
@@ -428,11 +450,7 @@ else:
             self.padRightTouched.signal().triggered.connect(self.on_right_touched)
             self.padRightUntouched.signal().triggered.connect(self.on_right_untouched)
 
-            # grip 轮询 timer
-            if not self._gripTimerConnected:
-                self._gripTimer.connect(self._poll_grip)
-                self._gripTimerConnected = True
-            self._gripTimer.setActive(1)
+            self._fly_enable()
             print("[AdjustTool] grip polling timer active")
 
             if not self.timerConnected:
@@ -459,8 +477,6 @@ else:
                 self.stickBackward = False
                 self.stickLeft = False
                 self.stickRight = False
-                self._flyHeld = False
-                self._flyBasePos = None
             except Exception:
                 pass
             try:
@@ -510,11 +526,7 @@ else:
                 self.padRightUntouched.signal().triggered.disconnect(self.on_right_untouched)
             except Exception:
                 pass
-            try:
-                self._gripTimer.setActive(0)
-                self._gripHeld = False
-            except Exception:
-                pass
+            self._fly_disable()
             try:
                 self.timer.setActive(0)
             except Exception:
@@ -859,7 +871,7 @@ else:
     # ------------------------------------------------------------------
     # SectionTool - 剖面工具
     # ------------------------------------------------------------------
-    class SectionTool:
+    class SectionTool(GripFlyMixin):
         """
         剖面工具:
           A:       循环启用 / 禁用截面
@@ -896,21 +908,7 @@ else:
             self.registry_key = "tool_section"
             self.newRightCon = None
             self.ClipControllerConstraint = None
-
-            # grip 飞行模式（与 AdjustTool 一致）
-            self._flyHeld = False
-            self._flyBasePos = None
-            self._flyVelX = 0.0
-            self._flyVelY = 0.0
-            self._flyVelZ = 0.0
-            self.flySpeed = 3.0
-            self._flyAlpha = 0.3
-            self._flyDeadZone = 20.0
-            self._flyMaxStep = 50.0
-            self._gripHeld = False
-            self._GRIP_THRESHOLD = 0.5
-            self._gripTimer = vrTimer()
-            self._gripTimerConnected = False
+            self._fly_init()
 
         def _apply_clipping_plane(self):
             try:
@@ -929,70 +927,11 @@ else:
             except Exception as e:
                 print("[SectionTool] _apply_clipping_plane ERROR: " + str(e))
 
-        def on_grip_pressed(self, action=None, device=None):
-            self._flyHeld = True
-            self._flyDbgFrame = 0
-            try:
-                mat = self.rightController.getTrackingMatrix()
-                col = mat.column(3)
-                self._flyBasePos = (col.x(), col.y(), col.z())
-                print("[Fly][SectionTool][PRESS] base_t=(%.1f,%.1f,%.1f)" % self._flyBasePos)
-            except Exception as e:
-                print("[Fly][SectionTool][PRESS] ERROR: " + str(e))
-                self._flyBasePos = None
-
-        def on_grip_released(self, action=None, device=None):
-            self._flyHeld = False
-            self._flyBasePos = None
-            self._flyVelX = 0.0
-            self._flyVelY = 0.0
-            self._flyVelZ = 0.0
-
-        def _poll_grip(self):
-            try:
-                state = self.rightController.getButtonState("grip")
-                pressed = state.isPressed() or state.getPosition().x() >= self._GRIP_THRESHOLD
-                if pressed and not self._gripHeld:
-                    self._gripHeld = True
-                    self.on_grip_pressed()
-                elif not pressed and self._gripHeld:
-                    self._gripHeld = False
-                    self.on_grip_released()
-            except Exception:
-                pass
-
         def _update_loop(self):
             if self.triggerHeld and self.clipping:
                 self._apply_clipping_plane()
 
-            # --- Grip fly（与 AdjustTool 逻辑一致）---
-            if self._flyHeld and self._flyBasePos is not None:
-                try:
-                    mat = self.rightController.getTrackingMatrix()
-                    col = mat.column(3)
-                    cx, cy, cz = col.x(), col.y(), col.z()
-                    dx = cx - self._flyBasePos[0]
-                    dy = cy - self._flyBasePos[1]
-                    dz = cz - self._flyBasePos[2]
-                    dist = math.sqrt(dx * dx + dy * dy + dz * dz)
-                    self._flyDbgFrame = getattr(self, '_flyDbgFrame', 0) + 1
-                    if self._flyDbgFrame % 30 == 1:
-                        print("[Fly][SectionTool] cur=(%.1f,%.1f,%.1f) base=(%.1f,%.1f,%.1f) dist=%.1f" % (
-                            cx, cy, cz,
-                            self._flyBasePos[0], self._flyBasePos[1], self._flyBasePos[2],
-                            dist))
-                    if dist > self._flyDeadZone:
-                        speed = min((dist - self._flyDeadZone) * self.flySpeed, self._flyMaxStep)
-                        nx, ny, nz = dx / dist, dy / dist, dz / dist
-                        origin = vrDeviceService.getTrackingOrigin()
-                        new_o = QVector3D(
-                            origin.x() - nx * speed,
-                            origin.y() - ny * speed,
-                            origin.z() - nz * speed
-                        )
-                        vrDeviceService.setTrackingOrigin(new_o)
-                except Exception as e:
-                    print("[SectionTool][Fly] ERROR: " + str(e))
+            self._fly_tick()
 
         def on_trigger_pressed(self, action=None, device=None):
             self.triggerHeld = True
@@ -1061,11 +1000,7 @@ else:
                 self.timerConnected = True
             self.timer.setActive(1)
 
-            # grip 轮询 timer
-            if not self._gripTimerConnected:
-                self._gripTimer.connect(self._poll_grip)
-                self._gripTimerConnected = True
-            self._gripTimer.setActive(1)
+            self._fly_enable()
             print("[SectionTool] grip polling timer active")
 
             self.newRightCon = findNode("MRcontrollerRight")
@@ -1081,9 +1016,6 @@ else:
         def disable(self):
             self.isEnabled = False
             self.triggerHeld = False
-            self._flyHeld = False
-            self._flyBasePos = None
-            self._gripHeld = False
             try:
                 if vred_tool_registry.get(self.registry_key) is self:
                     del vred_tool_registry[self.registry_key]
@@ -1109,10 +1041,7 @@ else:
                 self.timer.setActive(0)
             except Exception:
                 pass
-            try:
-                self._gripTimer.setActive(0)
-            except Exception:
-                pass
+            self._fly_disable()
             try:
                 enableClippingPlane(0)
                 self.clipping = False
@@ -1568,7 +1497,7 @@ else:
     #   A: 开启手电筒   B: 关闭手电筒
     #   右手柄样式: Flashlight_R (choice=12)
     # ------------------------------------------------------------------
-    class FlashlightTool:
+    class FlashlightTool(GripFlyMixin):
         def __init__(self):
             self.isEnabled = False
             self.registry_key = "tool_flashlight"
@@ -1579,6 +1508,9 @@ else:
             self.lightTimerConnected = False
             self.newRightCon = None
             self.flashlightControllerConstraint = None
+
+            # grip 飞行模式（与 AdjustTool 一致）
+            self._fly_init()
 
             self.rightController = vrDeviceService.getVRDevice("right-controller")
             self.rightController.setVisualizationMode(Visualization_ControllerAndHand)
@@ -1635,6 +1567,8 @@ else:
         def _update_light_transform(self):
             """Timer 回调：将聚光灯姿态同步到手柄，并叠加局部平移/旋转偏移。"""
             if not self.lightSceneNode:
+                # 即使光节点不可用，也允许 grip 飞行逻辑继续运行
+                self._fly_tick()
                 return
             try:
                 node = self.newRightCon if self.newRightCon else self.rightController.getNode()
@@ -1659,6 +1593,7 @@ else:
                     self.lightSceneNode.setWorldTransform(node.getWorldTransform())
                 except Exception:
                     pass
+            self._fly_tick()
 
         def _start_light_timer(self):
             self.lightTimer.setActive(0)
@@ -1732,12 +1667,16 @@ else:
             except Exception:
                 pass
             self.aPressedAction.signal().triggered.connect(self.toggle_light)
+
+            self._fly_enable()
+
             self._create_spotlight()
             self._activate_flashlight_controller()
             print("[AllTools] FlashlightTool enabled (A=开启, B=关闭)")
 
         def disable(self):
             self.isEnabled = False
+            self._fly_disable()
             try:
                 if vred_tool_registry.get(self.registry_key) is self:
                     del vred_tool_registry[self.registry_key]
