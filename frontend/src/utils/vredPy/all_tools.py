@@ -67,7 +67,8 @@ else:
 
     # Notes 节点引用
     try:
-        refObject = findNode("MR_Stuff").getChild(0)    # first tag style child (tag_Move)
+        _tagIconSwitch = findNode("TagIconSwitch")
+        refObject = _tagIconSwitch.getChild(0) if _tagIconSwitch else None
     except Exception:
         refObject = None
 
@@ -564,6 +565,20 @@ else:
           A:       切换删除模式
         """
         _NOTE_TEMPLATE_NAMES = [
+            "Move_S",
+            "AlignCenter_S",
+            "Smile_S",
+            "Passed_S",
+            "Notice_S",
+            "AlignTo_S",
+            "Good_S",
+            "Flag_S",
+            "Cancel_S",
+            "MoreCurve_S",
+        ]
+
+        # MR_Stuff 下的克隆素材，与 _NOTE_TEMPLATE_NAMES 索引一一对应
+        _TAG_ASSET_NAMES = [
             "tag_Move",
             "tag_AlignCenter",
             "tag_Smile",
@@ -593,6 +608,17 @@ else:
 
             vrDeviceService.getInteraction("Teleport").addSupportedInteractionGroup("NotesGroup")
 
+            # "Tools Menu" 默认把 B 键映射到 "show"，该路径在 VRED 内部与
+            # right-a-pressed 共用触发通道，导致按 B 时 right-a-pressed 也会触发。
+            # 将 "show" 重映射到 left-y-pressed，并加入 NotesGroup，阻断 B 键的
+            # 意外触发（与 ABKey.py 保持一致）。
+            try:
+                _toolsMenu = vrDeviceService.getInteraction("Tools Menu")
+                _toolsMenu.addSupportedInteractionGroup("NotesGroup")
+                _toolsMenu.setControllerActionMapping("show", "left-y-pressed")
+            except Exception:
+                pass
+
             self.triggerRightPressed = self.multiButtonPad.createControllerAction("right-trigger-pressed")
             self.aPressedAction = self.multiButtonPad.createControllerAction("right-a-pressed")
             self.bPressedAction = self.multiButtonPad.createControllerAction("right-b-pressed")
@@ -601,6 +627,7 @@ else:
             self.pointer.addSupportedInteractionGroup("NotesGroup")
 
             self.registry_key = "tool_draw_note"
+            self.newRightCon = None
 
         def _set_controller_choice(self, choice):
             try:
@@ -619,26 +646,38 @@ else:
                 return False
             return True
 
+        def _get_tag_icon_switch(self):
+            tag_switch = None
+            try:
+                tag_add_r = findNode("TagAdd_R")
+                if self._node_exists(tag_add_r):
+                    tag_add = tag_add_r.findChild("TagAdd")
+                    if self._node_exists(tag_add):
+                        tag_switch = tag_add.findChild("TagIconSwitch")
+            except Exception:
+                tag_switch = None
+
+            if not self._node_exists(tag_switch):
+                try:
+                    tag_switch = findNode("TagIconSwitch")
+                except Exception:
+                    tag_switch = None
+            return tag_switch
+
         def _get_note_templates(self):
             templates = []
-            # 优先从 MR_Stuff 下取模板，避免拿到同名的非模板节点
-            mr_stuff = None
-            try:
-                mr_stuff = findNode("MR_Stuff")
-            except Exception:
-                mr_stuff = None
-
-            if self._node_exists(mr_stuff):
+            tag_switch = self._get_tag_icon_switch()
+            if self._node_exists(tag_switch):
                 for name in self._NOTE_TEMPLATE_NAMES:
                     child = None
                     try:
-                        child = mr_stuff.findChild(name)
+                        child = tag_switch.findChild(name)
                     except Exception:
                         child = None
                     if self._node_exists(child):
                         templates.append(child)
 
-            # 兜底：按名称全局查找
+            # 兜底：按名称全局查找当前手柄图标节点
             if not templates:
                 for name in self._NOTE_TEMPLATE_NAMES:
                     try:
@@ -650,23 +689,7 @@ else:
             return templates
 
         def _sync_tag_icon_switch(self, index):
-            # 精确同步 TagAdd_R/TagAdd/TagIconSwitch
-            tag_switch = None
-            try:
-                tag_add_r = findNode("TagAdd_R")
-                if self._node_exists(tag_add_r):
-                    tag_add = tag_add_r.findChild("TagAdd")
-                    if self._node_exists(tag_add):
-                        tag_switch = tag_add.findChild("TagIconSwitch")
-            except Exception:
-                tag_switch = None
-
-            # 兜底全局查找
-            if not tag_switch:
-                try:
-                    tag_switch = findNode("TagIconSwitch")
-                except Exception:
-                    tag_switch = None
+            tag_switch = self._get_tag_icon_switch()
 
             try:
                 if self._node_exists(tag_switch):
@@ -681,8 +704,8 @@ else:
                 refObject = None
                 return False
             self.currentNoteIndex = index % len(templates)
-            refObject = templates[self.currentNoteIndex]
             self._sync_tag_icon_switch(self.currentNoteIndex)
+            refObject = self._get_note_templates()[self.currentNoteIndex]
             return True
 
         def _enter_default_mode(self):
@@ -734,36 +757,79 @@ else:
                 pass
 
         def _spawn_current_note(self):
-            global refObject
             global Cloned_ref_obj
-            templates = self._get_note_templates()
-            if not templates:
-                return
+            idx = self.currentNoteIndex
+
+            # 1. 从 MR_Stuff 取对应的 tag_xxx 模板（尺寸/材质正确的克隆素材）
+            asset_name = self._TAG_ASSET_NAMES[idx % len(self._TAG_ASSET_NAMES)]
+            tag_node = None
+            # 优先在 MR_Stuff 子树内搜索；VRED findChild 只搜直接子节点，
+            # 改用全局 findNode 作为兜底，tag_xxx 名称在场景中唯一
             try:
-                # 使用当前样式对应模板作为克隆源
-                refObject = templates[self.currentNoteIndex % len(templates)]
-                tag_add_r = findNode("TagAdd_R")
-                if not self._node_exists(tag_add_r):
-                    return
-                node_num = random.randint(0, 1000000)
-                current_position = getTransformNodeTranslation(tag_add_r, True)
-                current_rotation = getTransformNodeRotation(tag_add_r)
-                current_scale = getTransformNodeScale(refObject)
-
-                name_string = "%s" % refObject.getName()
-                pos_string = "%f,%f,%f" % (current_position.x(), current_position.y(), current_position.z())
-                rot_string = "%f,%f,%f" % (current_rotation.x(), current_rotation.y(), current_rotation.z())
-                scale_string = "%f,%f,%f" % (current_scale.x(), current_scale.y(), current_scale.z())
-
-                vrSessionService.sendPython('clonedRef = cloneNode(findNode("' + name_string + '"), False)')
-                vrSessionService.sendPython('clonedRef.setName("' + name_string + '_' + str(node_num) + '")')
-                vrSessionService.sendPython('moveNode(clonedRef, clonedRef.getParent(), getRootNode())')
-                vrSessionService.sendPython('setTransformNodeRotation(clonedRef, ' + rot_string + ')')
-                vrSessionService.sendPython('setTransformNodeTranslation(clonedRef, ' + pos_string + ', True)')
-                vrSessionService.sendPython('setTransformNodeScale(clonedRef, ' + scale_string + ')')
-                vrSessionService.sendPython('addNodeTag(clonedRef, "Cloned Note")')
+                mr_stuff = findNode("MR_Stuff")
+                if self._node_exists(mr_stuff):
+                    # 遍历直接子节点匹配名称
+                    for i in range(mr_stuff.getChildCount()):
+                        child = mr_stuff.getChild(i)
+                        if self._node_exists(child) and child.getName() == asset_name:
+                            tag_node = child
+                            break
             except Exception:
-                pass
+                tag_node = None
+
+            # 全局兜底
+            if not self._node_exists(tag_node):
+                try:
+                    tag_node = findNode(asset_name)
+                except Exception:
+                    tag_node = None
+
+            if not self._node_exists(tag_node):
+                print("[Notes] _spawn_current_note: tag asset not found: %s" % asset_name)
+                return
+
+            # 2. 从 TagIconSwitch 取对应的 xx_S 图标节点，用于获取手柄当前世界位置/朝向
+            icon_node = None
+            templates = self._get_note_templates()
+            if templates:
+                icon_node = templates[idx % len(templates)]
+
+            if not self._node_exists(icon_node):
+                print("[Notes] _spawn_current_note: icon node not found")
+                return
+
+            try:
+                tag_path  = "%s" % getUniquePath(tag_node)
+                icon_path = "%s" % getUniquePath(icon_node)
+                node_num  = random.randint(0, 1000000)
+                clone_name = "%s_%d" % (asset_name, node_num)
+
+                # 优先收归到 Cloned_ref_obj，保证 cleanup 时能统一删除
+                container_path = ""
+                if self._node_exists(Cloned_ref_obj):
+                    try:
+                        container_path = "%s" % getUniquePath(Cloned_ref_obj)
+                    except Exception:
+                        container_path = ""
+
+                vrSessionService.sendPython(
+                    '_tag  = findUniquePath("' + tag_path  + '"); '
+                    '_icon = findUniquePath("' + icon_path + '"); '
+                    '_bb   = _icon.getBoundingBox(); '
+                    '_wpos = [(_bb[0]+_bb[3])/2.0, (_bb[1]+_bb[4])/2.0, (_bb[2]+_bb[5])/2.0]; '
+                    '_wrot = _icon.getWorldRotation(); '
+                    '_cpath = "' + container_path + '"; '
+                    '_container = findUniquePath(_cpath) if _cpath else getRootNode(); '
+                    'clonedRef = cloneNode(_tag, False); '
+                    'clonedRef.setName("' + clone_name + '"); '
+                    'moveNode(clonedRef, clonedRef.getParent(), _container); '
+                    'clonedRef.setWorldTranslation(_wpos[0], _wpos[1], _wpos[2]); '
+                    'clonedRef.setRotation(_wrot[0] + (-66.48), _wrot[1] + (-0.000006), _wrot[2] + 7.61584); '
+                    'addNodeTag(clonedRef, "Cloned Note")'
+                )
+                print("[Notes] spawning %s at icon world transform" % clone_name)
+            except Exception as e:
+                print("[Notes] _spawn_current_note error: %s" % e)
 
         def enable(self):
             self.isEnabled = True
@@ -855,18 +921,21 @@ else:
             self._enter_add_mode(reset_style=False)
 
         def toggleDeleteMode(self):
+            print("345")
             if not self.deleteNoteIsActive:
                 self._enter_delete_mode()
             else:
                 self._enter_default_mode()
 
         def ChangeNote(self):
-            if self.deleteNoteIsActive or not self.isAddMode:
+            if self.deleteNoteIsActive:
                 return
             templates = self._get_note_templates()
             if not templates:
                 return
             self._set_note_style(self.currentNoteIndex + 1)
+            if not self.isAddMode:
+                self._enter_add_mode(reset_style=False)
 
     # ------------------------------------------------------------------
     # SectionTool - 剖面工具
@@ -2574,15 +2643,15 @@ else:
     except Exception as e:
         print("[AllTools] Failed to register VoiceNotes: " + str(e))
 
-    # --- 全局 Teleport 绑定（仅左手柄）---
-    try:
-        _jump_tele = vrDeviceService.getInteraction("Teleport")
-        _jump_tele.setControllerActionMapping("prepare", "any-{}-touched".format(_pad_input))
-        _jump_tele.setControllerActionMapping("abort",   "any-{}-untouched".format(_pad_input))
-        _jump_tele.setControllerActionMapping("execute",  "any-{}-pressed".format(_pad_input))
-        print("[AllTools] 全局 Teleport 已绑定 (any-{})".format(_pad_input))
-    except Exception as e:
-        print("[AllTools] 全局 Teleport 绑定失败: " + str(e))
+    # --- 全局 Teleport 绑定 ---
+    # try:
+    #     _jump_tele = vrDeviceService.getInteraction("Teleport")
+    #     _jump_tele.setControllerActionMapping("prepare", "any-{}-touched".format(_pad_input))
+    #     _jump_tele.setControllerActionMapping("abort",   "any-{}-untouched".format(_pad_input))
+    #     _jump_tele.setControllerActionMapping("execute",  "any-{}-pressed".format(_pad_input))
+    #     print("[AllTools] 全局 Teleport 已绑定 (any-{})".format(_pad_input))
+    # except Exception as e:
+    #     print("[AllTools] 全局 Teleport 绑定失败: " + str(e))
 
     _all_tools_initialized = True
     print("[AllTools] All tools initialized. Use switch_tool(name) to activate.")

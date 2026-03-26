@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
+import LicenseGuard from './components/LicenseGuard';
 import LoginScreen from './components/LoginScreen';
 import { THEME_COLOR } from './constants';
 import { api } from './services/api';
@@ -848,11 +849,17 @@ except Exception as e:
     const pendingCount = Object.keys(pendingLaunches).length;
 
     if (!isLoggedIn) {
-        return <LoginScreen handleLogin={handleLogin} loginForm={loginForm} setLoginForm={setLoginForm} loginError={loginError} />;
+        return (
+            <LicenseGuard>
+                <LoginScreen handleLogin={handleLogin} loginForm={loginForm} setLoginForm={setLoginForm} loginError={loginError} />
+            </LicenseGuard>
+        );
     }
 
     return (
+      <LicenseGuard>
         <div className="flex items-center justify-center h-screen w-screen bg-gray-100 p-4 font-sans select-none relative text-sm text-gray-600">
+
             {/* Notification Toast */}
             <NotificationToast notifications={notifications} />
 
@@ -997,6 +1004,7 @@ except Exception as e:
                 confirmDeleteNode={confirmDeleteNode} 
             />
         </div>
+      </LicenseGuard>
     );
 };
 

@@ -1,22 +1,21 @@
 'use strict';
 
+const { validate, getReasonMessage } = require('./license/validator');
+
 module.exports = {
-  /**
-   * An asynchronous register function that runs before
-   * your application is initialized.
-   *
-   * This gives you an opportunity to extend code.
-   */
   register(/*{ strapi }*/) {},
 
-  /**
-   * An asynchronous bootstrap function that runs before
-   * your application gets started.
-   *
-   * This gives you an opportunity to set up your data model,
-   * run jobs, or perform some special logic.
-   */
   async bootstrap({ strapi }) {
+    // --- 许可证校验 ---
+    const licenseResult = validate();
+    if (licenseResult.valid) {
+      strapi.log.info(`[License] 有效 · 客户: ${licenseResult.customer} · 到期: ${licenseResult.expires_at}`);
+    } else {
+      strapi.log.warn(`[License] 无效: ${getReasonMessage(licenseResult.reason)}`);
+      strapi.log.warn(`[License] 当前机器 ID: ${licenseResult.current_machine_id}`);
+      strapi.log.warn('[License] 系统将启动，但所有 API 请求将被拦截，直到上传有效许可证。');
+    }
+
     try {
       const permissionActions = [
         // Project
