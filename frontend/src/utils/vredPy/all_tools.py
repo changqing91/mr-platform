@@ -2,6 +2,7 @@
 # VRED MR Tools - Unified Script
 # 一次注入所有工具，通过 switch_tool(name) 切换当前生效的工具
 # 可用工具: adjust, draw_note, section, turntable, measure, voice_note, flashlight
+# 全局默认: 左手柄 grip 按住移动 = 牵引漫游（拖拽世界，始终生效）
 # ======================================================================
 
 import os
@@ -2555,6 +2556,79 @@ else:
                 print("[AllTools] VoiceNotes disabled (A=录音, B长按=橡皮擦, Grip+射线=移动, Trigger+射线=播放)")
 
     # ======================================================================
+    # LeftGripTraction - 左手柄 Grip 牵引（全局常驻，不随工具切换）
+    # ======================================================================
+    class LeftGripTraction:
+        """
+        左手柄 Grip 牵引 —— 全局常驻，不随工具切换而开关。
+        按住左手 grip 移动控制器，场景随之平移（反向，放大 TRACTION_SCALE 倍）。
+        参考 fly.py 的 grip0Pressed + isGripPressed 分支实现。
+        """
+        TRACTION_SCALE = 2.0
+        _GRIP_THRESHOLD = 0.5
+
+        def __init__(self):
+            self._held = False
+            self._basePos = None        # 按下时左手柄位置 (x, y, z)
+            self._originBase = None     # 按下时 tracking origin (x, y, z)
+            self._gripHeld = False      # polling 状态
+            self._leftController = vrDeviceService.getVRDevice("left-controller")
+            self._timer = vrTimer()
+            self._timer.connect(self._tick)
+            self._timer.setActive(1)
+            print("[LeftGripTraction] started (left grip = traction)")
+
+        def _tick(self):
+            try:
+                state = self._leftController.getButtonState("grip")
+                pressed = state.isPressed() or state.getPosition().x() >= self._GRIP_THRESHOLD
+                if pressed and not self._gripHeld:
+                    self._gripHeld = True
+                    self._on_pressed()
+                elif not pressed and self._gripHeld:
+                    self._gripHeld = False
+                    self._on_released()
+                if self._held and self._basePos is not None:
+                    self._do_traction()
+            except Exception as e:
+                print("[LeftGripTraction] tick ERROR: " + str(e))
+
+        def _on_pressed(self):
+            try:
+                mat = self._leftController.getTrackingMatrix()
+                col = mat.column(3)
+                self._basePos = (col.x(), col.y(), col.z())
+                origin = vrDeviceService.getTrackingOrigin()
+                self._originBase = (origin.x(), origin.y(), origin.z())
+                self._held = True
+                print("[LeftGripTraction] grip pressed")
+            except Exception as e:
+                print("[LeftGripTraction][PRESS] ERROR: " + str(e))
+                self._basePos = None
+                self._originBase = None
+
+        def _on_released(self):
+            self._held = False
+            self._basePos = None
+            self._originBase = None
+            print("[LeftGripTraction] grip released")
+
+        def _do_traction(self):
+            try:
+                mat = self._leftController.getTrackingMatrix()
+                col = mat.column(3)
+                dx = col.x() - self._basePos[0]
+                dy = col.y() - self._basePos[1]
+                dz = col.z() - self._basePos[2]
+                vrDeviceService.setTrackingOrigin(QVector3D(
+                    self._originBase[0] - self.TRACTION_SCALE * dx,
+                    self._originBase[1] - self.TRACTION_SCALE * dy,
+                    self._originBase[2] - self.TRACTION_SCALE * dz,
+                ))
+            except Exception as e:
+                print("[LeftGripTraction] ERROR: " + str(e))
+
+    # ======================================================================
     # 工具管理器 + 全局 API
     # ======================================================================
     class _ToolManager:
@@ -2642,6 +2716,13 @@ else:
         print("[AllTools] VoiceNotes registered")
     except Exception as e:
         print("[AllTools] Failed to register VoiceNotes: " + str(e))
+
+    # --- 左手柄 Grip 牵引（全局常驻）---
+    global _left_grip_traction
+    try:
+        _left_grip_traction = LeftGripTraction()
+    except Exception as e:
+        print("[AllTools] Failed to start LeftGripTraction: " + str(e))
 
     # --- 全局 Teleport 绑定 ---
     # try:
