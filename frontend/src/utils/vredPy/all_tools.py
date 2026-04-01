@@ -1515,8 +1515,8 @@ else:
             controllerPos = getTransformNodeTranslation(self.rightController.getNode(), 1)
             findNode("CtrllrR_UI").fields().setInt32("choice", 14)
             self.rightController.setVisible(0)
-            self.rightController.setEnabled(0)
             self.newRightCon.setActive(1)
+            setTransformNodeTranslation(self.newRightCon, controllerPos.x(), controllerPos.y(), controllerPos.z(), True)
             self.measureControllerConstraint = vrConstraintService.createParentConstraint(
                 [self.rightController.getNode()], self.newRightCon, False
             )
@@ -1535,10 +1535,6 @@ else:
                 pass
             try:
                 self.rightController.setVisible(1)
-            except Exception:
-                pass
-            try:
-                self.rightController.setEnabled(1)
             except Exception:
                 pass
 
