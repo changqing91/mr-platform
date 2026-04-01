@@ -1506,6 +1506,7 @@ else:
             self.rightController = vrDeviceService.getVRDevice("right-controller")
             self.newRightCon = None
             self.measureControllerConstraint = None
+            self._measurement_shown = False
 
         def _find_or_load_measure_controller(self):
             return findNode("MRcontrollerRight")
@@ -1561,6 +1562,7 @@ else:
         def switchOn(self):
             if not self.on:
                 self.point1Selected = False
+                self._measurement_shown = False
                 try:
                     self.pointer = vrDeviceService.getInteraction("Pointer")
                     self.executeAction = self.pointer.getControllerAction("execute")
@@ -1590,6 +1592,11 @@ else:
                     return
             except Exception:
                 pass
+            if self._measurement_shown:
+                self.removeMeasurement()
+                self._measurement_shown = False
+                self.point1Selected = False
+                return
             if not self.point1Selected:
                 self.point1Selected = True
                 try:
@@ -1598,7 +1605,6 @@ else:
                 except Exception:
                     self.node1 = None
                     self.point1 = None
-                self.removeMeasurement()
             else:
                 self.point1Selected = False
                 try:
@@ -1608,6 +1614,7 @@ else:
                     self.node2 = None
                     self.point2 = None
                 self.createMeasurement()
+                self._measurement_shown = True
 
         def createMeasurement(self):
             try:
