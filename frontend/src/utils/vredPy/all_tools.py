@@ -798,7 +798,7 @@ else:
                     [self.rightController.getNode()], best_node, False)
                 self._grip_held = True
                 self._dragging_node = best_node
-                self._set_controller_choice(10)
+                self._set_controller_choice(4)  # TagMove_R
                 print("[Notes] Grip → 开始拖动: " + best_node.getName())
             except Exception as e:
                 print("[Notes] Grip → createParentConstraint 失败: " + str(e))
@@ -1851,103 +1851,159 @@ else:
     # VoiceNotes - 语音标注工具
     # ------------------------------------------------------------------
     class VoiceNotes:
-            _TOUCH_DIST = 150.0      # mm — controller must be within this distance to trigger playback
-            _FORWARD_OFFSET = 200.0  # mm — how far in front of the controller a new note is placed
+        _TOUCH_DIST = 150.0      # mm — controller must be within this distance to trigger playback
+        _FORWARD_OFFSET = 200.0  # mm — how far in front of the controller a new note is placed
 
-            def __init__(self):
-                # ── VRED devices ──
-                self.leftController = vrDeviceService.getVRDevice("left-controller")
-                self.rightController = vrDeviceService.getVRDevice("right-controller")
-                self.leftController.setVisualizationMode(Visualization_ControllerAndHand)
-                self.rightController.setVisualizationMode(Visualization_ControllerAndHand)
-                vrImmersiveInteractionService.setDefaultInteractionsActive(1)
+        def __init__(self):
+            # ── VRED devices ──
+            self.leftController = vrDeviceService.getVRDevice("left-controller")
+            self.rightController = vrDeviceService.getVRDevice("right-controller")
+            self.leftController.setVisualizationMode(Visualization_ControllerAndHand)
+            self.rightController.setVisualizationMode(Visualization_ControllerAndHand)
+            vrImmersiveInteractionService.setDefaultInteractionsActive(1)
 
-                # ── interaction group ──
-                self.multi = vrDeviceService.createInteraction("MultiButtonPadVoice")
-                self.multi.setSupportedInteractionGroups(["VoiceNotesGroup"])
-                self.pointer = vrDeviceService.getInteraction("Pointer")
-                self.pointer.addSupportedInteractionGroup("VoiceNotesGroup")
-                vrDeviceService.getInteraction("Teleport").addSupportedInteractionGroup("VoiceNotesGroup")
+            # ── interaction group ──
+            self.multi = vrDeviceService.createInteraction("MultiButtonPadVoice")
+            self.multi.setSupportedInteractionGroups(["VoiceNotesGroup"])
+            self.pointer = vrDeviceService.getInteraction("Pointer")
+            self.pointer.addSupportedInteractionGroup("VoiceNotesGroup")
+            vrDeviceService.getInteraction("Teleport").addSupportedInteractionGroup("VoiceNotesGroup")
 
-                # ── button actions ──
-                self.aPressedAction = self.multi.createControllerAction("right-a-pressed")
-                self.aReleasedAction = self.multi.createControllerAction("right-a-released")
-                self.bPressedAction = self.multi.createControllerAction("right-b-pressed")
-                self.bReleasedAction = self.multi.createControllerAction("right-b-released")
-                self.triggerPressedAction = self.multi.createControllerAction("right-trigger-pressed")
+            # ── button actions ──
+            self.aPressedAction = self.multi.createControllerAction("right-a-pressed")
+            self.aReleasedAction = self.multi.createControllerAction("right-a-released")
+            self.bPressedAction = self.multi.createControllerAction("right-b-pressed")
+            self.bReleasedAction = self.multi.createControllerAction("right-b-released")
+            self.triggerPressedAction = self.multi.createControllerAction("right-trigger-pressed")
 
-                # grip 通过 getButtonState 轮询（与 AdjustTool / SectionTool 一致）
-                self._GRIP_THRESHOLD = 0.5
-                self._gripTimer = vrTimer()
-                self._gripTimerConnected = False
+            # grip 通过 getButtonState 轮询（与 AdjustTool / SectionTool 一致）
+            self._GRIP_THRESHOLD = 0.5
+            self._gripTimer = vrTimer()
+            self._gripTimerConnected = False
 
-                # ── audio ──
-                self._recorder = None
-                self._player = None
-                self._audio_input = None
-                self._audio_output = None
-                self._capture_session = None
+            # ── audio ──
+            self._recorder = None
+            self._player = None
+            self._audio_input = None
+            self._audio_output = None
+            self._capture_session = None
 
-                # ── recording state ──
-                self._is_recording = False
-                self._current_rect = None
-                self._current_annotation = None
-                self._current_audio_path = None
-                self._current_label = None
-                self._last_audio_path = None
-                self._last_rect = None
+            # ── recording state ──
+            self._is_recording = False
+            self._current_rect = None
+            self._current_annotation = None
+            self._current_audio_path = None
+            self._current_label = None
+            self._last_audio_path = None
+            self._last_rect = None
 
-                # ── annotation data ──
-                self._rect_audio_paths = {}   # key → wav path
-                self._rect_base_scales = {}   # key → QVector3D base scale
-                self._rect_annotations = {}   # key → vrAnnotation
-                self._rect_labels = {}        # key → display label
-                self._voice_note_nodes = {}   # key → scene node
+            # ── annotation data ──
+            self._rect_audio_paths = {}   # key → wav path
+            self._rect_base_scales = {}   # key → QVector3D base scale
+            self._rect_annotations = {}   # key → vrAnnotation
+            self._rect_labels = {}        # key → display label
+            self._voice_note_nodes = {}   # key → scene node
 
-                # ── hover ──
-                self._hover_rect = None
-                self._hover_scale = 1.2
+            # ── hover ──
+            self._hover_rect = None
+            self._hover_scale = 1.2
 
-                # ── template ──
-                self._voice_player_template = None
+            # ── template ──
+            self._voice_player_template = None
 
-                # ── drag / touch ──
-                self._gripHeld = False    # polling state tracker
-                self._grip_held = False   # drag-in-progress state
-                self._dragging_node = None
-                self._drag_constraint = None
-                self._eraser_held = False
-                self._b_down = False
-                self._bTimer = QtCore.QTimer()
-                self._bTimer.setSingleShot(True)
-                self._bTimer.setInterval(500)
-                self._bTimer.timeout.connect(self._activate_eraser)
-                self._eraser_in_range = set()
-                self._eraserTimer = vrTimer()
-                self._eraserTimerConnected = False
+            # ── drag / touch ──
+            self._gripHeld = False    # polling state tracker
+            self._grip_held = False   # drag-in-progress state
+            self._dragging_node = None
+            self._drag_constraint = None
+            self._eraser_held = False
+            self._b_down = False
+            self._bTimer = QtCore.QTimer()
+            self._bTimer.setSingleShot(True)
+            self._bTimer.setInterval(500)
+            self._bTimer.timeout.connect(self._activate_eraser)
+            self._eraser_in_range = set()
+            self._eraserTimer = vrTimer()
+            self._eraserTimerConnected = False
 
-                # ── misc ──
-                self.isEnabled = False
-                self.registry_key = "tool_voice_note"
-                self.newRightCon = None
-                self.voiceControllerConstraint = None
+            # ── misc ──
+            self.isEnabled = False
+            self.registry_key = "tool_voice_note"
+            self.newRightCon = None
+            self.voiceControllerConstraint = None
 
-            # ── audio / media ──────────────────────────────────────────────
+        # ── audio / media ──────────────────────────────────────────────
 
-            def _ensure_recorder(self):
-                if self._recorder is not None:
-                    return self._recorder
-                self._audio_input = QtMultimedia.QAudioInput()
-                try:
-                    inputs = QtMultimedia.QMediaDevices.audioInputs()
-                    preferred = os.getenv("VOICE_NOTE_AUDIO_INPUT", "").strip().lower()
-                    chosen = None
-                    keywords = [
-                        "alvr", "virtual audio", "virtual-audio", "virtualaudio",
-                        "audio cable", "virtual audio cable", "cable", "vb-audio", "vac",
-                        "microphone", "mic", "virtual desktop", "virtual desktop audio"
-                    ]
+        def _ensure_recorder(self):
+            if self._recorder is not None:
+                return self._recorder
+            self._audio_input = QtMultimedia.QAudioInput()
+            try:
+                inputs = QtMultimedia.QMediaDevices.audioInputs()
+                preferred = os.getenv("VOICE_NOTE_AUDIO_INPUT", "").strip().lower()
+                chosen = None
+                keywords = [
+                    "alvr", "virtual audio", "virtual-audio", "virtualaudio",
+                    "audio cable", "virtual audio cable", "cable", "vb-audio", "vac",
+                    "microphone", "mic", "virtual desktop", "virtual desktop audio"
+                ]
+                for dev in inputs:
+                    try:
+                        name = ""
+                        try:
+                            name = dev.description()
+                        except Exception:
+                            pass
+                        if not name:
+                            try:
+                                name = dev.deviceName()
+                            except Exception:
+                                name = ""
+                        lowered = name.lower() if name else ""
+                        if preferred and lowered and preferred in lowered:
+                            chosen = dev
+                            break
+                        if lowered and any(k in lowered for k in keywords):
+                            chosen = dev
+                            break
+                    except Exception:
+                        pass
+                if chosen is None:
                     for dev in inputs:
+                        try:
+                            if dev.isDefault():
+                                chosen = dev
+                                break
+                        except Exception:
+                            pass
+                if chosen is None and len(inputs) == 1:
+                    chosen = inputs[0]
+                if chosen:
+                    try:
+                        self._audio_input.setDevice(chosen)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            self._recorder = QtMultimedia.QMediaRecorder()
+            self._capture_session = QtMultimedia.QMediaCaptureSession()
+            self._capture_session.setAudioInput(self._audio_input)
+            self._capture_session.setRecorder(self._recorder)
+            return self._recorder
+
+        def _ensure_player(self):
+            if self._player is not None:
+                return self._player
+            self._player = QtMultimedia.QMediaPlayer()
+            self._audio_output = QtMultimedia.QAudioOutput()
+            try:
+                outputs = QtMultimedia.QMediaDevices.audioOutputs()
+                preferred = os.getenv("VOICE_NOTE_AUDIO_DEVICE", "").strip().lower()
+                chosen = None
+                chosen_name = ""
+                # 仅通过环境变量或系统默认选择设备，不做关键字匹配
+                if preferred:
+                    for dev in outputs:
                         try:
                             name = ""
                             try:
@@ -1959,640 +2015,586 @@ else:
                                     name = dev.deviceName()
                                 except Exception:
                                     name = ""
-                            lowered = name.lower() if name else ""
-                            if preferred and lowered and preferred in lowered:
+                            if name and preferred in name.lower():
                                 chosen = dev
-                                break
-                            if lowered and any(k in lowered for k in keywords):
-                                chosen = dev
+                                chosen_name = name
                                 break
                         except Exception:
                             pass
-                    if chosen is None:
-                        for dev in inputs:
-                            try:
-                                if dev.isDefault():
-                                    chosen = dev
-                                    break
-                            except Exception:
-                                pass
-                    if chosen is None and len(inputs) == 1:
-                        chosen = inputs[0]
-                    if chosen:
+                if chosen is None:
+                    for dev in outputs:
                         try:
-                            self._audio_input.setDevice(chosen)
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
-                self._recorder = QtMultimedia.QMediaRecorder()
-                self._capture_session = QtMultimedia.QMediaCaptureSession()
-                self._capture_session.setAudioInput(self._audio_input)
-                self._capture_session.setRecorder(self._recorder)
-                return self._recorder
-
-            def _ensure_player(self):
-                if self._player is not None:
-                    return self._player
-                self._player = QtMultimedia.QMediaPlayer()
-                self._audio_output = QtMultimedia.QAudioOutput()
-                try:
-                    outputs = QtMultimedia.QMediaDevices.audioOutputs()
-                    preferred = os.getenv("VOICE_NOTE_AUDIO_DEVICE", "").strip().lower()
-                    chosen = None
-                    chosen_name = ""
-                    # 仅通过环境变量或系统默认选择设备，不做关键字匹配
-                    if preferred:
-                        for dev in outputs:
-                            try:
-                                name = ""
+                            if dev.isDefault():
+                                chosen = dev
                                 try:
-                                    name = dev.description()
+                                    chosen_name = dev.description() or dev.deviceName()
                                 except Exception:
-                                    pass
-                                if not name:
-                                    try:
-                                        name = dev.deviceName()
-                                    except Exception:
-                                        name = ""
-                                if name and preferred in name.lower():
-                                    chosen = dev
-                                    chosen_name = name
-                                    break
-                            except Exception:
-                                pass
-                    if chosen is None:
-                        for dev in outputs:
-                            try:
-                                if dev.isDefault():
-                                    chosen = dev
-                                    try:
-                                        chosen_name = dev.description() or dev.deviceName()
-                                    except Exception:
-                                        chosen_name = "default"
-                                    break
-                            except Exception:
-                                pass
-                    if chosen:
-                        try:
-                            self._audio_output.setDevice(chosen)
+                                    chosen_name = "default"
+                                break
                         except Exception:
                             pass
-                        print("[VoiceNotes] 选用音频输出: " + str(chosen_name))
-                    else:
-                        print("[VoiceNotes] 未选到音频输出设备，使用系统默认")
+                if chosen:
                     try:
-                        self._audio_output.setVolume(1.0)
+                        self._audio_output.setDevice(chosen)
                     except Exception:
                         pass
-                except Exception as e:
-                    print("[VoiceNotes] _ensure_player 设备枚举失败: " + str(e))
-                self._player.setAudioOutput(self._audio_output)
-                return self._player
-
-            def _play_audio(self, path):
-                if not path or not os.path.exists(path):
-                    print("[VoiceNotes] _play_audio: 文件不存在: " + str(path))
-                    return False
-                player = self._ensure_player()
-                # 先停止当前播放，再切换音源
-                try:
-                    player.stop()
-                except Exception:
-                    pass
-                url = QtCore.QUrl.fromLocalFile(path)
-                if hasattr(QtMultimedia.QMediaPlayer, "setSource"):
-                    player.setSource(url)
+                    print("[VoiceNotes] 选用音频输出: " + str(chosen_name))
                 else:
-                    player.setMedia(QtMultimedia.QMediaContent(url))
-                player.play()
+                    print("[VoiceNotes] 未选到音频输出设备，使用系统默认")
                 try:
-                    err = player.errorString()
-                    if err:
-                        print("[VoiceNotes] 播放器错误: " + str(err))
-                    else:
-                        print("[VoiceNotes] 播放已启动: " + str(path))
+                    self._audio_output.setVolume(1.0)
                 except Exception:
                     pass
-                return True
+            except Exception as e:
+                print("[VoiceNotes] _ensure_player 设备枚举失败: " + str(e))
+            self._player.setAudioOutput(self._audio_output)
+            return self._player
 
-            # ── node helpers ───────────────────────────────────────────────
+        def _play_audio(self, path):
+            if not path or not os.path.exists(path):
+                print("[VoiceNotes] _play_audio: 文件不存在: " + str(path))
+                return False
+            player = self._ensure_player()
+            # 先停止当前播放，再切换音源
+            try:
+                player.stop()
+            except Exception:
+                pass
+            url = QtCore.QUrl.fromLocalFile(path)
+            if hasattr(QtMultimedia.QMediaPlayer, "setSource"):
+                player.setSource(url)
+            else:
+                player.setMedia(QtMultimedia.QMediaContent(url))
+            player.play()
+            try:
+                err = player.errorString()
+                if err:
+                    print("[VoiceNotes] 播放器错误: " + str(err))
+                else:
+                    print("[VoiceNotes] 播放已启动: " + str(path))
+            except Exception:
+                pass
+            return True
 
-            @staticmethod
-            def _get_rect_key(node):
-                if not node:
-                    return None
+        # ── node helpers ───────────────────────────────────────────────
+
+        @staticmethod
+        def _get_rect_key(node):
+            if not node:
+                return None
+            try:
+                oid = node.getObjectId()
+                if oid is not None:
+                    return "oid_" + str(int(oid))
+            except Exception:
+                pass
+            try:
+                key = node.getUniquePath()
+                if key:
+                    return key
+            except Exception:
+                pass
+            try:
+                name = node.getName()
+                if name:
+                    return name
+            except Exception:
+                pass
+            return str(id(node))
+
+        def _store_rect_scale(self, rect):
+            pass  # hover/scale tracking removed with distanceFunc
+
+        # ── eraser timer callback ──────────────────────────────────────
+
+        def _eraser_tick(self):
+            """Called by eraserTimer while eraser mode is active.
+            Uses world-space distance between controller and VNR_ nodes.
+            pick() raycast is not used here: it requires the controller to
+            point at a node from a distance and fails for physical proximity."""
+            try:
+                ctrl_pos = getTransformNodeTranslation(
+                    self.rightController.getNode(), 1)
+                cx, cy, cz = ctrl_pos.x(), ctrl_pos.y(), ctrl_pos.z()
+            except Exception:
+                return
+            in_range_now = set()
+            for node in self._get_all_voice_note_nodes():
+                key = self._get_rect_key(node)
+                if not key:
+                    continue
                 try:
-                    oid = node.getObjectId()
-                    if oid is not None:
-                        return "oid_" + str(int(oid))
+                    p = getTransformNodeTranslation(node, 1)
+                    dx = p.x() - cx
+                    dy = p.y() - cy
+                    dz = p.z() - cz
+                    dist = math.sqrt(dx*dx + dy*dy + dz*dz)
+                    if dist <= VoiceNotes._TOUCH_DIST:
+                        if key not in self._eraser_in_range:
+                            # 首次进入范围 → 删除 annotation 及节点
+                            print("首次进入范围 → 删除 annotation 及节点")
+                            print(self._rect_annotations)
+                            print(key)
+                            ann = self._rect_annotations.get(key)
+                            print(ann)
+                            print("[VoiceNotes] 橡皮擦范围内: " + str(key) + " (距离: {:.1f} mm)".format(dist))
+                            if ann:
+                                try:
+                                    print("[VoiceNotes] 删除标注: " + str(self._rect_labels.get(key, "unknown")))
+                                    vrAnnotationService.deleteAnnotation(ann)
+                                except Exception:
+                                    pass
+                            for d in (self._rect_audio_paths, self._rect_base_scales,
+                                        self._rect_annotations, self._rect_labels,
+                                        self._voice_note_nodes):
+                                d.pop(key, None)
+                            deleteNode(node, True)
+                            print("[VoiceNotes] 橡皮擦删除: " + str(key))
+                        else:
+                            # 仍在范围内，防止离开后重入时重复删除
+                            in_range_now.add(key)
                 except Exception:
                     pass
+            self._eraser_in_range = in_range_now
+
+        def _activate_eraser(self):
+            """QTimer single-shot callback: long press threshold reached."""
+            if not self._b_down or self._is_recording:
+                # 录音中或 B 已松开，不切换模式
+                self._b_down = False
+                return
+            self._eraser_held = True
+            self._eraser_in_range.clear()
+            try:
+                findNode("CtrllrR_UI").fields().setInt32("choice", 9)
+            except Exception:
+                pass
+            if not self._eraserTimerConnected:
+                self._eraserTimer.connect(self._eraser_tick)
+                self._eraserTimerConnected = True
+            self._eraserTimer.setActive(1)
+            print("[VoiceNotes] 长按B激活 → 橡皮擦模式")
+
+        def _get_all_voice_note_nodes(self):
+            if self._voice_note_nodes:
+                return list(self._voice_note_nodes.values())
+            result = []
+            try:
+                for node in getAllNodes():
+                    try:
+                        if node.getName().startswith("VNR_"):
+                            result.append(node)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            return result
+
+        # ── template / node creation ───────────────────────────────────
+
+        def _ensure_voice_player_template(self):
+            if self._voice_player_template is not None:
                 try:
-                    key = node.getUniquePath()
-                    if key:
-                        return key
+                    if not self._voice_player_template.isNull():
+                        return self._voice_player_template
                 except Exception:
                     pass
+            tmpl = findNode("VoicePlayer")
+            # tmpl.setActive(False)
+            # setIsVRNode(tmpl, True)
+            self._voice_player_template = tmpl
+            return tmpl
+
+        def _create_note_node(self, label, position=None, rotation=None):
+            """Clone the VoicePlayer template, place it in the scene and register it."""
+            if self._voice_player_template is None:
+                print("[VoiceNotes] _create_note_node: VoicePlayer template not loaded")
+                return None, None
+            rect = cloneNode(self._voice_player_template, False)
+            moveNode(rect, rect.getParent(), getRootNode())
+            rect.setActive(True)
+            # setIsVRNode(rect, True)
+            rect.setName("VNR_" + (label if label else "VoiceNode"))
+            try:
+                vrScenegraphService.clearSelection()
+            except Exception:
+                pass
+            self._store_rect_scale(rect)
+            if position:
+                setTransformNodeTranslation(rect, position.x(), position.y(), position.z(), 1)
+            if rotation:
                 try:
-                    name = node.getName()
-                    if name:
-                        return name
+                    setTransformNodeRotation(rect, rotation.x(), rotation.y(), rotation.z())
                 except Exception:
                     pass
-                return str(id(node))
+            key = self._get_rect_key(rect)
+            print("key0: " + key)
+            if key:
+                self._voice_note_nodes[key] = rect
+                if label:
+                    self._rect_labels[key] = label
+            return rect, None
 
-            def _store_rect_scale(self, rect):
-                pass  # hover/scale tracking removed with distanceFunc
+        # ── recording ─────────────────────────────────────────────────
 
-            # ── eraser timer callback ──────────────────────────────────────
+        def _start_recording(self, position=None, rotation=None):
+            base_dir = os.path.join(tempfile.gettempdir(), "vred_voice_notes")
+            if not os.path.exists(base_dir):
+                os.makedirs(base_dir)
+            ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            path = os.path.join(base_dir, "voice_note_" + ts + ".wav")
+            recorder = self._ensure_recorder()
+            recorder.setOutputLocation(QtCore.QUrl.fromLocalFile(path))
+            rect, annotation = self._create_note_node(ts + " Recording", position, rotation)
+            recorder.record()
+            self._is_recording = True
+            self._current_rect = rect
+            self._current_annotation = annotation
+            self._current_audio_path = path
+            self._current_label = ts
+            if rect:
+                key = self._get_rect_key(rect)
+                print("key2: " + key)
+                if key:
+                    self._rect_audio_paths[key] = path
 
-            def _eraser_tick(self):
-                """Called by eraserTimer while eraser mode is active.
-                Uses world-space distance between controller and VNR_ nodes.
-                pick() raycast is not used here: it requires the controller to
-                point at a node from a distance and fails for physical proximity."""
+        def _stop_recording(self):
+            self._ensure_recorder().stop()
+            self._is_recording = False
+            rect = self._current_rect
+            if rect:
+                old_key = self._get_rect_key(rect)
+                print("key4: " + old_key)
+                label = self._current_label
                 try:
-                    ctrl_pos = getTransformNodeTranslation(
-                        self.rightController.getNode(), 1)
-                    cx, cy, cz = ctrl_pos.x(), ctrl_pos.y(), ctrl_pos.z()
+                    rect.setName("VNR_" + label)
                 except Exception:
-                    return
-                in_range_now = set()
+                    pass
+                if self._current_annotation:
+                    try:
+                        self._current_annotation.setText(label)
+                    except Exception:
+                        pass
+                new_key = self._get_rect_key(rect)
+                if old_key and new_key and old_key != new_key:
+                    for d in (self._rect_audio_paths, self._rect_base_scales,
+                                self._rect_annotations, self._rect_labels,
+                                self._voice_note_nodes):
+                        if old_key in d:
+                            d[new_key] = d.pop(old_key)
+                final_key = new_key or old_key
+                if final_key:
+                    self._rect_labels[final_key] = label
+                self._last_rect = rect
+            self._last_audio_path = self._current_audio_path
+            self._current_rect = None
+            self._current_annotation = None
+            self._current_audio_path = None
+            self._current_label = None
+
+        # ── controller position helpers ────────────────────────────────
+
+        def _get_controller_position(self, controller):
+            try:
+                return getTransformNodeTranslation(controller.getNode(), 1)
+            except Exception:
+                pass
+            try:
+                matrix = controller.getTrackingMatrix()
+                if matrix:
+                    col = matrix.column(3)
+                    return Vec3f(col.x(), col.y(), col.z())
+            except Exception:
+                pass
+            return None
+
+        def _get_controller_forward_position(self, controller):
+            px, py, pz = None, None, None
+            try:
+                pos = getTransformNodeTranslation(controller.getNode(), 1)
+                px, py, pz = pos.x(), pos.y(), pos.z()
+            except Exception:
+                pass
+            if px is None:
+                try:
+                    matrix = controller.getTrackingMatrix()
+                    if matrix:
+                        col = matrix.column(3)
+                        px, py, pz = col.x(), col.y(), col.z()
+                except Exception:
+                    pass
+            if px is None:
+                return None
+            offset = VoiceNotes._FORWARD_OFFSET
+            try:
+                hit = controller.pick()
+                if hit and hit.hasHit():
+                    pt = hit.getPoint()
+                    dx, dy, dz = pt.x() - px, pt.y() - py, pt.z() - pz
+                    dist = math.sqrt(dx*dx + dy*dy + dz*dz)
+                    if dist > 1.0:
+                        s = offset / dist
+                        return Vec3f(px + dx*s, py + dy*s, pz + dz*s)
+            except Exception:
+                pass
+            try:
+                matrix = controller.getTrackingMatrix()
+                if matrix:
+                    col2 = matrix.column(2)
+                    fx, fy, fz = -col2.x(), -col2.y(), -col2.z()
+                    length = math.sqrt(fx*fx + fy*fy + fz*fz)
+                    if length > 0.0001:
+                        s = offset / length
+                        return Vec3f(px + fx*s, py + fy*s, pz + fz*s)
+            except Exception:
+                pass
+            return Vec3f(px, py, pz)
+
+        # ── custom controller ──────────────────────────────────────────
+
+        def _find_or_load_voice_controller(self):
+            return findNode("MRcontrollerRight")
+
+        def _activate_voice_controller(self):
+            self.newRightCon = self._find_or_load_voice_controller()
+            controllerPos = getTransformNodeTranslation(self.rightController.getNode(), 1)
+            findNode("CtrllrR_UI").fields().setInt32("choice", 7)
+            self.rightController.setVisible(0)
+            self.newRightCon.setActive(1)
+            setTransformNodeTranslation(self.newRightCon, controllerPos.x(), controllerPos.y(), controllerPos.z(), True)
+            self.voiceControllerConstraint = vrConstraintService.createParentConstraint(
+                [self.rightController.getNode()], self.newRightCon, False)
+
+        def _deactivate_voice_controller(self):
+            try:
+                if self.voiceControllerConstraint:
+                    vrConstraintService.deleteConstraint(self.voiceControllerConstraint)
+                    self.voiceControllerConstraint = None
+            except Exception:
+                pass
+            try:
+                if self.newRightCon:
+                    self.newRightCon.setActive(0)
+            except Exception:
+                pass
+            try:
+                self.rightController.setVisible(1)
+                self.rightController.setEnabled(1)
+            except Exception:
+                pass
+
+        # ── event handlers ─────────────────────────────────────────────
+
+        def on_a_pressed(self, action_obj=None, device_obj=None):
+            if self._is_recording:
+                return
+            # 确保 B 长按计时器不干扰录音
+            self._bTimer.stop()
+            self._b_down = False
+            findNode("CtrllrR_UI").fields().setInt32("choice", 8)
+            pos = None
+            rot = None
+            try:
+                mrRight = findNode("MRcontrollerRight")
+                if mrRight:
+                    wpos = mrRight.getWorldTranslation()
+                    wrot = mrRight.getWorldRotation()
+                    pos = Vec3f(wpos[0], wpos[1], wpos[2])
+                    rot = Vec3f(wrot[0], wrot[1], wrot[2])
+            except Exception:
+                pass
+            if pos is None:
+                pos = self._get_controller_forward_position(self.rightController)
+            self._start_recording(pos, rot)
+            print("[VoiceNotes] A pressed → 开始录音，位置: " + str(pos))
+
+        def on_a_released(self, action_obj=None, device_obj=None):
+            if self._is_recording:
+                self._stop_recording()
+                findNode("CtrllrR_UI").fields().setInt32("choice", 7)
+                print("[VoiceNotes] A released → 结束录音")
+
+        def on_trigger_pressed(self, action_obj=None, device_obj=None):
+            print("[VoiceNotes] Trigger pressed → 射线检测播放")
+            if self._is_recording or self._eraser_held or self._grip_held:
+                return
+            # Raycast: find VNR_ node hit by right controller pointer
+            hit_node = None
+            try:
+                hit = self.rightController.pick()
+                if hit and hit.hasHit():
+                    node = hit.getNode()
+                    print("[VoiceNotes] Trigger hit node: " + str(node.getName() if node else "None"))
+                    print(node)
+                    while node and not node.isNull():
+                        name = node.getName()
+                        if name.startswith("VNR_"):
+                            hit_node = node
+                            break
+                        node = node.getParent()
+            except Exception as e:
+                print("[VoiceNotes] trigger pick failed: " + str(e))
+            if hit_node is None:
+                print("[VoiceNotes] Trigger: 射线未命中可播放节点")
+                return
+            key = self._get_rect_key(hit_node)
+            path = self._rect_audio_paths.get(key) if key else None
+            # Fallback: derive audio path from node name (handles key mismatch and session restarts)
+            if not path:
+                try:
+                    node_name = hit_node.getName()  # e.g. "VNR_20240319_123456"
+                    if node_name.startswith("VNR_"):
+                        ts = node_name[4:]  # strip "VNR_" prefix
+                        base_dir = os.path.join(tempfile.gettempdir(), "vred_voice_notes")
+                        candidate = os.path.join(base_dir, "voice_note_" + ts + ".wav")
+                        if os.path.exists(candidate):
+                            path = candidate
+                            if key:  # restore mapping to avoid repeated fallback
+                                self._rect_audio_paths[key] = path
+                            print("[VoiceNotes] Fallback: 通过节点名恢复音频路径: " + candidate)
+                        else:
+                            print("[VoiceNotes] Fallback: 候选路径不存在: " + candidate)
+                except Exception as e:
+                    print("[VoiceNotes] Fallback lookup failed: " + str(e))
+            if path:
+                self._play_audio(path)
+                print("[VoiceNotes] Trigger播放: " + str(path))
+                ann = self._rect_annotations.get(key)
+                if ann:
+                    try:
+                        ann.setText("Playing")
+                    except Exception:
+                        pass
+            else:
+                print("[VoiceNotes] Trigger命中节点但未找到音频 key=" + str(key))
+
+        def on_b_pressed(self, action_obj=None, device_obj=None):
+            # 录音中不启动橡皮擦
+            if self._is_recording:
+                return
+            # 先确保 grip 拖动已停止，避免状态冲突
+            if self._grip_held:
+                self.on_grip_released()
+            self._b_down = True
+            self._eraser_in_range.clear()
+            self._bTimer.start()  # 500 ms single-shot → _activate_eraser
+            print("[VoiceNotes] B down → 等待长按激活橡皮擦 (0.5s)...")
+
+        def on_b_released(self, action_obj=None, device_obj=None):
+            self._b_down = False
+            self._bTimer.stop()
+            if self._eraser_held:
+                self._eraser_held = False
+                self._eraser_in_range.clear()
+                self._eraserTimer.setActive(0)
+                findNode("CtrllrR_UI").fields().setInt32("choice", 7)
+                print("[VoiceNotes] B released → 橡皮擦停用")
+            else:
+                print("[VoiceNotes] B released → 未达长按阈值，忽略")
+
+        def _poll_grip(self):
+            try:
+                state = self.rightController.getButtonState("grip")
+                pressed = state.isPressed() or state.getPosition().x() >= self._GRIP_THRESHOLD
+                if pressed and not self._gripHeld:
+                    self._gripHeld = True
+                    self.on_grip_pressed()
+                elif not pressed and self._gripHeld:
+                    self._gripHeld = False
+                    self.on_grip_released()
+            except Exception:
+                pass
+
+        def on_grip_pressed(self, action_obj=None, device_obj=None):
+            if self._grip_held:
+                return
+            if self._drag_constraint is not None:
+                try:
+                    vrConstraintService.deleteConstraint(self._drag_constraint)
+                except Exception:
+                    pass
+                self._drag_constraint = None
+            # 使用近距离接触检测（与橡皮擦模式一致），不依赖射线命中
+            best_node = None
+            best_dist = VoiceNotes._TOUCH_DIST
+            try:
+                ctrl_pos = getTransformNodeTranslation(self.rightController.getNode(), 1)
+                cx, cy, cz = ctrl_pos.x(), ctrl_pos.y(), ctrl_pos.z()
                 for node in self._get_all_voice_note_nodes():
-                    key = self._get_rect_key(node)
-                    if not key:
-                        continue
                     try:
                         p = getTransformNodeTranslation(node, 1)
                         dx = p.x() - cx
                         dy = p.y() - cy
                         dz = p.z() - cz
                         dist = math.sqrt(dx*dx + dy*dy + dz*dz)
-                        if dist <= VoiceNotes._TOUCH_DIST:
-                            if key not in self._eraser_in_range:
-                                # 首次进入范围 → 删除 annotation 及节点
-                                print("首次进入范围 → 删除 annotation 及节点")
-                                print(self._rect_annotations)
-                                print(key)
-                                ann = self._rect_annotations.get(key)
-                                print(ann)
-                                print("[VoiceNotes] 橡皮擦范围内: " + str(key) + " (距离: {:.1f} mm)".format(dist))
-                                if ann:
-                                    try:
-                                        print("[VoiceNotes] 删除标注: " + str(self._rect_labels.get(key, "unknown")))
-                                        vrAnnotationService.deleteAnnotation(ann)
-                                    except Exception:
-                                        pass
-                                for d in (self._rect_audio_paths, self._rect_base_scales,
-                                          self._rect_annotations, self._rect_labels,
-                                          self._voice_note_nodes):
-                                    d.pop(key, None)
-                                deleteNode(node, True)
-                                print("[VoiceNotes] 橡皮擦删除: " + str(key))
-                            else:
-                                # 仍在范围内，防止离开后重入时重复删除
-                                in_range_now.add(key)
+                        if dist <= best_dist:
+                            best_dist = dist
+                            best_node = node
                     except Exception:
                         pass
-                self._eraser_in_range = in_range_now
+            except Exception as e:
+                print("[VoiceNotes] Grip proximity check failed: " + str(e))
+            if best_node is None:
+                print("[VoiceNotes] Grip: 范围内无可拖动节点 (TOUCH_DIST=%.1f mm)" % VoiceNotes._TOUCH_DIST)
+                return
+            try:
+                self._drag_constraint = vrConstraintService.createParentConstraint(
+                    [self.rightController.getNode()], best_node, False)
+                self._grip_held = True
+                self._dragging_node = best_node
+                findNode("CtrllrR_UI").fields().setInt32("choice", 10)
+                print("[VoiceNotes] Grip → 开始拖动: " + best_node.getName())
+            except Exception as e:
+                print("[VoiceNotes] Grip → createParentConstraint 失败: " + str(e))
 
-            def _activate_eraser(self):
-                """QTimer single-shot callback: long press threshold reached."""
-                if not self._b_down or self._is_recording:
-                    # 录音中或 B 已松开，不切换模式
-                    self._b_down = False
-                    return
-                self._eraser_held = True
-                self._eraser_in_range.clear()
+        def on_grip_released(self, action_obj=None, device_obj=None):
+            if self._drag_constraint is not None:
                 try:
-                    findNode("CtrllrR_UI").fields().setInt32("choice", 9)
+                    vrConstraintService.deleteConstraint(self._drag_constraint)
                 except Exception:
                     pass
-                if not self._eraserTimerConnected:
-                    self._eraserTimer.connect(self._eraser_tick)
-                    self._eraserTimerConnected = True
-                self._eraserTimer.setActive(1)
-                print("[VoiceNotes] 长按B激活 → 橡皮擦模式")
+                self._drag_constraint = None
+            self._grip_held = False
+            self._dragging_node = None
+            findNode("CtrllrR_UI").fields().setInt32("choice", 7)
+            print("[VoiceNotes] Grip released → 停止拖动")
 
-            def _get_all_voice_note_nodes(self):
-                if self._voice_note_nodes:
-                    return list(self._voice_note_nodes.values())
-                result = []
-                try:
-                    for node in getAllNodes():
+        # ── lifecycle ──────────────────────────────────────────────────
+
+        def enable(self):
+            self.isEnabled = True
+            try:
+                for k, obj in list(vred_tool_registry.items()):
+                    if obj is not self and hasattr(obj, 'disable'):
                         try:
-                            if node.getName().startswith("VNR_"):
-                                result.append(node)
+                            obj.disable()
                         except Exception:
                             pass
-                except Exception:
-                    pass
-                return result
+            except Exception:
+                pass
+            vred_tool_registry[self.registry_key] = self
+            # Hide stream panel when tool is activated
+            global _stream_panel_visible
+            _stream_panel_visible = False
+            _sp_hide()
+            self.multi.setSupportedInteractionGroups(["VoiceNotesGroup"])
+            vrDeviceService.setActiveInteractionGroup("VoiceNotesGroup")
+            self.aPressedAction.signal().triggered.connect(self.on_a_pressed)
+            self.aReleasedAction.signal().triggered.connect(self.on_a_released)
+            self.bPressedAction.signal().triggered.connect(self.on_b_pressed)
+            self.bReleasedAction.signal().triggered.connect(self.on_b_released)
+            self.triggerPressedAction.signal().triggered.connect(self.on_trigger_pressed)
+            # grip 轮询 timer（与 AdjustTool / SectionTool 一致）
+            if not self._gripTimerConnected:
+                self._gripTimer.connect(self._poll_grip)
+                self._gripTimerConnected = True
+            self._gripTimer.setActive(1)
+            print("[VoiceNotes] grip polling timer active")
+            self._ensure_voice_player_template()
+            self._activate_voice_controller()
+            print("[AllTools] VoiceNotes enabled (A=录音, B长按=橡皮擦, Grip+射线=移动, Trigger+射线=播放)")
 
-            # ── template / node creation ───────────────────────────────────
-
-            def _ensure_voice_player_template(self):
-                if self._voice_player_template is not None:
-                    try:
-                        if not self._voice_player_template.isNull():
-                            return self._voice_player_template
-                    except Exception:
-                        pass
-                tmpl = findNode("VoicePlayer")
-                tmpl.setActive(False)
-                # setIsVRNode(tmpl, True)
-                self._voice_player_template = tmpl
-                return tmpl
-
-            def _create_note_node(self, label, position=None):
-                """Clone the VoicePlayer template, place it in the scene and register it."""
-                if self._voice_player_template is None:
-                    print("[VoiceNotes] _create_note_node: VoicePlayer template not loaded")
-                    return None, None
-                rect = cloneNode(self._voice_player_template, False)
-                moveNode(rect, rect.getParent(), getRootNode())
-                rect.setActive(True)
-                # setIsVRNode(rect, True)
-                rect.setName("VNR_" + (label if label else "VoiceNode"))
-                try:
-                    vrScenegraphService.clearSelection()
-                except Exception:
-                    pass
-                self._store_rect_scale(rect)
-                if position:
-                    setTransformNodeTranslation(rect, position.x(), position.y(), position.z(), 1)
-                key = self._get_rect_key(rect)
-                print("key0: " + key)
-                if key:
-                    self._voice_note_nodes[key] = rect
-                    if label:
-                        self._rect_labels[key] = label
-                annotation = None
-                if label:
-                    try:
-                        ann_pos = position if position else getTransformNodeTranslation(rect, 1)
-                        annotation = vrAnnotationService.createAnnotation(label)
-                        if key:
-                            self._rect_annotations[key] = annotation
-                        annotation.setText(label)
-                        annotation.setSceneNode(rect)
-                        annotation.setPosition(QtGui.QVector3D(
-                            ann_pos.x(), ann_pos.y(), ann_pos.z()))
-                        annotation.setAnchored(True)
-                        print("[VoiceNotes] Annotation created: " + str(label))
-                    except Exception as e:
-                        print("[VoiceNotes] Annotation creation failed: " + str(e))
-                return rect, annotation
-
-            # ── recording ─────────────────────────────────────────────────
-
-            def _start_recording(self, position=None):
-                base_dir = os.path.join(tempfile.gettempdir(), "vred_voice_notes")
-                if not os.path.exists(base_dir):
-                    os.makedirs(base_dir)
-                ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                path = os.path.join(base_dir, "voice_note_" + ts + ".wav")
-                recorder = self._ensure_recorder()
-                recorder.setOutputLocation(QtCore.QUrl.fromLocalFile(path))
-                rect, annotation = self._create_note_node(ts + " Recording", position)
-                recorder.record()
-                self._is_recording = True
-                self._current_rect = rect
-                self._current_annotation = annotation
-                self._current_audio_path = path
-                self._current_label = ts
-                if rect:
-                    key = self._get_rect_key(rect)
-                    print("key2: " + key)
-                    if key:
-                        self._rect_audio_paths[key] = path
-
-            def _stop_recording(self):
-                self._ensure_recorder().stop()
-                self._is_recording = False
-                rect = self._current_rect
-                if rect:
-                    old_key = self._get_rect_key(rect)
-                    print("key4: " + old_key)
-                    label = self._current_label
-                    try:
-                        rect.setName("VNR_" + label)
-                    except Exception:
-                        pass
-                    if self._current_annotation:
-                        try:
-                            self._current_annotation.setText(label)
-                        except Exception:
-                            pass
-                    new_key = self._get_rect_key(rect)
-                    if old_key and new_key and old_key != new_key:
-                        for d in (self._rect_audio_paths, self._rect_base_scales,
-                                  self._rect_annotations, self._rect_labels,
-                                  self._voice_note_nodes):
-                            if old_key in d:
-                                d[new_key] = d.pop(old_key)
-                    final_key = new_key or old_key
-                    if final_key:
-                        self._rect_labels[final_key] = label
-                    self._last_rect = rect
-                self._last_audio_path = self._current_audio_path
-                self._current_rect = None
-                self._current_annotation = None
-                self._current_audio_path = None
-                self._current_label = None
-
-            # ── controller position helpers ────────────────────────────────
-
-            def _get_controller_position(self, controller):
-                try:
-                    return getTransformNodeTranslation(controller.getNode(), 1)
-                except Exception:
-                    pass
-                try:
-                    matrix = controller.getTrackingMatrix()
-                    if matrix:
-                        col = matrix.column(3)
-                        return Vec3f(col.x(), col.y(), col.z())
-                except Exception:
-                    pass
-                return None
-
-            def _get_controller_forward_position(self, controller):
-                px, py, pz = None, None, None
-                try:
-                    pos = getTransformNodeTranslation(controller.getNode(), 1)
-                    px, py, pz = pos.x(), pos.y(), pos.z()
-                except Exception:
-                    pass
-                if px is None:
-                    try:
-                        matrix = controller.getTrackingMatrix()
-                        if matrix:
-                            col = matrix.column(3)
-                            px, py, pz = col.x(), col.y(), col.z()
-                    except Exception:
-                        pass
-                if px is None:
-                    return None
-                offset = VoiceNotes._FORWARD_OFFSET
-                try:
-                    hit = controller.pick()
-                    if hit and hit.hasHit():
-                        pt = hit.getPoint()
-                        dx, dy, dz = pt.x() - px, pt.y() - py, pt.z() - pz
-                        dist = math.sqrt(dx*dx + dy*dy + dz*dz)
-                        if dist > 1.0:
-                            s = offset / dist
-                            return Vec3f(px + dx*s, py + dy*s, pz + dz*s)
-                except Exception:
-                    pass
-                try:
-                    matrix = controller.getTrackingMatrix()
-                    if matrix:
-                        col2 = matrix.column(2)
-                        fx, fy, fz = -col2.x(), -col2.y(), -col2.z()
-                        length = math.sqrt(fx*fx + fy*fy + fz*fz)
-                        if length > 0.0001:
-                            s = offset / length
-                            return Vec3f(px + fx*s, py + fy*s, pz + fz*s)
-                except Exception:
-                    pass
-                return Vec3f(px, py, pz)
-
-            # ── custom controller ──────────────────────────────────────────
-
-            def _find_or_load_voice_controller(self):
-                return findNode("MRcontrollerRight")
-
-            def _activate_voice_controller(self):
-                self.newRightCon = self._find_or_load_voice_controller()
-                controllerPos = getTransformNodeTranslation(self.rightController.getNode(), 1)
-                findNode("CtrllrR_UI").fields().setInt32("choice", 7)
-                self.rightController.setVisible(0)
-                self.newRightCon.setActive(1)
-                setTransformNodeTranslation(self.newRightCon, controllerPos.x(), controllerPos.y(), controllerPos.z(), True)
-                self.voiceControllerConstraint = vrConstraintService.createParentConstraint(
-                    [self.rightController.getNode()], self.newRightCon, False)
-
-            def _deactivate_voice_controller(self):
-                try:
-                    if self.voiceControllerConstraint:
-                        vrConstraintService.deleteConstraint(self.voiceControllerConstraint)
-                        self.voiceControllerConstraint = None
-                except Exception:
-                    pass
-                try:
-                    if self.newRightCon:
-                        self.newRightCon.setActive(0)
-                except Exception:
-                    pass
-                try:
-                    self.rightController.setVisible(1)
-                    self.rightController.setEnabled(1)
-                except Exception:
-                    pass
-
-            # ── event handlers ─────────────────────────────────────────────
-
-            def on_a_pressed(self, action_obj=None, device_obj=None):
-                if self._is_recording:
-                    return
-                # 确保 B 长按计时器不干扰录音
-                self._bTimer.stop()
-                self._b_down = False
-                findNode("CtrllrR_UI").fields().setInt32("choice", 8)
-                pos = self._get_controller_forward_position(self.rightController)
-                self._start_recording(pos)
-                print("[VoiceNotes] A pressed → 开始录音，位置: " + str(pos))
-
-            def on_a_released(self, action_obj=None, device_obj=None):
-                if self._is_recording:
-                    self._stop_recording()
-                    findNode("CtrllrR_UI").fields().setInt32("choice", 7)
-                    print("[VoiceNotes] A released → 结束录音")
-
-            def on_trigger_pressed(self, action_obj=None, device_obj=None):
-                print("[VoiceNotes] Trigger pressed → 射线检测播放")
-                if self._is_recording or self._eraser_held or self._grip_held:
-                    return
-                # Raycast: find VNR_ node hit by right controller pointer
-                hit_node = None
-                try:
-                    hit = self.rightController.pick()
-                    if hit and hit.hasHit():
-                        node = hit.getNode()
-                        print("[VoiceNotes] Trigger hit node: " + str(node.getName() if node else "None"))
-                        print(node)
-                        while node and not node.isNull():
-                            name = node.getName()
-                            if name.startswith("VNR_"):
-                                hit_node = node
-                                break
-                            node = node.getParent()
-                except Exception as e:
-                    print("[VoiceNotes] trigger pick failed: " + str(e))
-                if hit_node is None:
-                    print("[VoiceNotes] Trigger: 射线未命中可播放节点")
-                    return
-                key = self._get_rect_key(hit_node)
-                path = self._rect_audio_paths.get(key) if key else None
-                # Fallback: derive audio path from node name (handles key mismatch and session restarts)
-                if not path:
-                    try:
-                        node_name = hit_node.getName()  # e.g. "VNR_20240319_123456"
-                        if node_name.startswith("VNR_"):
-                            ts = node_name[4:]  # strip "VNR_" prefix
-                            base_dir = os.path.join(tempfile.gettempdir(), "vred_voice_notes")
-                            candidate = os.path.join(base_dir, "voice_note_" + ts + ".wav")
-                            if os.path.exists(candidate):
-                                path = candidate
-                                if key:  # restore mapping to avoid repeated fallback
-                                    self._rect_audio_paths[key] = path
-                                print("[VoiceNotes] Fallback: 通过节点名恢复音频路径: " + candidate)
-                            else:
-                                print("[VoiceNotes] Fallback: 候选路径不存在: " + candidate)
-                    except Exception as e:
-                        print("[VoiceNotes] Fallback lookup failed: " + str(e))
-                if path:
-                    self._play_audio(path)
-                    print("[VoiceNotes] Trigger播放: " + str(path))
-                    ann = self._rect_annotations.get(key)
-                    if ann:
-                        try:
-                            ann.setText("Playing")
-                        except Exception:
-                            pass
-                else:
-                    print("[VoiceNotes] Trigger命中节点但未找到音频 key=" + str(key))
-
-            def on_b_pressed(self, action_obj=None, device_obj=None):
-                # 录音中不启动橡皮擦
-                if self._is_recording:
-                    return
-                # 先确保 grip 拖动已停止，避免状态冲突
-                if self._grip_held:
-                    self.on_grip_released()
-                self._b_down = True
-                self._eraser_in_range.clear()
-                self._bTimer.start()  # 500 ms single-shot → _activate_eraser
-                print("[VoiceNotes] B down → 等待长按激活橡皮擦 (0.5s)...")
-
-            def on_b_released(self, action_obj=None, device_obj=None):
-                self._b_down = False
-                self._bTimer.stop()
-                if self._eraser_held:
-                    self._eraser_held = False
-                    self._eraser_in_range.clear()
-                    self._eraserTimer.setActive(0)
-                    findNode("CtrllrR_UI").fields().setInt32("choice", 7)
-                    print("[VoiceNotes] B released → 橡皮擦停用")
-                else:
-                    print("[VoiceNotes] B released → 未达长按阈值，忽略")
-
-            def _poll_grip(self):
-                try:
-                    state = self.rightController.getButtonState("grip")
-                    pressed = state.isPressed() or state.getPosition().x() >= self._GRIP_THRESHOLD
-                    if pressed and not self._gripHeld:
-                        self._gripHeld = True
-                        self.on_grip_pressed()
-                    elif not pressed and self._gripHeld:
-                        self._gripHeld = False
-                        self.on_grip_released()
-                except Exception:
-                    pass
-
-            def on_grip_pressed(self, action_obj=None, device_obj=None):
-                if self._grip_held:
-                    return
-                if self._drag_constraint is not None:
-                    try:
-                        vrConstraintService.deleteConstraint(self._drag_constraint)
-                    except Exception:
-                        pass
-                    self._drag_constraint = None
-                # 使用近距离接触检测（与橡皮擦模式一致），不依赖射线命中
-                best_node = None
-                best_dist = VoiceNotes._TOUCH_DIST
-                try:
-                    ctrl_pos = getTransformNodeTranslation(self.rightController.getNode(), 1)
-                    cx, cy, cz = ctrl_pos.x(), ctrl_pos.y(), ctrl_pos.z()
-                    for node in self._get_all_voice_note_nodes():
-                        try:
-                            p = getTransformNodeTranslation(node, 1)
-                            dx = p.x() - cx
-                            dy = p.y() - cy
-                            dz = p.z() - cz
-                            dist = math.sqrt(dx*dx + dy*dy + dz*dz)
-                            if dist <= best_dist:
-                                best_dist = dist
-                                best_node = node
-                        except Exception:
-                            pass
-                except Exception as e:
-                    print("[VoiceNotes] Grip proximity check failed: " + str(e))
-                if best_node is None:
-                    print("[VoiceNotes] Grip: 范围内无可拖动节点 (TOUCH_DIST=%.1f mm)" % VoiceNotes._TOUCH_DIST)
-                    return
-                try:
-                    self._drag_constraint = vrConstraintService.createParentConstraint(
-                        [self.rightController.getNode()], best_node, False)
-                    self._grip_held = True
-                    self._dragging_node = best_node
-                    findNode("CtrllrR_UI").fields().setInt32("choice", 10)
-                    print("[VoiceNotes] Grip → 开始拖动: " + best_node.getName())
-                except Exception as e:
-                    print("[VoiceNotes] Grip → createParentConstraint 失败: " + str(e))
-
-            def on_grip_released(self, action_obj=None, device_obj=None):
-                if self._drag_constraint is not None:
-                    try:
-                        vrConstraintService.deleteConstraint(self._drag_constraint)
-                    except Exception:
-                        pass
-                    self._drag_constraint = None
-                self._grip_held = False
-                self._dragging_node = None
-                findNode("CtrllrR_UI").fields().setInt32("choice", 7)
-                print("[VoiceNotes] Grip released → 停止拖动")
-
-            # ── lifecycle ──────────────────────────────────────────────────
-
-            def enable(self):
-                self.isEnabled = True
-                try:
-                    for k, obj in list(vred_tool_registry.items()):
-                        if obj is not self and hasattr(obj, 'disable'):
-                            try:
-                                obj.disable()
-                            except Exception:
-                                pass
-                except Exception:
-                    pass
-                vred_tool_registry[self.registry_key] = self
-                # Hide stream panel when tool is activated
-                global _stream_panel_visible
-                _stream_panel_visible = False
-                _sp_hide()
-                self.multi.setSupportedInteractionGroups(["VoiceNotesGroup"])
-                vrDeviceService.setActiveInteractionGroup("VoiceNotesGroup")
-                self.aPressedAction.signal().triggered.connect(self.on_a_pressed)
-                self.aReleasedAction.signal().triggered.connect(self.on_a_released)
-                self.bPressedAction.signal().triggered.connect(self.on_b_pressed)
-                self.bReleasedAction.signal().triggered.connect(self.on_b_released)
-                self.triggerPressedAction.signal().triggered.connect(self.on_trigger_pressed)
-                # grip 轮询 timer（与 AdjustTool / SectionTool 一致）
-                if not self._gripTimerConnected:
-                    self._gripTimer.connect(self._poll_grip)
-                    self._gripTimerConnected = True
-                self._gripTimer.setActive(1)
-                print("[VoiceNotes] grip polling timer active")
-                self._ensure_voice_player_template()
-                self._activate_voice_controller()
-                print("[AllTools] VoiceNotes enabled (A=录音, B长按=橡皮擦, Grip+射线=移动, Trigger+射线=播放)")
-
-            def disable(self):
+        def disable(self):
                 self.isEnabled = False
                 try:
                     self.multi.setSupportedInteractionGroups([])
