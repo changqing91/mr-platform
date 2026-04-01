@@ -1,8 +1,9 @@
 import React from 'react';
-import { Box, LogOut } from 'lucide-react';
+import { Box, LogOut, Users } from 'lucide-react';
 import { THEME_COLOR } from '../constants';
 
-const Header = ({ currentUser, handleLogout }) => {
+const Header = ({ currentUser, handleLogout, onAccountManagement }) => {
+    const isAdmin = currentUser?.username === 'admin';
     return (
         <header className="h-16 border-b border-gray-100 flex items-center justify-between px-8 bg-white z-20 shrink-0">
             <div className="flex items-center gap-3">
@@ -13,13 +14,29 @@ const Header = ({ currentUser, handleLogout }) => {
             </div>
             <div className="flex items-center gap-3">
                 <div className="text-right mr-2 hidden sm:block">
-                    <div className="text-sm font-bold text-gray-700">{currentUser?.username}</div>
+                    <div className="text-sm font-bold text-gray-700 flex items-center gap-1.5">
+                        {currentUser?.username}
+                        {isAdmin && (
+                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md text-white" style={{ backgroundColor: THEME_COLOR }}>
+                                管理员
+                            </span>
+                        )}
+                    </div>
                     <div className="text-[10px] text-gray-400 font-mono">ID: {currentUser?.id}</div>
                 </div>
                 <div className="w-9 h-9 rounded-full bg-gray-200 border border-gray-200 flex items-center justify-center text-gray-500 font-bold">
                     {currentUser?.username?.charAt(0).toUpperCase()}
                 </div>
-                <button onClick={handleLogout} className="p-2 text-gray-400 hover:bg-gray-100 rounded-lg transition-colors ml-2" title="退出登录">
+                {isAdmin && onAccountManagement && (
+                    <button
+                        onClick={onAccountManagement}
+                        className="p-2 text-gray-400 hover:bg-gray-100 rounded-lg transition-colors"
+                        title="账户管理"
+                    >
+                        <Users size={18} />
+                    </button>
+                )}
+                <button onClick={handleLogout} className="p-2 text-gray-400 hover:bg-gray-100 rounded-lg transition-colors ml-1" title="退出登录">
                     <LogOut size={18} />
                 </button>
             </div>

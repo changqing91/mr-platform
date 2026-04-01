@@ -1,6 +1,9 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
+import { Routes, Route } from 'react-router-dom';
 import LicenseGuard from './components/LicenseGuard';
 import LoginScreen from './components/LoginScreen';
+import RegisterScreen from './components/RegisterScreen';
+import AccountManagement from './components/AccountManagement';
 import { THEME_COLOR } from './constants';
 import { api } from './services/api';
 import { uploadFile, TUSD_PATH_PREFIX } from './services/upload';
@@ -20,8 +23,9 @@ import {
     ClearNodesConfirmModal, 
     DeleteNodeConfirmModal 
 } from './components/ConfirmationModals';
+import StreamPage from './pages/StreamPage';
 
-const App = () => {
+const MainApp = () => {
     // --- State: Auth ---
     const [isLoggedIn, setIsLoggedIn] = useState(() => !!localStorage.getItem('jwt'));
     const [loginForm, setLoginForm] = useState({ username: '', password: '' });
@@ -30,6 +34,9 @@ const App = () => {
         const saved = localStorage.getItem('currentUser');
         return saved ? JSON.parse(saved) : null;
     });
+    const [showRegister, setShowRegister] = useState(false);
+    const [registerError, setRegisterError] = useState(null);
+    const [showAccountManagement, setShowAccountManagement] = useState(false);
 
     // --- State: Data ---
     const [projects, setProjects] = useState([]);
@@ -197,6 +204,18 @@ const App = () => {
         setLoginForm({ username: '', password: '' });
         localStorage.removeItem('jwt');
         localStorage.removeItem('currentUser');
+    };
+
+    const handleRegister = async (username, email, password) => {
+        setRegisterError(null);
+        try {
+            await api.auth.register(username, email, password);
+            setShowRegister(false);
+            addNotification('注册成功，请登录', 'success');
+        } catch (e) {
+            console.error(e);
+            setRegisterError(e.message || '注册失败，请重试');
+        }
     };
 
     // --- Handlers: Projects ---
@@ -851,7 +870,21 @@ except Exception as e:
     if (!isLoggedIn) {
         return (
             <LicenseGuard>
-                <LoginScreen handleLogin={handleLogin} loginForm={loginForm} setLoginForm={setLoginForm} loginError={loginError} />
+                {showRegister ? (
+                    <RegisterScreen
+                        handleRegister={handleRegister}
+                        onBackToLogin={() => { setShowRegister(false); setRegisterError(null); }}
+                        registerError={registerError}
+                    />
+                ) : (
+                    <LoginScreen
+                        handleLogin={handleLogin}
+                        loginForm={loginForm}
+                        setLoginForm={setLoginForm}
+                        loginError={loginError}
+                        onRegister={() => { setShowRegister(true); setLoginError(null); }}
+                    />
+                )}
             </LicenseGuard>
         );
     }
@@ -875,7 +908,7 @@ except Exception as e:
                         setKillCandidate={setKillCandidate}
                     />
                 )}
-                <Header currentUser={currentUser} handleLogout={handleLogout} />
+                <Header currentUser={currentUser} handleLogout={handleLogout} onAccountManagement={() => setShowAccountManagement(true)} />
 
                 <div className="flex-1 flex overflow-hidden bg-gray-50">
                     {showMonitorWall ? (
@@ -955,6 +988,13 @@ except Exception as e:
             <input type="file" ref={replaceFileInputRef} onChange={handleReplaceFileSelect} className="hidden" />
 
             {/* Modals */}
+            {showAccountManagement && (
+                <AccountManagement
+                    onClose={() => setShowAccountManagement(false)}
+                    addNotification={addNotification}
+                />
+            )}
+
             <KillConfirmModal 
                 killCandidate={killCandidate} 
                 setKillCandidate={setKillCandidate} 
@@ -1007,5 +1047,12 @@ except Exception as e:
       </LicenseGuard>
     );
 };
+
+const App = () => (
+    <Routes>
+        <Route path="/stream" element={<StreamPage />} />
+        <Route path="/*" element={<MainApp />} />
+    </Routes>
+);
 
 export default App;

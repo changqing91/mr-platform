@@ -4,7 +4,7 @@ import ProjectThumbnail from './ProjectThumbnail';
 import { api } from '../services/api';
 import { api as vredApi } from '../services/vredPython';
 import { MR_TOOLS } from '../constants';
-import { ALL_TOOLS_SCRIPT, getSwitchToolCommand, getCleanupAllCommand } from '../utils/vredPy';
+import { getAllToolsScript, getSwitchToolCommand, getCleanupAllCommand } from '../utils/vredPy';
 
 // --- Camera helpers ---
 const parseVec3 = (v) => {
@@ -238,18 +238,33 @@ const StreamingView = ({
         await removeSceneplateFloor();
     };
 
+    const ensureStreamPanelInjected = async () => {
+        if (!machine) return;
+        try {
+            // 每次进入 XR/MR 都重新注入以更新面板 URL（guard 外的 StreamPanel 段会重新执行）
+            await api.processes.executePython(
+                machine.ip,
+                machine.port || 8888,
+                getAllToolsScript(getStreamPanelUrl())
+            );
+            setIsToolsInjected(true);
+        } catch (e) {
+            console.error('Failed to inject stream panel:', e);
+        }
+    };
+
     const handleEnterXR = async () => {
         updateStreamParam('displayMode', 'xr');
         sendPython('setDisplayMode(VR_DISPLAY_OPEN_XR)');
-        // 关闭底板
         await removeSceneplateFloor();
+        await ensureStreamPanelInjected();
     };
 
     const handleEnterMR = async () => {
         updateStreamParam('displayMode', 'mr');
         sendPython('setDisplayMode(VR_DISPLAY_OPEN_XR)');
-        // 创建底板
         await createSceneplateFloor();
+        await ensureStreamPanelInjected();
     };
 
     const createSceneplateFloor = async () => {
@@ -401,12 +416,17 @@ vrOSGWidget.enableSceneplates(False)
     const [activeTool, setActiveTool] = useState(null);
     const [isToolsInjected, setIsToolsInjected] = useState(false);
 
+    const getStreamPanelUrl = () => {
+        const token = localStorage.getItem('jwt') || '';
+        return `${window.location.origin}/#/stream?machineId=${streamingMachineId}&token=${encodeURIComponent(token)}`;
+    };
+
     const handleSwitchTool = async (tool) => {
         if (!machine) return;
         try {
             let code = '';
             if (!isToolsInjected) {
-                code = ALL_TOOLS_SCRIPT + '\n';
+                code = getAllToolsScript(getStreamPanelUrl()) + '\n';
             }
             code += getSwitchToolCommand(tool.id);
             await api.processes.executePython(machine.ip, machine.port || 8888, code);

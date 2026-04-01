@@ -33,6 +33,9 @@ module.exports = {
         // Process (Custom)
         'api::process.process.launch',
         'api::process.process.stop',
+        // User Admin (Custom)
+        'api::user-admin.user-admin.listUsers',
+        'api::user-admin.user-admin.changePassword',
       ];
 
       const bootstrapPermissions = async (roleType) => {

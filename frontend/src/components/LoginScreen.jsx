@@ -1,8 +1,8 @@
 import React from 'react';
-import { Box, User, Lock, ArrowLeft, AlertTriangle } from 'lucide-react';
+import { Box, User, Lock, ArrowLeft, AlertTriangle, UserPlus } from 'lucide-react';
 import { THEME_COLOR } from '../constants';
 
-const LoginScreen = ({ handleLogin, loginForm, setLoginForm, loginError }) => (
+const LoginScreen = ({ handleLogin, loginForm, setLoginForm, loginError, onRegister }) => (
     <div className="absolute inset-0 z-50 bg-white flex items-center justify-center animate-in fade-in duration-500">
         <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl overflow-hidden relative border border-gray-100">
             <div className="h-2 w-full absolute top-0" style={{ backgroundColor: THEME_COLOR }}></div>
@@ -55,6 +55,16 @@ const LoginScreen = ({ handleLogin, loginForm, setLoginForm, loginError }) => (
                     <button type="submit" className="w-full py-3.5 hover:opacity-90 text-white rounded-xl font-bold shadow-lg shadow-[#39C5BB]/30 transition-all transform active:scale-[0.98] flex items-center justify-center gap-2 mt-4" style={{ backgroundColor: THEME_COLOR }}>
                         登录平台 <ArrowLeft size={18} className="rotate-180" />
                     </button>
+                    {onRegister && (
+                        <button
+                            type="button"
+                            onClick={onRegister}
+                            className="w-full py-3 border border-gray-200 text-gray-600 rounded-xl font-bold hover:bg-gray-50 transition-all flex items-center justify-center gap-2"
+                        >
+                            <UserPlus size={16} />
+                            注册新账户
+                        </button>
+                    )}
                 </form>
             </div>
             <div className="bg-gray-50 p-4 text-center text-xs text-gray-400 border-t border-gray-100">

@@ -436,6 +436,10 @@ else:
             except Exception:
                 pass
             vred_tool_registry[self.registry_key] = self
+            # Hide stream panel when tool is activated
+            global _stream_panel_visible
+            _stream_panel_visible = False
+            _sp_hide()
             vrDeviceService.setActiveInteractionGroup("AdjustGroup")
 
             start = self.pointer.getControllerAction("start")
@@ -578,19 +582,6 @@ else:
             "MoreCurve_S",
         ]
 
-        # MR_Stuff 下的克隆素材，与 _NOTE_TEMPLATE_NAMES 索引一一对应
-        _TAG_ASSET_NAMES = [
-            "tag_Move",
-            "tag_AlignCenter",
-            "tag_Smile",
-            "tag_Passed",
-            "tag_Notice",
-            "tag_AlignTo",
-            "tag_Good",
-            "tag_Flag",
-            "tag_Cancel",
-            "tag_MoreCurve",
-        ]
 
         def __init__(self):
             self.isEnabled = False
@@ -609,16 +600,8 @@ else:
 
             vrDeviceService.getInteraction("Teleport").addSupportedInteractionGroup("NotesGroup")
 
-            # "Tools Menu" 默认把 B 键映射到 "show"，该路径在 VRED 内部与
-            # right-a-pressed 共用触发通道，导致按 B 时 right-a-pressed 也会触发。
-            # 将 "show" 重映射到 left-y-pressed，并加入 NotesGroup，阻断 B 键的
-            # 意外触发（与 ABKey.py 保持一致）。
-            try:
-                _toolsMenu = vrDeviceService.getInteraction("Tools Menu")
-                _toolsMenu.addSupportedInteractionGroup("NotesGroup")
-                _toolsMenu.setControllerActionMapping("show", "left-y-pressed")
-            except Exception:
-                pass
+            # "Tools Menu" 已在初始化时全局禁用（setSupportedInteractionGroups([])），
+            # 这里不再重新添加任何 group，避免其内置 Y 键行为干扰工具状态。
 
             self.triggerRightPressed = self.multiButtonPad.createControllerAction("right-trigger-pressed")
             self.aPressedAction = self.multiButtonPad.createControllerAction("right-a-pressed")
@@ -761,49 +744,23 @@ else:
             global Cloned_ref_obj
             idx = self.currentNoteIndex
 
-            # 1. 从 MR_Stuff 取对应的 tag_xxx 模板（尺寸/材质正确的克隆素材）
-            asset_name = self._TAG_ASSET_NAMES[idx % len(self._TAG_ASSET_NAMES)]
-            tag_node = None
-            # 优先在 MR_Stuff 子树内搜索；VRED findChild 只搜直接子节点，
-            # 改用全局 findNode 作为兜底，tag_xxx 名称在场景中唯一
-            try:
-                mr_stuff = findNode("MR_Stuff")
-                if self._node_exists(mr_stuff):
-                    # 遍历直接子节点匹配名称
-                    for i in range(mr_stuff.getChildCount()):
-                        child = mr_stuff.getChild(i)
-                        if self._node_exists(child) and child.getName() == asset_name:
-                            tag_node = child
-                            break
-            except Exception:
-                tag_node = None
-
-            # 全局兜底
-            if not self._node_exists(tag_node):
-                try:
-                    tag_node = findNode(asset_name)
-                except Exception:
-                    tag_node = None
-
-            if not self._node_exists(tag_node):
-                print("[Notes] _spawn_current_note: tag asset not found: %s" % asset_name)
+            # 直接从 TagIconSwitch 取对应的 xx_S 图标节点作为克隆源
+            templates = self._get_note_templates()
+            if not templates:
+                print("[Notes] _spawn_current_note: no templates found")
                 return
 
-            # 2. 从 TagIconSwitch 取对应的 xx_S 图标节点，用于获取手柄当前世界位置/朝向
-            icon_node = None
-            templates = self._get_note_templates()
-            if templates:
-                icon_node = templates[idx % len(templates)]
-
+            icon_node = templates[idx % len(templates)]
             if not self._node_exists(icon_node):
                 print("[Notes] _spawn_current_note: icon node not found")
                 return
 
+            template_name = self._NOTE_TEMPLATE_NAMES[idx % len(self._NOTE_TEMPLATE_NAMES)]
+
             try:
-                tag_path  = "%s" % getUniquePath(tag_node)
                 icon_path = "%s" % getUniquePath(icon_node)
                 node_num  = random.randint(0, 1000000)
-                clone_name = "%s_%d" % (asset_name, node_num)
+                clone_name = "%s_%d" % (template_name, node_num)
 
                 # 优先收归到 Cloned_ref_obj，保证 cleanup 时能统一删除
                 container_path = ""
@@ -814,21 +771,20 @@ else:
                         container_path = ""
 
                 vrSessionService.sendPython(
-                    '_tag  = findUniquePath("' + tag_path  + '"); '
                     '_icon = findUniquePath("' + icon_path + '"); '
-                    '_bb   = _icon.getBoundingBox(); '
-                    '_wpos = [(_bb[0]+_bb[3])/2.0, (_bb[1]+_bb[4])/2.0, (_bb[2]+_bb[5])/2.0]; '
-                    '_wrot = _icon.getWorldRotation(); '
+                    '_mrRight = findNode("MRcontrollerRight"); '
+                    '_wpos = _mrRight.getWorldTranslation(); '
+                    '_wrot = _mrRight.getWorldRotation(); '
                     '_cpath = "' + container_path + '"; '
                     '_container = findUniquePath(_cpath) if _cpath else getRootNode(); '
-                    'clonedRef = cloneNode(_tag, False); '
+                    'clonedRef = cloneNode(_icon, False); '
                     'clonedRef.setName("' + clone_name + '"); '
                     'moveNode(clonedRef, clonedRef.getParent(), _container); '
                     'clonedRef.setWorldTranslation(_wpos[0], _wpos[1], _wpos[2]); '
-                    'clonedRef.setRotation(_wrot[0] + (-66.48), _wrot[1] + (-0.000006), _wrot[2] + 7.61584); '
+                    'clonedRef.setRotation(_wrot[0], _wrot[1], _wrot[2]); '
                     'addNodeTag(clonedRef, "Cloned Note")'
                 )
-                print("[Notes] spawning %s at icon world transform" % clone_name)
+                print("[Notes] spawning %s at MRcontrollerRight transform" % clone_name)
             except Exception as e:
                 print("[Notes] _spawn_current_note error: %s" % e)
 
@@ -845,6 +801,10 @@ else:
             except Exception:
                 pass
             vred_tool_registry[self.registry_key] = self
+            # Hide stream panel when tool is activated
+            global _stream_panel_visible
+            _stream_panel_visible = False
+            _sp_hide()
             self.multiButtonPad.setSupportedInteractionGroups(["NotesGroup"])
             vrDeviceService.setActiveInteractionGroup("NotesGroup")
 
@@ -922,13 +882,14 @@ else:
             self._enter_add_mode(reset_style=False)
 
         def toggleDeleteMode(self):
-            print("345")
+            print("toggling delete mode, currently deleteNoteIsActive=%s" % self.deleteNoteIsActive)
             if not self.deleteNoteIsActive:
                 self._enter_delete_mode()
             else:
                 self._enter_default_mode()
 
         def ChangeNote(self):
+            print("changing note style, currently deleteNoteIsActive=%s" % self.deleteNoteIsActive)
             if self.deleteNoteIsActive:
                 return
             templates = self._get_note_templates()
@@ -1053,6 +1014,10 @@ else:
             except Exception:
                 pass
             vred_tool_registry[self.registry_key] = self
+            # Hide stream panel when tool is activated
+            global _stream_panel_visible
+            _stream_panel_visible = False
+            _sp_hide()
             setClippingShowManipulator(0)
             try:
                 setClippingContourVisualization(0, Vec3f(0, 0, 0), 0)
@@ -1270,6 +1235,10 @@ else:
             except Exception:
                 pass
             vred_tool_registry[self.registry_key] = self
+            # Hide stream panel when tool is activated
+            global _stream_panel_visible
+            _stream_panel_visible = False
+            _sp_hide()
             vrDeviceService.setActiveInteractionGroup("TurntableGroup")
 
             self.aPressedAction.signal().triggered.connect(self.start_rotation)
@@ -1475,6 +1444,10 @@ else:
             except Exception:
                 pass
             vred_tool_registry[self.registry_key] = self
+            # Hide stream panel when tool is activated
+            global _stream_panel_visible
+            _stream_panel_visible = False
+            _sp_hide()
             self.switchOn()
             self._activate_measure_controller()
             print("[AllTools] MeasureTool enabled")
@@ -1729,6 +1702,10 @@ else:
             except Exception:
                 pass
             vred_tool_registry[self.registry_key] = self
+            # Hide stream panel when tool is activated
+            global _stream_panel_visible
+            _stream_panel_visible = False
+            _sp_hide()
             vrDeviceService.setActiveInteractionGroup("FlashlightGroup")
             # 只连接 aPressedAction；bPressedAction 在此 VRED 环境中与 A 键共用同一物理信号，
             # 不连接 bPressedAction 可确保每次 A 键只触发一次 toggle。
@@ -2480,6 +2457,10 @@ else:
                 except Exception:
                     pass
                 vred_tool_registry[self.registry_key] = self
+                # Hide stream panel when tool is activated
+                global _stream_panel_visible
+                _stream_panel_visible = False
+                _sp_hide()
                 self.multi.setSupportedInteractionGroups(["VoiceNotesGroup"])
                 vrDeviceService.setActiveInteractionGroup("VoiceNotesGroup")
                 self.aPressedAction.signal().triggered.connect(self.on_a_pressed)
@@ -2578,7 +2559,21 @@ else:
             self._timer.setActive(1)
             print("[LeftGripTraction] started (left grip = traction)")
 
+        def _is_locomotion(self):
+            try:
+                return _tool_manager.get_active() is None
+            except Exception:
+                return True
+
         def _tick(self):
+            if not self._is_locomotion():
+                # 非 Locomotion 状态：释放牵引，不做任何移动
+                if self._gripHeld or self._held:
+                    self._gripHeld = False
+                    self._held = False
+                    self._basePos = None
+                    self._originBase = None
+                return
             try:
                 state = self._leftController.getButtonState("grip")
                 pressed = state.isPressed() or state.getPosition().x() >= self._GRIP_THRESHOLD
@@ -2629,6 +2624,123 @@ else:
                 print("[LeftGripTraction] ERROR: " + str(e))
 
     # ======================================================================
+    # LocomotionMode - Locomotion 状态下右手柄飞行 + 截图
+    # ======================================================================
+    class LocomotionMode:
+        """
+        Locomotion 状态下右手柄交互（全局常驻，只在无工具激活时生效）：
+        - Grip: 飞行模式（与 GripFlyMixin 一致）
+        - A 键: 截图，保存到 \\\\192.167.7.80\\upload\\screenshot
+        """
+        SCREENSHOT_DIR  = r"\\192.167.7.80\upload\screenshot"
+        FLY_SPEED       = 0.35
+        FLY_ACCEL       = 0.015
+        FLY_DEAD_ZONE   = 20.0
+        FLY_MAX_STEP    = 45.0
+        _GRIP_THRESHOLD = 0.5
+
+        def __init__(self):
+            self._right      = vrDeviceService.getVRDevice("right-controller")
+            self._flyHeld    = False
+            self._flyBasePos = None
+            self._gripHeld   = False
+
+            # polling timer
+            self._timer = vrTimer()
+            self._timer.connect(self._tick)
+            self._timer.setActive(1)
+
+            # A 键绑定到 Locomotion 交互组
+            try:
+                _old_la = vrDeviceService.getInteraction("LocomotionActions")
+                if _old_la.isValid():
+                    vrDeviceService.removeInteraction(_old_la)
+            except Exception:
+                pass
+            self._loco_interact  = vrDeviceService.createInteraction("LocomotionActions")
+            self._loco_interact.setSupportedInteractionGroups(["Locomotion"])
+            self._aPressedAction = self._loco_interact.createControllerAction("right-a-pressed")
+            self._aPressedAction.signal().triggered.connect(self._take_screenshot)
+            print("[LocomotionMode] started (right grip=fly, right A=screenshot)")
+
+        def _is_locomotion(self):
+            try:
+                return _tool_manager.get_active() is None
+            except Exception:
+                return True
+
+        def _tick(self):
+            if not self._is_locomotion():
+                if self._flyHeld or self._gripHeld:
+                    self._flyHeld    = False
+                    self._flyBasePos = None
+                    self._gripHeld   = False
+                return
+            try:
+                state   = self._right.getButtonState("grip")
+                pressed = state.isPressed() or state.getPosition().x() >= self._GRIP_THRESHOLD
+                if pressed and not self._gripHeld:
+                    self._gripHeld = True
+                    self._on_grip_pressed()
+                elif not pressed and self._gripHeld:
+                    self._gripHeld = False
+                    self._on_grip_released()
+            except Exception:
+                pass
+            self._fly_tick()
+
+        def _on_grip_pressed(self):
+            self._flyHeld = True
+            try:
+                mat = self._right.getTrackingMatrix()
+                col = mat.column(3)
+                self._flyBasePos = (col.x(), col.y(), col.z())
+            except Exception as e:
+                print("[LocomotionMode][GRIP] ERROR: " + str(e))
+                self._flyBasePos = None
+
+        def _on_grip_released(self):
+            self._flyHeld    = False
+            self._flyBasePos = None
+
+        def _fly_tick(self):
+            if not (self._flyHeld and self._flyBasePos is not None):
+                return
+            try:
+                mat  = self._right.getTrackingMatrix()
+                col  = mat.column(3)
+                dx   = col.x() - self._flyBasePos[0]
+                dy   = col.y() - self._flyBasePos[1]
+                dz   = col.z() - self._flyBasePos[2]
+                dist = math.sqrt(dx*dx + dy*dy + dz*dz)
+                if dist > self.FLY_DEAD_ZONE:
+                    d     = dist - self.FLY_DEAD_ZONE
+                    speed = self.FLY_SPEED + d * self.FLY_ACCEL + d * d * 0.0006
+                    speed = min(speed, self.FLY_MAX_STEP)
+                    nx, ny, nz = dx/dist, dy/dist, dz/dist
+                    origin = vrDeviceService.getTrackingOrigin()
+                    vrDeviceService.setTrackingOrigin(QVector3D(
+                        origin.x() - nx * speed,
+                        origin.y() - ny * speed,
+                        origin.z() - nz * speed,
+                    ))
+            except Exception as e:
+                print("[LocomotionMode][FLY] ERROR: " + str(e))
+
+        def _take_screenshot(self, action=None, device=None):
+            if not self._is_locomotion():
+                return
+            try:
+                if not os.path.exists(self.SCREENSHOT_DIR):
+                    os.makedirs(self.SCREENSHOT_DIR)
+                ts   = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                path = os.path.join(self.SCREENSHOT_DIR, "screenshot_" + ts + ".png")
+                vrRenderService.renderToFile(path)
+                print("[LocomotionMode] Screenshot saved: " + path)
+            except Exception as e:
+                print("[LocomotionMode] Screenshot failed: " + str(e))
+
+    # ======================================================================
     # 工具管理器 + 全局 API
     # ======================================================================
     class _ToolManager:
@@ -2650,9 +2762,9 @@ else:
                 except Exception:
                     pass
             # 启用目标工具
+            self.active_tool = name  # 先设置，确保 enable() 期间 get_active() 已返回正确值
             try:
                 self.tools[name].enable()
-                self.active_tool = name
                 print("[AllTools] Switched to: " + str(name))
                 return True
             except Exception as e:
@@ -2717,12 +2829,19 @@ else:
     except Exception as e:
         print("[AllTools] Failed to register VoiceNotes: " + str(e))
 
-    # --- 左手柄 Grip 牵引（全局常驻）---
+    # --- 左手柄 Grip 牵引（全局常驻，只在 Locomotion 状态生效）---
     global _left_grip_traction
     try:
         _left_grip_traction = LeftGripTraction()
     except Exception as e:
         print("[AllTools] Failed to start LeftGripTraction: " + str(e))
+
+    # --- Locomotion 模式右手柄（飞行 + 截图，全局常驻）---
+    global _locomotion_mode
+    try:
+        _locomotion_mode = LocomotionMode()
+    except Exception as e:
+        print("[AllTools] Failed to start LocomotionMode: " + str(e))
 
     # --- 全局 Teleport 绑定 ---
     # try:
@@ -2834,7 +2953,225 @@ def cleanup_all_tools():
     vred_tool_registry = {}
     _tool_manager = _ToolManager()
     _all_tools_initialized = False
+    # 清除 interaction 和 guard 标记，允许重新初始化
+    _sp_geom_node = None
+    if '_sp_interaction' in globals():
+        del globals()['_sp_interaction']
+    if '_left_x_return_guard' in globals():
+        del globals()['_left_x_return_guard']
 
     print("[AllTools] Full cleanup complete. All tools disabled, all nodes removed, state reset.")
 
 print("[AllTools] Script loaded. Available commands: switch_tool(name), disable_all_tools(), get_active_tool(), cleanup_all_tools()")
+
+# ======================================================================
+# 串流面板 + X 键守卫 — 仅首次注入时初始化
+# OpenXR action set 在会话启动后锁定，重注入时不可再创建新 action。
+# ======================================================================
+global _stream_panel_url, _stream_panel_visible, _sp_geom_node
+if '_stream_panel_url' not in globals():
+    _stream_panel_url = globals().get('_STREAM_PANEL_URL', '')
+if '_stream_panel_visible' not in globals():
+    _stream_panel_visible = False
+if '_sp_geom_node' not in globals():
+    _sp_geom_node = None
+
+_SP_NODE_NAME   = "MenuPanel_L"
+_SP_ENGINE_NAME = "MRmenu"
+
+def _sp_build():
+    """找到 OSB 中已有的 MenuPanel_L 节点，设置 WebEngine URL，初始隐藏。"""
+    global _sp_geom_node
+    node = findNode(_SP_NODE_NAME)
+    if not node:
+        print("[StreamPanel] ERROR: node '" + _SP_NODE_NAME + "' not found in scene")
+        return
+    try:
+        if node.isNull():
+            print("[StreamPanel] ERROR: node '" + _SP_NODE_NAME + "' is null")
+            return
+    except AttributeError:
+        pass  # vrNodePtr 无 isNull()，跳过检查
+    _sp_geom_node = node
+
+    # 设置 URL：直接按媒体编辑器中的 WebEngine 名称查找
+    if _stream_panel_url:
+        _url_set = False
+        try:
+            eng = vrWebEngineService.getWebEngine(_SP_ENGINE_NAME)
+            if eng.isValid():
+                eng.setUrl(_stream_panel_url)
+                print("[StreamPanel] URL set on '" + _SP_ENGINE_NAME + "': " + _stream_panel_url)
+                _url_set = True
+        except Exception as _e:
+            print("[StreamPanel] getWebEngine failed: " + str(_e))
+        if not _url_set:
+            # 兜底：遍历所有 WebEngine 找绑定到该节点材质的那个
+            try:
+                geo = vrdGeometryNode(node)
+                mat = geo.getMaterial()
+                if mat and mat.isValid():
+                    for _eng in vrWebEngineService.getWebEngines():
+                        try:
+                            if _eng.getMaterial().getObjectId() == mat.getObjectId():
+                                _eng.setUrl(_stream_panel_url)
+                                print("[StreamPanel] URL set via material match: " + _stream_panel_url)
+                                _url_set = True
+                                break
+                        except Exception:
+                            pass
+            except Exception as _e2:
+                print("[StreamPanel] material fallback failed: " + str(_e2))
+        if not _url_set:
+            print("[StreamPanel] WARNING: could not set URL, no matching WebEngine found")
+
+    # 初始隐藏
+    node.setActive(False)
+    print("[StreamPanel] ready. Node: " + _SP_NODE_NAME)
+
+def _sp_show():
+    """激活 MRmenu 节点（位置由 OSB 约束控制）。"""
+    global _sp_geom_node
+    if _sp_geom_node is None:
+        _sp_build()
+    if _sp_geom_node is None:
+        print("[StreamPanel] show failed: node not available")
+        return
+    _sp_geom_node.setActive(True)
+    print("[StreamPanel] shown")
+
+def _sp_hide():
+    """隐藏 MRmenu 节点。"""
+    global _sp_geom_node
+    try:
+        if _sp_geom_node is not None:
+            _sp_geom_node.setActive(False)
+    except Exception:
+        pass
+    print("[StreamPanel] hidden")
+
+def _sp_toggle():
+    global _stream_panel_visible
+    try:
+        # 仅在 Locomotion（无激活工具）时允许 Y 键切换串流面板。
+        if _tool_manager.get_active() is not None:
+            if _stream_panel_visible:
+                _sp_hide()
+                _stream_panel_visible = False
+            return
+    except Exception:
+        pass
+    # 若 X 键刚刚完成返回 Locomotion，抑制紧随的 Y cross-talk 事件 500ms
+    try:
+        guard = _left_x_return_guard
+        now_ms = int(QtCore.QDateTime.currentMSecsSinceEpoch())
+        if hasattr(guard, '_last_locomotion_ms') and (now_ms - guard._last_locomotion_ms) <= 500:
+            print("[StreamPanel] Y suppressed: too soon after X locomotion return")
+            return
+    except Exception:
+        pass
+    _stream_panel_visible = not _stream_panel_visible
+    if _stream_panel_visible:
+        _sp_show()
+    else:
+        _sp_hide()
+
+# 注入时初始化（找节点、设 URL、隐藏）——仅首次执行
+if _sp_geom_node is None:
+    _sp_build()
+
+# 以下 interaction 注册仅首次注入时执行（OpenXR action set 会话中锁定，不可重建）
+# 每次注入都执行——确保 Tools Menu 始终被真正禁用
+# 注意: setSupportedInteractionGroups([]) 在 VRED 中等同于"所有组"，必须用不存在的组名才能禁用
+try:
+    _toolsMenu = vrDeviceService.getInteraction("Tools Menu")
+    _toolsMenu.setSupportedInteractionGroups(["__disabled__"])
+    print("[StreamPanel] Tools Menu disabled (Y key freed)")
+except Exception as _tme:
+    print("[StreamPanel] Tools Menu disable failed: " + str(_tme))
+
+if '_sp_interaction' not in globals():
+
+    try:
+        _old_sp = vrDeviceService.getInteraction("StreamPanelToggle")
+        if _old_sp.isValid():
+            vrDeviceService.removeInteraction(_old_sp)
+    except Exception:
+        pass
+
+    try:
+        _sp_interaction = vrDeviceService.createInteraction("StreamPanelToggle")
+        _sp_interaction.setSupportedInteractionGroups(["Locomotion"])
+        _sp_y = _sp_interaction.createControllerAction("left-y-pressed")
+        _sp_y.signal().triggered.connect(_sp_toggle)
+        print("[StreamPanel] ready. URL=" + _stream_panel_url)
+    except Exception as _ex:
+        print("[StreamPanel] init error: " + str(_ex))
+
+def _to_locomotion():
+    """禁用所有工具，切换回 Locomotion 状态。"""
+    global _stream_panel_visible
+    try:
+        _tool_manager.disable_all()
+    except Exception:
+        pass
+    try:
+        vrDeviceService.setActiveInteractionGroup("Locomotion")
+    except Exception:
+        pass
+    if _stream_panel_visible:
+        _sp_hide()
+        _stream_panel_visible = False
+    print("[AllTools] Returned to Locomotion (X key)")
+
+
+class _LeftXReturnGuard:
+    """
+    监听左手柄 X 键，任意工具模式下均可触发返回 Locomotion。
+    注册到所有 Group（含 Locomotion），在 Locomotion 下直接忽略。
+    _last_locomotion_ms 供 _sp_toggle() 抑制 X 之后的 Y cross-talk。
+    """
+
+    _ALL_GROUPS = [
+        "AdjustGroup", "NotesGroup", "ClipGroup",
+        "TurntableGroup", "FlashlightGroup", "VoiceNotesGroup",
+    ]
+
+    def __init__(self):
+        self._last_locomotion_ms = -1000000
+        try:
+            _old = vrDeviceService.getInteraction("LocomotionReturn")
+            if _old:
+                vrDeviceService.removeInteraction(_old)
+        except Exception:
+            pass
+        self._interaction = vrDeviceService.createInteraction("LocomotionReturn")
+        self._interaction.setSupportedInteractionGroups(self._ALL_GROUPS)
+        self._x = self._interaction.createControllerAction("left-x-pressed")
+        self._x.signal().triggered.connect(self._on_x)
+        print("[AllTools] LeftXReturnGuard ready (event, all groups)")
+
+    def _now_ms(self):
+        try:
+            return int(QtCore.QDateTime.currentMSecsSinceEpoch())
+        except Exception:
+            return 0
+
+    def _on_x(self, action=None, device=None):
+        try:
+            active = _tool_manager.get_active()
+        except Exception:
+            active = None
+        if active is None:
+            return  # Locomotion 下不处理
+        self._last_locomotion_ms = self._now_ms()
+        print("[AllTools] LocomotionReturn triggered (X)")
+        _to_locomotion()
+
+
+global _left_x_return_guard
+if '_left_x_return_guard' not in globals():
+    try:
+        _left_x_return_guard = _LeftXReturnGuard()
+    except Exception as _ex:
+        print("[AllTools] LeftXReturnGuard init error: " + str(_ex))

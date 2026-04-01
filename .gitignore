@@ -4,3 +4,4 @@ vrdemo
 .data
 tools/license-gen/private.pem
 server/license.lic
+*.epub

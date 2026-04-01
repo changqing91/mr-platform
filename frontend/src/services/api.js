@@ -50,9 +50,55 @@ export const api = {
             // It doesn't follow { data: ... } wrapper usually
             if (!res.ok) {
                 const error = await res.json();
-                throw new Error(error.error?.message || 'Login Failed');
+                const msg = error.error?.message || '';
+                // Translate common Strapi auth error messages to Chinese
+                if (msg.toLowerCase().includes('identifier') || msg.toLowerCase().includes('password') || msg.toLowerCase().includes('invalid')) {
+                    throw new Error('账号或密码错误');
+                }
+                if (msg.toLowerCase().includes('blocked')) {
+                    throw new Error('账户已被锁定，请联系管理员');
+                }
+                if (msg.toLowerCase().includes('confirmed')) {
+                    throw new Error('账户尚未激活');
+                }
+                throw new Error(msg || '登录失败');
             }
             return res.json();
+        },
+        register: async (username, email, password) => {
+            const res = await fetch(`${API_URL}/auth/local/register`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, email, password })
+            });
+            if (!res.ok) {
+                const error = await res.json();
+                const msg = error.error?.message || '';
+                if (msg.toLowerCase().includes('already taken') || msg.toLowerCase().includes('unique')) {
+                    throw new Error('用户名或邮箱已被注册');
+                }
+                if (msg.toLowerCase().includes('email')) {
+                    throw new Error('邮箱格式无效');
+                }
+                throw new Error(msg || '注册失败');
+            }
+            return res.json();
+        }
+    },
+    userAdmin: {
+        listUsers: async () => {
+            const res = await fetch(`${API_URL}/user-admin/users`, {
+                headers: getAuthHeaders()
+            });
+            return unwrap(res);
+        },
+        changePassword: async (userId, password) => {
+            const res = await fetch(`${API_URL}/user-admin/users/${userId}/password`, {
+                method: 'PUT',
+                headers: getAuthHeaders(),
+                body: JSON.stringify({ password })
+            });
+            return unwrap(res);
         }
     },
     projects: {
