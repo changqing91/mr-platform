@@ -568,6 +568,7 @@ else:
           Trigger: 默认模式 -> TagAdd_R；再次点击 -> 放置当前标注
           B:       在 TagAdd_R 模式下循环切换标注样式
           A:       切换删除模式
+          Grip:    靠近已放置标注后按住 → 拖动移位
         """
         _NOTE_TEMPLATE_NAMES = [
             "Move_S",
@@ -582,6 +583,7 @@ else:
             "MoreCurve_S",
         ]
 
+        _TOUCH_DIST = 150.0  # mm — controller must be within this distance to grab a note
 
         def __init__(self):
             self.isEnabled = False
@@ -612,6 +614,15 @@ else:
 
             self.registry_key = "tool_draw_note"
             self.newRightCon = None
+
+            # ── grip drag ──
+            self._GRIP_THRESHOLD = 0.5
+            self._gripHeld = False
+            self._grip_held = False
+            self._dragging_node = None
+            self._drag_constraint = None
+            self._gripTimer = vrTimer()
+            self._gripTimerConnected = False
 
         def _set_controller_choice(self, choice):
             try:
@@ -724,6 +735,86 @@ else:
                     return None
             return None
 
+        def _get_all_cloned_notes(self):
+            """Return all scene nodes tagged 'Cloned Note' (placed graphic annotations)."""
+            result = []
+            try:
+                for node in getAllNodes():
+                    try:
+                        if hasNodeTag(node, 'Cloned Note'):
+                            result.append(node)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            return result
+
+        def _poll_grip(self):
+            try:
+                state = self.rightController.getButtonState("grip")
+                pressed = state.isPressed() or state.getPosition().x() >= self._GRIP_THRESHOLD
+                if pressed and not self._gripHeld:
+                    self._gripHeld = True
+                    self.on_grip_pressed()
+                elif not pressed and self._gripHeld:
+                    self._gripHeld = False
+                    self.on_grip_released()
+            except Exception:
+                pass
+
+        def on_grip_pressed(self, action=None, device=None):
+            if self._grip_held:
+                return
+            if self._drag_constraint is not None:
+                try:
+                    vrConstraintService.deleteConstraint(self._drag_constraint)
+                except Exception:
+                    pass
+                self._drag_constraint = None
+            best_node = None
+            best_dist = Notes._TOUCH_DIST
+            try:
+                ctrl_pos = getTransformNodeTranslation(self.rightController.getNode(), 1)
+                cx, cy, cz = ctrl_pos.x(), ctrl_pos.y(), ctrl_pos.z()
+                for node in self._get_all_cloned_notes():
+                    try:
+                        p = getTransformNodeTranslation(node, 1)
+                        dx = p.x() - cx
+                        dy = p.y() - cy
+                        dz = p.z() - cz
+                        dist = math.sqrt(dx*dx + dy*dy + dz*dz)
+                        if dist <= best_dist:
+                            best_dist = dist
+                            best_node = node
+                    except Exception:
+                        pass
+            except Exception as e:
+                print("[Notes] Grip proximity check failed: " + str(e))
+            if best_node is None:
+                print("[Notes] Grip: 范围内无可拖动标注 (TOUCH_DIST=%.1f mm)" % Notes._TOUCH_DIST)
+                return
+            try:
+                self._drag_constraint = vrConstraintService.createParentConstraint(
+                    [self.rightController.getNode()], best_node, False)
+                self._grip_held = True
+                self._dragging_node = best_node
+                self._set_controller_choice(10)
+                print("[Notes] Grip → 开始拖动: " + best_node.getName())
+            except Exception as e:
+                print("[Notes] Grip → createParentConstraint 失败: " + str(e))
+
+        def on_grip_released(self, action=None, device=None):
+            if self._drag_constraint is not None:
+                try:
+                    vrConstraintService.deleteConstraint(self._drag_constraint)
+                except Exception:
+                    pass
+                self._drag_constraint = None
+            self._grip_held = False
+            self._dragging_node = None
+            self._set_controller_choice(1)
+            print("[Notes] Grip released → 停止拖动")
+
         def _on_pointer_start(self, action, device):
             """Pointer interaction callback – used for picking in delete mode."""
             if not self.deleteNoteIsActive:
@@ -782,7 +873,8 @@ else:
                     'moveNode(clonedRef, clonedRef.getParent(), _container); '
                     'clonedRef.setWorldTranslation(_wpos[0], _wpos[1], _wpos[2]); '
                     'clonedRef.setRotation(_wrot[0], _wrot[1], _wrot[2]); '
-                    'addNodeTag(clonedRef, "Cloned Note")'
+                    'addNodeTag(clonedRef, "Cloned Note"); '
+                    'vrScenegraphService.clearSelection()'
                 )
                 print("[Notes] spawning %s at MRcontrollerRight transform" % clone_name)
             except Exception as e:
@@ -812,6 +904,11 @@ else:
             self.aPressedAction.signal().triggered.connect(self.toggleDeleteMode)
             self.bPressedAction.signal().triggered.connect(self.ChangeNote)
             self.pointer.getControllerAction("start").signal().triggered.connect(self._on_pointer_start)
+            # grip 轮询 timer
+            if not self._gripTimerConnected:
+                self._gripTimer.connect(self._poll_grip)
+                self._gripTimerConnected = True
+            self._gripTimer.setActive(1)
             self.currentNoteIndex = 0
             self._set_note_style(0)
 
@@ -825,7 +922,7 @@ else:
                 [self.rightController.getNode()], self.newRightCon, False)
 
             self._enter_default_mode()
-            print("[AllTools] Notes enabled")
+            print("[AllTools] Notes enabled (Trigger=放置, A=删除, B=切换样式, Grip靠近=拖动)")
 
         def disable(self):
             self.isEnabled = False
@@ -854,6 +951,19 @@ else:
                 self.pointer.getControllerAction("start").signal().triggered.disconnect(self._on_pointer_start)
             except Exception:
                 pass
+            try:
+                self._gripTimer.setActive(0)
+            except Exception:
+                pass
+            self._gripHeld = False
+            if self._drag_constraint is not None:
+                try:
+                    vrConstraintService.deleteConstraint(self._drag_constraint)
+                except Exception:
+                    pass
+                self._drag_constraint = None
+            self._grip_held = False
+            self._dragging_node = None
             try:
                 if hasattr(self, 'NoteControllerConstraint') and self.NoteControllerConstraint:
                     vrConstraintService.deleteConstraint(self.NoteControllerConstraint)
@@ -2105,6 +2215,10 @@ else:
                 rect.setActive(True)
                 # setIsVRNode(rect, True)
                 rect.setName("VNR_" + (label if label else "VoiceNode"))
+                try:
+                    vrScenegraphService.clearSelection()
+                except Exception:
+                    pass
                 self._store_rect_scale(rect)
                 if position:
                     setTransformNodeTranslation(rect, position.x(), position.y(), position.z(), 1)
