@@ -1072,8 +1072,11 @@ else:
 
             self.triggerRightPressed = multiButtonPadClip.createControllerAction("right-trigger-pressed")
             self.triggerRightReleased = multiButtonPadClip.createControllerAction("right-trigger-released")
-            self.aPressedAction = multiButtonPadClip.createControllerAction("right-a-pressed")
-            self.bPressedAction = multiButtonPadClip.createControllerAction("right-b-pressed")
+            # A and B use getButtonState polling (OpenXR fires xa+yb simultaneously)
+            self._aHeld = False
+            self._bHeld = False
+            self._abTimer = vrTimer()
+            self._abTimerConnected = False
 
             self.registry_key = "tool_section"
             self.newRightCon = None
@@ -1141,6 +1144,26 @@ else:
                     pass
             print("[SectionTool] flipped=%s" % self.flipped)
 
+        def _poll_ab(self):
+            try:
+                a_pressed = self.rightController.getButtonState("xa").isPressed()
+                if a_pressed and not self._aHeld:
+                    self._aHeld = True
+                    self.toggle_clipping()
+                elif not a_pressed:
+                    self._aHeld = False
+            except Exception:
+                pass
+            try:
+                b_pressed = self.rightController.getButtonState("yb").isPressed()
+                if b_pressed and not self._bHeld:
+                    self._bHeld = True
+                    self.toggle_flipped()
+                elif not b_pressed:
+                    self._bHeld = False
+            except Exception:
+                pass
+
         def enable(self):
             self.isEnabled = True
             try:
@@ -1166,8 +1189,12 @@ else:
 
             self.triggerRightPressed.signal().triggered.connect(self.on_trigger_pressed)
             self.triggerRightReleased.signal().triggered.connect(self.on_trigger_released)
-            self.aPressedAction.signal().triggered.connect(self.toggle_clipping)
-            self.bPressedAction.signal().triggered.connect(self.toggle_flipped)
+            if not self._abTimerConnected:
+                self._abTimer.connect(self._poll_ab)
+                self._abTimerConnected = True
+            self._aHeld = False
+            self._bHeld = False
+            self._abTimer.setActive(1)
 
             if not self.timerConnected:
                 self.timer.connect(self._update_loop)
@@ -1204,13 +1231,11 @@ else:
             except Exception:
                 pass
             try:
-                self.aPressedAction.signal().triggered.disconnect(self.toggle_clipping)
+                self._abTimer.setActive(0)
             except Exception:
                 pass
-            try:
-                self.bPressedAction.signal().triggered.disconnect(self.toggle_flipped)
-            except Exception:
-                pass
+            self._aHeld = False
+            self._bHeld = False
             try:
                 self.timer.setActive(0)
             except Exception:
