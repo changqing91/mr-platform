@@ -606,8 +606,11 @@ else:
             # 这里不再重新添加任何 group，避免其内置 Y 键行为干扰工具状态。
 
             self.triggerRightPressed = self.multiButtonPad.createControllerAction("right-trigger-pressed")
-            self.aPressedAction = self.multiButtonPad.createControllerAction("right-a-pressed")
-            self.bPressedAction = self.multiButtonPad.createControllerAction("right-b-pressed")
+            # Both A and B use getButtonState polling (OpenXR fires xa+yb simultaneously)
+            self._aHeld = False
+            self._bHeld = False
+            self._abTimer = vrTimer()
+            self._abTimerConnected = False
 
             self.pointer = vrDeviceService.getInteraction("Pointer")
             self.pointer.addSupportedInteractionGroup("NotesGroup")
@@ -748,6 +751,30 @@ else:
             except Exception:
                 pass
             return result
+
+        def _poll_ab(self):
+            try:
+                a_pressed = self.rightController.getButtonState("xa").isPressed()
+                if a_pressed and not self._aHeld:
+                    self._aHeld = True
+                    self.toggleDeleteMode()
+                elif not a_pressed:
+                    self._aHeld = False
+            except Exception:
+                pass
+            try:
+                b_pressed = self.rightController.getButtonState("yb").isPressed()
+                if b_pressed and not self._bHeld:
+                    self._bHeld = True
+                    self.ChangeNote()
+                elif not b_pressed:
+                    self._bHeld = False
+            except Exception:
+                pass
+
+        def _poll_b(self):
+            # kept for compatibility; replaced by _poll_ab
+            pass
 
         def _poll_grip(self):
             try:
@@ -901,8 +928,12 @@ else:
             vrDeviceService.setActiveInteractionGroup("NotesGroup")
 
             self.triggerRightPressed.signal().triggered.connect(self.trigger_right_pressed)
-            self.aPressedAction.signal().triggered.connect(self.toggleDeleteMode)
-            self.bPressedAction.signal().triggered.connect(self.ChangeNote)
+            if not self._abTimerConnected:
+                self._abTimer.connect(self._poll_ab)
+                self._abTimerConnected = True
+            self._aHeld = False
+            self._bHeld = False
+            self._abTimer.setActive(1)
             self.pointer.getControllerAction("start").signal().triggered.connect(self._on_pointer_start)
             # grip 轮询 timer
             if not self._gripTimerConnected:
@@ -927,7 +958,7 @@ else:
         def disable(self):
             self.isEnabled = False
             try:
-                self.multiButtonPad.setSupportedInteractionGroups([])
+                self.multiButtonPad.setSupportedInteractionGroups(["__disabled__"])
             except Exception:
                 pass
             try:
@@ -940,13 +971,11 @@ else:
             except Exception:
                 pass
             try:
-                self.aPressedAction.signal().triggered.disconnect(self.toggleDeleteMode)
+                self._abTimer.setActive(0)
             except Exception:
                 pass
-            try:
-                self.bPressedAction.signal().triggered.disconnect(self.ChangeNote)
-            except Exception:
-                pass
+            self._aHeld = False
+            self._bHeld = False
             try:
                 self.pointer.getControllerAction("start").signal().triggered.disconnect(self._on_pointer_start)
             except Exception:
@@ -1247,9 +1276,11 @@ else:
             self.pointer = vrDeviceService.getInteraction("Pointer")
             self.pointer.addSupportedInteractionGroup("TurntableGroup")
 
-            self.aPressedAction = self.multiButtonPad.createControllerAction("right-a-pressed")
-            self.aReleasedAction = self.multiButtonPad.createControllerAction("right-a-released")
-            self.bPressedAction = self.multiButtonPad.createControllerAction("right-b-pressed")
+            self.aPressedAction = self.multiButtonPad.createControllerAction("right-xa-pressed")
+            # A released and B pressed use getButtonState polling (OpenXR xa-released triggers yb-pressed bug)
+            self._bHeld = False
+            self._bTimer = vrTimer()
+            self._bTimerConnected = False
 
             self.registry_key = "tool_turntable"
 
@@ -1323,6 +1354,18 @@ else:
             except Exception:
                 self.nodeRefReady = False
 
+        def _poll_b(self):
+            try:
+                state = self.rightController.getButtonState("yb")
+                pressed = state.isPressed()
+                if pressed and not self._bHeld:
+                    self._bHeld = True
+                    self.restore_rotation()
+                elif not pressed:
+                    self._bHeld = False
+            except Exception:
+                pass
+
         def _start_timer(self):
             self.timer.setActive(0)
             if not self.timerConnected:
@@ -1352,8 +1395,11 @@ else:
             vrDeviceService.setActiveInteractionGroup("TurntableGroup")
 
             self.aPressedAction.signal().triggered.connect(self.start_rotation)
-            self.aReleasedAction.signal().triggered.connect(self.stop_rotation)
-            self.bPressedAction.signal().triggered.connect(self.restore_rotation)
+            if not self._bTimerConnected:
+                self._bTimer.connect(self._poll_b)
+                self._bTimerConnected = True
+            self._bHeld = False
+            self._bTimer.setActive(1)
 
             self._sessionOriginalAngleSaved = False
 
@@ -1380,13 +1426,10 @@ else:
             except Exception:
                 pass
             try:
-                self.aReleasedAction.signal().triggered.disconnect(self.stop_rotation)
+                self._bTimer.setActive(0)
             except Exception:
                 pass
-            try:
-                self.bPressedAction.signal().triggered.disconnect(self.restore_rotation)
-            except Exception:
-                pass
+            self._bHeld = False
             try:
                 self.rightController.setVisible(1)
             except Exception:
@@ -1461,6 +1504,13 @@ else:
             self._stop_timer()
 
         def updateRotation(self):
+            # Poll A released via getButtonState (xa-released event is buggy in OpenXR)
+            if self.aHeld:
+                try:
+                    if not self.rightController.getButtonState("xa").isPressed():
+                        self.stop_rotation()
+                except Exception:
+                    pass
             if not self.aHeld or not self.node:
                 return
             try:
