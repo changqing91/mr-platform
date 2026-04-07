@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { ShieldX, ShieldCheck, Upload, AlertTriangle, Loader } from 'lucide-react';
+import { ShieldX, ShieldCheck, Upload, AlertTriangle, Loader, Copy, Check } from 'lucide-react';
 import { THEME_COLOR } from '../constants';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
@@ -21,7 +21,7 @@ async function uploadLicense(licenseObj) {
 const REASON_LABELS = {
   LICENSE_NOT_FOUND: '未找到许可证',
   LICENSE_PARSE_ERROR: '许可证格式错误',
-  SIGNATURE_INVALID: '许可证签名无效',
+  SIGNATURE_INVALID: '许可证签名无效',         
   MACHINE_ID_MISMATCH: '机器绑定不符',
   LICENSE_EXPIRED: '许可证已过期',
 };
@@ -31,6 +31,14 @@ export default function LicenseGuard({ children }) {
   const [uploading, setUploading] = useState(false);
   const [uploadResult, setUploadResult] = useState(null);
   const [dragging, setDragging] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const copyMachineId = () => {
+    navigator.clipboard.writeText(status.current_machine_id).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
 
   const checkLicense = useCallback(async () => {
     try {
@@ -163,8 +171,18 @@ export default function LicenseGuard({ children }) {
           {/* Machine ID */}
           {status.current_machine_id && (
             <div className="mt-6 bg-gray-50 rounded-xl p-4">
-              <p className="text-xs text-gray-500 mb-1">当前服务器机器 ID（发送给 WhatTech 申请许可证）</p>
-              <code className="text-xs text-gray-700 break-all leading-relaxed">
+              <div className="flex items-center justify-between mb-1">
+                <p className="text-xs text-gray-500">当前服务器机器 ID（发送给 WhatTech 申请许可证）</p>
+                <button
+                  onClick={copyMachineId}
+                  className="flex items-center gap-1 text-xs px-2 py-1 rounded-lg transition-colors shrink-0 whitespace-nowrap"
+                  style={copied ? { color: '#16a34a', backgroundColor: '#f0fdf4' } : { color: THEME_COLOR, backgroundColor: `${THEME_COLOR}15` }}
+                >
+                  {copied ? <Check size={12} /> : <Copy size={12} />}
+                  {copied ? '已复制' : '复制'}
+                </button>
+              </div>
+              <code className="text-xs text-gray-700 break-all leading-relaxed select-all">
                 {status.current_machine_id}
               </code>
             </div>

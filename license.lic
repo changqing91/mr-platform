@@ -1,8 +1,8 @@
 {
   "version": 1,
   "customer": "whattech",
-  "machine_id": "1d4034c1c907faab77f40639c714e4b912506595328a9e11eb0eb7c43b89abb1",
-  "issued_at": "2026-03-31",
+  "machine_id": "75a787808ffd7741a8f93d2e20705a0f3a37f4eaf7fb5e61ed6c6b8ee71f6280",
+  "issued_at": "2026-04-07",
   "expires_at": "2027-03-26",
-  "signature": "GAs66EmLVji2QsdN7Vm8OMRvyvcEWCtL6eA3GTEvDVl8lfEZw5rfwI2goYoU1NBnTVV3Hb/cP4yXsmhT2dcvX8E4jz087qXu/b/7XPn2XtIG1lFOTojIsYjDRK/3LSQFcEqDHtBWHIVpLVQnBBqqBYGvWDzNwWbYNtG93xpbzh+52Po5VaqssIW7a2WbjujAc+Xre1eeROjnQhjs5usQ09ZkhrL0UOecjB9j4tYn5iLbadRVZPQyM+GXS/IAXupr5Ak2nlYas5u+WJNbwFWRks7UtadaoM8BFgnGn8pyz9BC3+dThWos8Ftyw/c2CR33JA98tPLVhH07mnBZ0LdNrw=="
+  "signature": "hKmRMYs9G+EH3R2ZIi5S47VXUmzUG3H+I1Wp6Ycpad+Wt3yLZN/+bCkkxz+2gElbgLWsTmLNm2w8qDlucp9HBww/9cRWK2KcTXcMToaJnWz+a40E2n5krRFrauSkTTcuuJfCECFD1jW5ROYf0ohkjF20Wu+B1Niy+FO0gAFoqdkb8c7XqMH1csIUugYhVpaBIoBrs2KbzW9nC0HIr3ExJCYix2sF00lz0OFv7fiGCwmQ/vlpKeS0J3hKejP+x5RhVommKjh4f8qR7oCqWrtvymCRUHmugDO9N2Ilmu/GEv0ollQ/D5PUAZbJgg3Sztusff5O9xDvUovodaekf7nGJQ=="
 }
