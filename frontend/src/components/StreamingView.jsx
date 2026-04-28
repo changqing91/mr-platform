@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { ArrowLeft, Activity, Glasses, SplitSquareHorizontal, ImageIcon, Headset, FolderOpen, Monitor, RotateCcw, Power, Zap } from 'lucide-react';
+import { ArrowLeft, Activity, Glasses, SplitSquareHorizontal, ImageIcon, Headset, FolderOpen, Monitor, RotateCcw, Power, Zap, Save, CheckCircle, XCircle } from 'lucide-react';
 import ProjectThumbnail from './ProjectThumbnail';
 import { api } from '../services/api';
 import { api as vredApi } from '../services/vredPython';
@@ -449,12 +449,61 @@ vrOSGWidget.enableSceneplates(False)
     };
 
     const [iframeLoading, setIframeLoading] = useState(true);
+    const [isSaving, setIsSaving] = useState(false);
+    const [saveResult, setSaveResult] = useState(null); // { ok: bool, msg: string } | null
 
     const onIframeLoad = () => {
         setIframeLoading(false);
     };
 
     const goBack = () => setStreamingMachineId(null);
+
+    const handleSaveAs = async () => {
+        if (!machine || isSaving) return;
+        setIsSaving(true);
+        setSaveResult(null);
+        try {
+            const tusdPrefix = import.meta.env.VITE_TUSD_PATH_PREFIX || '';
+            const backupDir = (tusdPrefix + 'backup\\').replace(/\\/g, '\\\\');
+
+            // 从 project 记录直接取文件名，避免依赖 VRED Python API
+            let rawFileName = project?.fileName || project?.name || 'backup';
+            // 确保扩展名为 .vpb
+            const fileName = rawFileName.toLowerCase().endsWith('.vpb')
+                ? rawFileName
+                : rawFileName.replace(/\.[^.]+$/, '') + '.vpb';
+
+            const pythonScript = `
+import os
+
+try:
+    fileName = '${fileName}'
+    backupDir = '${backupDir}'
+    if not os.path.exists(backupDir):
+        os.makedirs(backupDir)
+    savePath = os.path.join(backupDir, fileName)
+    vrFileIOService.saveFile(savePath)
+    print('SAVE_OK:' + savePath)
+except Exception as e:
+    print('SAVE_ERR:' + str(e))
+`;
+            const result = await api.processes.executePython(machine.ip, machine.port || 8888, pythonScript);
+            const output = typeof result === 'string' ? result : JSON.stringify(result);
+            if (output && output.includes('SAVE_ERR:')) {
+                const errMsg = output.split('SAVE_ERR:')[1]?.split('\n')[0] || '保存失败';
+                setSaveResult({ ok: false, msg: errMsg });
+            } else {
+                const pathMatch = output && output.match(/SAVE_OK:(.+)/);
+                const savedPath = pathMatch ? pathMatch[1].trim() : '已保存';
+                setSaveResult({ ok: true, msg: savedPath });
+            }
+        } catch (e) {
+            setSaveResult({ ok: false, msg: e.message || '执行失败' });
+        } finally {
+            setIsSaving(false);
+            setTimeout(() => setSaveResult(null), 5000);
+        }
+    };
 
     const vredUrl = machine ? `http://${machine.ip}:${machine.port || 8888}/apps/VREDStreamApp/index.html` : '';
 
@@ -466,6 +515,24 @@ vrOSGWidget.enableSceneplates(False)
                     <button onClick={goBack} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 transition-colors text-sm">
                         <ArrowLeft size={16} />退出预览
                     </button>
+                    <button
+                        onClick={handleSaveAs}
+                        disabled={isSaving}
+                        className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                        title={`另存为 VPB 到 backup 文件夹`}
+                    >
+                        {isSaving
+                            ? <div className="w-4 h-4 border-2 border-t-transparent border-[#39C5BB] rounded-full animate-spin" />
+                            : <Save size={16} className="text-[#39C5BB]" />
+                        }
+                        另存为
+                    </button>
+                    {saveResult && (
+                        <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono max-w-xs truncate animate-in fade-in duration-300 ${saveResult.ok ? 'bg-green-900/40 border border-green-700 text-green-400' : 'bg-red-900/40 border border-red-700 text-red-400'}`}>
+                            {saveResult.ok ? <CheckCircle size={12} /> : <XCircle size={12} />}
+                            <span className="truncate">{saveResult.ok ? `已保存: ${saveResult.msg}` : `失败: ${saveResult.msg}`}</span>
+                        </div>
+                    )}
                     <div className="h-6 w-[1px] bg-gray-700"></div>
                     <div>
                         <h2 className="text-lg font-bold flex items-center gap-2">
