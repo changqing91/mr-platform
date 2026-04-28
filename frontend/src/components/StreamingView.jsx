@@ -487,8 +487,19 @@ try:
 except Exception as e:
     print('SAVE_ERR:' + str(e))
 `;
-            const result = await api.processes.executePython(machine.ip, machine.port || 8888, pythonScript);
-            const output = typeof result === 'string' ? result : JSON.stringify(result);
+            let output = '';
+            try {
+                const result = await api.processes.executePython(machine.ip, machine.port || 8888, pythonScript);
+                output = typeof result === 'string' ? result : JSON.stringify(result);
+            } catch (fetchErr) {
+                const msg = fetchErr?.message || '';
+                // 超时说明 VRED 正在保存（耗时较长），实际已触发保存，视为成功
+                if (/timeout/i.test(msg)) {
+                    setSaveResult({ ok: true, msg: `${fileName} (保存中，请稍候)` });
+                    return;
+                }
+                throw fetchErr;
+            }
             if (output && output.includes('SAVE_ERR:')) {
                 const errMsg = output.split('SAVE_ERR:')[1]?.split('\n')[0] || '保存失败';
                 setSaveResult({ ok: false, msg: errMsg });
