@@ -3255,15 +3255,6 @@ def _sp_toggle():
             return
     except Exception:
         pass
-    # 若 X 键刚刚完成返回 Locomotion，抑制紧随的 Y cross-talk 事件 500ms
-    try:
-        guard = _left_x_return_guard
-        now_ms = int(QtCore.QDateTime.currentMSecsSinceEpoch())
-        if hasattr(guard, '_last_locomotion_ms') and (now_ms - guard._last_locomotion_ms) <= 500:
-            print("[StreamPanel] Y suppressed: too soon after X locomotion return")
-            return
-    except Exception:
-        pass
     _stream_panel_visible = not _stream_panel_visible
     if _stream_panel_visible:
         _sp_show()
@@ -3284,23 +3275,8 @@ try:
 except Exception as _tme:
     print("[StreamPanel] Tools Menu disable failed: " + str(_tme))
 
-if '_sp_interaction' not in globals():
-
-    try:
-        _old_sp = vrDeviceService.getInteraction("StreamPanelToggle")
-        if _old_sp.isValid():
-            vrDeviceService.removeInteraction(_old_sp)
-    except Exception:
-        pass
-
-    try:
-        _sp_interaction = vrDeviceService.createInteraction("StreamPanelToggle")
-        _sp_interaction.setSupportedInteractionGroups(["Locomotion"])
-        _sp_y = _sp_interaction.createControllerAction("left-y-pressed")
-        _sp_y.signal().triggered.connect(_sp_toggle)
-        print("[StreamPanel] ready. URL=" + _stream_panel_url)
-    except Exception as _ex:
-        print("[StreamPanel] init error: " + str(_ex))
+# X / Y 按键通过 _LeftXReturnGuard 轮询处理（OpenXR left-x-pressed 会同时触发 left-y-pressed）
+# StreamPanelToggle createInteraction 不再需要
 
 def _to_locomotion():
     """禁用所有工具，切换回 Locomotion 状态。"""
@@ -3321,29 +3297,19 @@ def _to_locomotion():
 
 class _LeftXReturnGuard:
     """
-    监听左手柄 X 键，任意工具模式下均可触发返回 Locomotion。
-    注册到所有 Group（含 Locomotion），在 Locomotion 下直接忽略。
-    _last_locomotion_ms 供 _sp_toggle() 抑制 X 之后的 Y cross-talk。
+    左手柄 X / Y 键轮询 (OpenXR createControllerAction 存在 X→Y 串扰 bug)。
+    X: 任意工具状态下返回 Locomotion
+    Y: Locomotion 状态下切换串流面板
     """
 
-    _ALL_GROUPS = [
-        "AdjustGroup", "NotesGroup", "ClipGroup",
-        "TurntableGroup", "FlashlightGroup", "VoiceNotesGroup",
-    ]
-
     def __init__(self):
-        self._last_locomotion_ms = -1000000
-        try:
-            _old = vrDeviceService.getInteraction("LocomotionReturn")
-            if _old:
-                vrDeviceService.removeInteraction(_old)
-        except Exception:
-            pass
-        self._interaction = vrDeviceService.createInteraction("LocomotionReturn")
-        self._interaction.setSupportedInteractionGroups(self._ALL_GROUPS)
-        self._x = self._interaction.createControllerAction("left-x-pressed")
-        self._x.signal().triggered.connect(self._on_x)
-        print("[AllTools] LeftXReturnGuard ready (event, all groups)")
+        self._xHeld = False
+        self._yHeld = False
+        self._leftController = vrDeviceService.getVRDevice("left-controller")
+        self._pollTimer = vrTimer()
+        self._pollTimer.connect(self._poll_xy)
+        self._pollTimer.setActive(1)
+        print("[AllTools] LeftXReturnGuard ready (polling, X=locomotion, Y=stream panel)")
 
     def _now_ms(self):
         try:
@@ -3351,16 +3317,38 @@ class _LeftXReturnGuard:
         except Exception:
             return 0
 
-    def _on_x(self, action=None, device=None):
+    def _poll_xy(self):
+        try:
+            x_pressed = self._leftController.getButtonState("xa").isPressed()
+            if x_pressed and not self._xHeld:
+                self._xHeld = True
+                self._on_x()
+            elif not x_pressed:
+                self._xHeld = False
+        except Exception:
+            pass
+        try:
+            y_pressed = self._leftController.getButtonState("yb").isPressed()
+            if y_pressed and not self._yHeld:
+                self._yHeld = True
+                self._on_y()
+            elif not y_pressed:
+                self._yHeld = False
+        except Exception:
+            pass
+
+    def _on_x(self):
         try:
             active = _tool_manager.get_active()
         except Exception:
             active = None
         if active is None:
             return  # Locomotion 下不处理
-        self._last_locomotion_ms = self._now_ms()
         print("[AllTools] LocomotionReturn triggered (X)")
         _to_locomotion()
+
+    def _on_y(self):
+        _sp_toggle()
 
 
 global _left_x_return_guard
