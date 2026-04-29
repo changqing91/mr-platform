@@ -225,6 +225,20 @@ export const api = {
                 body: JSON.stringify({ ip, port, code })
             });
             return unwrap(res);
+        },
+        getScriptConfig: async () => {
+            const res = await fetch(`${API_URL}/processes/script-config`, {
+                headers: getAuthHeaders()
+            });
+            return unwrap(res);
+        },
+        saveScriptConfig: async (config) => {
+            const res = await fetch(`${API_URL}/processes/script-config`, {
+                method: 'PUT',
+                headers: getAuthHeaders(),
+                body: JSON.stringify(config)
+            });
+            return unwrap(res);
         }
     },
     upload: async (file) => {

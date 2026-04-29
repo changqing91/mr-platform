@@ -156,7 +156,7 @@ module.exports = createCoreController('api::process.process', ({ strapi }) => ({
                                 res.on('end', resolve);
                             });
                             req.on('error', resolve);
-                            req.setTimeout(10000, () => { req.destroy(); resolve(); });
+                            req.setTimeout(10000, () => { req.destroy(); resolve(null); });
                         });
                     } catch (e) {
                         console.error(`Failed to clear VRED scene on ${p.machine.ip}:`, e);
@@ -196,7 +196,7 @@ module.exports = createCoreController('api::process.process', ({ strapi }) => ({
                                 res.on('end', resolve);
                             });
                             req.on('error', resolve);
-                            req.setTimeout(10000, () => { req.destroy(); resolve(); });
+                            req.setTimeout(10000, () => { req.destroy(); resolve(null); });
                         });
                     } catch (e) {
                         console.error(`Failed to clear VRED scene on ${p.machine.ip}:`, e);
@@ -244,7 +244,7 @@ module.exports = createCoreController('api::process.process', ({ strapi }) => ({
                                 res.on('end', resolve);
                             });
                             req.on('error', resolve);
-                            req.setTimeout(10000, () => { req.destroy(); resolve(); });
+                            req.setTimeout(10000, () => { req.destroy(); resolve(null); });
                         });
                     } catch (e) {
                         console.error(`Failed to clear VRED scene on ${p.machine.ip}:`, e);
@@ -281,6 +281,29 @@ module.exports = createCoreController('api::process.process', ({ strapi }) => ({
             return { message: 'Command executed', result };
         } catch (error) {
             console.error('ExecutePython Error:', error);
+            return ctx.internalServerError(error.message);
+        }
+    },
+
+    async getScriptConfig(ctx) {
+        try {
+            const store = strapi.store({ type: 'global' });
+            const config = await store.get({ key: 'mr_platform_startup_script_config' });
+            return config || {};
+        } catch (error) {
+            console.error('GetScriptConfig Error:', error);
+            return ctx.internalServerError(error.message);
+        }
+    },
+
+    async saveScriptConfig(ctx) {
+        try {
+            const config = ctx.request.body;
+            const store = strapi.store({ type: 'global' });
+            await store.set({ key: 'mr_platform_startup_script_config', value: config });
+            return config;
+        } catch (error) {
+            console.error('SaveScriptConfig Error:', error);
             return ctx.internalServerError(error.message);
         }
     },
@@ -328,11 +351,38 @@ module.exports = createCoreController('api::process.process', ({ strapi }) => ({
             // Ensure path format is compatible with VRED Python (forward slashes are safer)
             const sanitizedPath = finalPath.replace(/\\/g, '/');
             const isWireFile = sanitizedPath.toLowerCase().endsWith('.wire');
-            const loadCommand = isWireFile
-                ? `vrLiveReferenceService.importFile("${sanitizedPath}")`
-                : `vrFileIOService.loadFile("${sanitizedPath}")`;
 
-            console.log(`Loading project on ${machine.ip}:${vredPort}: ${loadCommand}`);
+            // Load startup script config from store and build Python snippet
+            const store = strapi.store({ type: 'global' });
+            const scriptConfig = (await store.get({ key: 'mr_platform_startup_script_config' })) || {};
+            const startupLines = [];
+            if (scriptConfig.dlssQuality !== undefined && scriptConfig.dlssQuality !== null) {
+                startupLines.push(`vrOSGWidget.setDLSSQuality(${Number(scriptConfig.dlssQuality)})`);
+            }
+            if (scriptConfig.customScript?.trim()) {
+                startupLines.push(scriptConfig.customScript.trim());
+            }
+            const startupScript = startupLines.join('\n');
+
+            let pythonCommand;
+            if (isWireFile) {
+                pythonCommand = `vrLiveReferenceService.importFile("${sanitizedPath}")`;
+            } else if (startupScript.trim()) {
+                // Hook into projectLoadFinished signal so startup script runs AFTER file is fully loaded.
+                // Using a unique callback name per launch to avoid collisions.
+                const cbName = `_mr_startup_${Date.now()}`;
+                const indented = startupScript.split('\n').map(l => '        ' + l).join('\n');
+                pythonCommand = `def ${cbName}(filename, success):
+    vrFileIOService.projectLoadFinished.disconnect(${cbName})
+    if success:
+${indented}
+vrFileIOService.projectLoadFinished.connect(${cbName})
+vrFileIOService.loadFile("${sanitizedPath}")`;
+            } else {
+                pythonCommand = `vrFileIOService.loadFile("${sanitizedPath}")`;
+            }
+
+            console.log(`Loading project on ${machine.ip}:${vredPort}`);
 
             // For VPB files: first clear scene synchronously via /python, then load via /pythonasyncr
             // This prevents multiple models accumulating when loadFile is called repeatedly
@@ -358,9 +408,9 @@ module.exports = createCoreController('api::process.process', ({ strapi }) => ({
                 });
             }
 
-            // Call VRED WebInterface to load the project file
+            // Call VRED WebInterface to load the project file (with optional startup script hooked via signal)
             await new Promise((resolve, reject) => {
-                const req = http.get(`http://${machine.ip}:${vredPort}/pythonasyncr?value=${encodeURIComponent(loadCommand)}`, (res) => {
+                const req = http.get(`http://${machine.ip}:${vredPort}/pythonasyncr?value=${encodeURIComponent(pythonCommand)}`, (res) => {
                     let responseData = '';
                     res.on('data', (chunk) => responseData += chunk);
                     res.on('end', () => {

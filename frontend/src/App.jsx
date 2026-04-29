@@ -69,6 +69,7 @@ const MainApp = () => {
     const [pendingLaunches, setPendingLaunches] = useState({}); // { machineId: projectId } (Staged for batch launch)
     const [streamingMachineId, setStreamingMachineId] = useState(null);
     const [collaborationMachineIds, setCollaborationMachineIds] = useState(new Set());
+    const [globalScriptConfig, setGlobalScriptConfig] = useState({});
 
     // --- State: Modals ---
     const [showProjectModal, setShowProjectModal] = useState(false);
@@ -174,6 +175,14 @@ const MainApp = () => {
             return next;
         });
     }, [runningMachines]);
+
+    useEffect(() => {
+        if (isLoggedIn) {
+            api.processes.getScriptConfig().then(config => {
+                if (config) setGlobalScriptConfig(config);
+            }).catch(e => console.error('Failed to load script config', e));
+        }
+    }, [isLoggedIn]);
 
     // --- Handlers: Auth ---
     const handleLogin = async (e) => {
@@ -683,7 +692,7 @@ except Exception as e:
                 const projectId = launchesToProcess[machineId];
                 try {
                     await api.processes.launch(machineId, projectId);
-                    
+
                     // Success: Update UI
                     setBootingMachines(prev => {
                         const next = new Set(prev);
@@ -960,6 +969,12 @@ except Exception as e:
                         setActiveMachineId={setActiveMachineId}
                         setShowMonitorWall={setShowMonitorWall}
                         setIsBatchMode={setIsBatchMode}
+                        machineScriptConfigs={undefined}
+                        globalScriptConfig={globalScriptConfig}
+                        onScriptConfigChange={async (config) => {
+                            setGlobalScriptConfig(config);
+                            try { await api.processes.saveScriptConfig(config); } catch(e) { console.error('Failed to save script config', e); }
+                        }}
                         collaborationMachineIds={collaborationMachineIds}
                         toggleMachineCollaboration={toggleMachineCollaboration}
                     />

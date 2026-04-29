@@ -1,6 +1,7 @@
+import React, { useState } from 'react';
 import { 
     Monitor, Layers2, Copy, CheckSquare, Power, Trash2, Plus, 
-    Play, RefreshCw, Link, Rocket, Server, RotateCcw, Square, Edit2
+    Play, RefreshCw, Link, Rocket, Server, RotateCcw, Square, Edit2, Sliders
 } from 'lucide-react';
 import ProjectThumbnail from './ProjectThumbnail';
 import { THEME_COLOR } from '../constants';
@@ -31,9 +32,18 @@ const MachineList = ({
     setShowMonitorWall,
     setIsBatchMode,
     collaborationMachineIds,
-    toggleMachineCollaboration
+    toggleMachineCollaboration,
+    globalScriptConfig,
+    onScriptConfigChange,
 }) => {
     const pendingCount = Object.keys(pendingLaunches).length;
+    const [showScriptPanel, setShowScriptPanel] = useState(false);
+
+    const updateGlobalConfig = (updates) => {
+        const next = { ...globalScriptConfig, ...updates };
+        onScriptConfigChange(next);
+    };
+    const hasScriptConfig = (globalScriptConfig?.dlssQuality !== undefined && globalScriptConfig?.dlssQuality !== null) || !!globalScriptConfig?.customScript?.trim();
 
     return (
         <aside className="w-[320px] lg:w-[30%] max-w-[480px] bg-gray-50 border-l border-gray-200 flex flex-col relative shrink-0">
@@ -49,7 +59,64 @@ const MachineList = ({
                             {isBatchMode ? `批量模式: 已选 ${selectedBatchIds.size} 个节点` : '选择项目以进行绑定，或管理现有节点'}
                         </p>
                     </div>
+                    <button
+                        onClick={() => setShowScriptPanel(v => !v)}
+                        className={`p-2 rounded-lg transition-colors ${showScriptPanel || hasScriptConfig ? 'bg-violet-100 text-violet-600' : 'text-gray-400 hover:bg-gray-100 hover:text-violet-500'}`}
+                        title="全局启动脚本配置"
+                    >
+                        <Sliders size={18} />
+                    </button>
                 </div>
+
+                {/* Global Script Config Panel */}
+                {showScriptPanel && (
+                    <div className="mb-4 rounded-xl border border-violet-200 bg-violet-50/60 p-3 space-y-3">
+                        <div className="text-xs font-bold text-violet-500 uppercase tracking-wider flex items-center gap-1.5">
+                            <Sliders size={12} />
+                            全局启动脚本配置
+                        </div>
+
+                        {/* DLSS */}
+                        <div className="space-y-2 pb-2 border-b border-violet-200">
+                            <div className="flex items-center justify-between">
+                                <span className="text-xs font-medium text-gray-700">DLSS</span>
+                                <select
+                                    value={globalScriptConfig?.dlssQuality ?? ''}
+                                    onChange={e => updateGlobalConfig({ dlssQuality: e.target.value === '' ? null : Number(e.target.value) })}
+                                    className="text-xs border border-violet-200 rounded px-2 py-0.5 bg-white focus:outline-none focus:border-violet-400"
+                                >
+                                    <option value={''}>不设置</option>
+                                    <option value={0}>关闭 (VR_DLSS_OFF)</option>
+                                    <option value={2}>性能 (VR_DLSS_PERFORMANCE)</option>
+                                    <option value={3}>均衡 (VR_DLSS_BALANCED)</option>
+                                    <option value={4}>质量 (VR_DLSS_QUALITY)</option>
+                                    <option value={5}>超高性能 (VR_DLSS_ULTRA_PERFORMANCE)</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        {/* Custom Script */}
+                        <div className="space-y-1.5">
+                            <div className="text-xs font-medium text-gray-700">自定义 Python 脚本</div>
+                            <textarea
+                                value={globalScriptConfig?.customScript || ''}
+                                onChange={e => updateGlobalConfig({ customScript: e.target.value })}
+                                placeholder="# 项目加载后执行..."
+                                className="w-full text-xs font-mono border border-violet-200 rounded-lg p-2 resize-none focus:outline-none focus:border-violet-400 bg-white placeholder-gray-300"
+                                rows={3}
+                            />
+                        </div>
+
+                        {hasScriptConfig && (
+                            <button
+                                onClick={() => onScriptConfigChange({})}
+                                className="text-xs text-gray-400 hover:text-red-400 transition-colors"
+                            >
+                                清除配置
+                            </button>
+                        )}
+                    </div>
+                )}
 
                 <div className="grid grid-cols-2 gap-3">
                     {/* Contextual Row */}
@@ -118,8 +185,8 @@ const MachineList = ({
                      let isClickable = !isOffline;
 
                      return (
+                         <React.Fragment key={machine.id}>
                          <div 
-                            key={machine.id}
                             onClick={() => { if(isClickable) handleMachineClick(machine); }}
                             className={`
                                 relative p-3 rounded-xl border-2 transition-all duration-200 group shadow-sm hover:shadow-md flex gap-3 
@@ -239,6 +306,8 @@ const MachineList = ({
                                  </div>
                              </div>
                          </div>
+
+                         </React.Fragment>
                      );
                  })}
              </div>
