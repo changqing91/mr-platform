@@ -682,24 +682,6 @@ except Exception as e:
             await Promise.all(machineIds.map(async (machineId) => {
                 const projectId = launchesToProcess[machineId];
                 try {
-                    // 如果节点已经在运行，先停止进程
-                    if (runningMachines[machineId]) {
-                        try {
-                            await api.processes.kill(machineId);
-                            // 从运行列表中移除
-                            setRunningMachines(prev => {
-                                const next = { ...prev };
-                                delete next[machineId];
-                                return next;
-                            });
-                            // 等待一小段时间确保进程完全停止
-                            await new Promise(resolve => setTimeout(resolve, 1000));
-                        } catch (stopError) {
-                            console.error(`Failed to stop process on ${machineId}:`, stopError);
-                            // 继续尝试启动，让后端处理冲突
-                        }
-                    }
-                    
                     await api.processes.launch(machineId, projectId);
                     
                     // Success: Update UI

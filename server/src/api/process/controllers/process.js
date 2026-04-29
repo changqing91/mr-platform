@@ -136,7 +136,7 @@ module.exports = createCoreController('api::process.process', ({ strapi }) => ({
             const processes = await strapi.entityService.findMany('api::process.process', {
                 filters: {
                     machine: machineId,
-                    status: 'running'
+                    status: { $in: ['running', 'starting'] }
                 },
                 populate: ['machine']
             });
@@ -145,9 +145,32 @@ module.exports = createCoreController('api::process.process', ({ strapi }) => ({
                 return ctx.notFound('No running process found for this machine');
             }
 
-            await Promise.all(processes.map(p => terminateProcess(strapi, p)));
+            // Clear VRED scene and clean DB records, do not terminate VRED process
+            await Promise.all(processes.map(async (p) => {
+                if (p.machine) {
+                    const port = p.machine.port || 8888;
+                    try {
+                        await new Promise((resolve) => {
+                            const req = http.get(`http://${p.machine.ip}:${port}/python?value=${encodeURIComponent('vrFileIOService.newFile()')}`, (res) => {
+                                res.on('data', () => {});
+                                res.on('end', resolve);
+                            });
+                            req.on('error', resolve);
+                            req.setTimeout(10000, () => { req.destroy(); resolve(); });
+                        });
+                    } catch (e) {
+                        console.error(`Failed to clear VRED scene on ${p.machine.ip}:`, e);
+                    }
+                }
+                await strapi.entityService.delete('api::process.process', p.id);
+                if (p.machine) {
+                    await strapi.entityService.update('api::machine.machine', p.machine.id, {
+                        data: { status: 'idle', current_project: null }
+                    });
+                }
+            }));
 
-            return { message: 'Process terminated' };
+            return { message: 'Process record cleared' };
 
         } catch (error) {
             console.error('Kill Error:', error);
@@ -158,13 +181,36 @@ module.exports = createCoreController('api::process.process', ({ strapi }) => ({
     async killAll(ctx) {
         try {
             const processes = await strapi.entityService.findMany('api::process.process', {
-                filters: { status: 'running' },
+                filters: { status: { $in: ['running', 'starting'] } },
                 populate: ['machine']
             });
 
-            await Promise.all(processes.map(p => terminateProcess(strapi, p)));
+            // Clear VRED scene and clean DB records, do not terminate VRED processes
+            await Promise.all(processes.map(async (p) => {
+                if (p.machine) {
+                    const port = p.machine.port || 8888;
+                    try {
+                        await new Promise((resolve) => {
+                            const req = http.get(`http://${p.machine.ip}:${port}/python?value=${encodeURIComponent('vrFileIOService.newFile()')}`, (res) => {
+                                res.on('data', () => {});
+                                res.on('end', resolve);
+                            });
+                            req.on('error', resolve);
+                            req.setTimeout(10000, () => { req.destroy(); resolve(); });
+                        });
+                    } catch (e) {
+                        console.error(`Failed to clear VRED scene on ${p.machine.ip}:`, e);
+                    }
+                }
+                await strapi.entityService.delete('api::process.process', p.id);
+                if (p.machine) {
+                    await strapi.entityService.update('api::machine.machine', p.machine.id, {
+                        data: { status: 'idle', current_project: null }
+                    });
+                }
+            }));
 
-            return { message: `Terminated ${processes.length} processes` };
+            return { message: `Cleared ${processes.length} process records` };
         } catch (error) {
             console.error('KillAll Error:', error);
             return ctx.internalServerError(error.message);
@@ -187,9 +233,32 @@ module.exports = createCoreController('api::process.process', ({ strapi }) => ({
                 populate: ['machine']
             });
 
-            await Promise.all(processes.map(p => terminateProcess(strapi, p)));
+            // Clear VRED scene and clean DB records, do not terminate VRED processes
+            await Promise.all(processes.map(async (p) => {
+                if (p.machine) {
+                    const port = p.machine.port || 8888;
+                    try {
+                        await new Promise((resolve) => {
+                            const req = http.get(`http://${p.machine.ip}:${port}/python?value=${encodeURIComponent('vrFileIOService.newFile()')}`, (res) => {
+                                res.on('data', () => {});
+                                res.on('end', resolve);
+                            });
+                            req.on('error', resolve);
+                            req.setTimeout(10000, () => { req.destroy(); resolve(); });
+                        });
+                    } catch (e) {
+                        console.error(`Failed to clear VRED scene on ${p.machine.ip}:`, e);
+                    }
+                }
+                await strapi.entityService.delete('api::process.process', p.id);
+                if (p.machine) {
+                    await strapi.entityService.update('api::machine.machine', p.machine.id, {
+                        data: { status: 'idle', current_project: null }
+                    });
+                }
+            }));
 
-            return { message: `Terminated ${processes.length} processes` };
+            return { message: `Cleared ${processes.length} process records` };
         } catch (error) {
             console.error('BatchKill Error:', error);
             return ctx.internalServerError(error.message);
@@ -239,19 +308,18 @@ module.exports = createCoreController('api::process.process', ({ strapi }) => ({
             if (!machine) return ctx.notFound('Machine not found');
             if (!project) return ctx.notFound('Project not found');
 
-            // // Check for existing running/starting process and terminate it
-            // const existingProcesses = await strapi.entityService.findMany('api::process.process', {
-            //     filters: {
-            //         machine: machineId,
-            //         status: { $in: ['running', 'starting'] }
-            //     },
-            //     populate: ['machine']
-            // });
+            // Check for existing DB records and clean them up (without killing VRED)
+            const existingProcesses = await strapi.entityService.findMany('api::process.process', {
+                filters: {
+                    machine: machineId,
+                    status: { $in: ['running', 'starting'] }
+                }
+            });
 
-            // if (existingProcesses && existingProcesses.length > 0) {
-            //     console.log(`Found ${existingProcesses.length} existing processes for machine ${machineId}, terminating...`);
-            //     await Promise.all(existingProcesses.map(p => terminateProcess(strapi, p)));
-            // }
+            if (existingProcesses && existingProcesses.length > 0) {
+                console.log(`Found ${existingProcesses.length} existing process records for machine ${machineId}, cleaning DB...`);
+                await Promise.all(existingProcesses.map(p => strapi.entityService.delete('api::process.process', p.id)));
+            }
 
             // Construct Command
             const vredPort = machine.port || 8888;
@@ -260,15 +328,39 @@ module.exports = createCoreController('api::process.process', ({ strapi }) => ({
             // Ensure path format is compatible with VRED Python (forward slashes are safer)
             const sanitizedPath = finalPath.replace(/\\/g, '/');
             const isWireFile = sanitizedPath.toLowerCase().endsWith('.wire');
-            const pythonCommand = isWireFile
+            const loadCommand = isWireFile
                 ? `vrLiveReferenceService.importFile("${sanitizedPath}")`
-                : `vrFileIOService.newFile()\nvrFileIOService.loadFile("${sanitizedPath}")`;
+                : `vrFileIOService.loadFile("${sanitizedPath}")`;
 
-            console.log(`Loading project on ${machine.ip}:${vredPort}: ${pythonCommand}`);
+            console.log(`Loading project on ${machine.ip}:${vredPort}: ${loadCommand}`);
 
-            // Call VRED WebInterface
+            // For VPB files: first clear scene synchronously via /python, then load via /pythonasyncr
+            // This prevents multiple models accumulating when loadFile is called repeatedly
+            if (!isWireFile) {
+                console.log(`Clearing scene with newFile() before loading...`);
+                await new Promise((resolve, reject) => {
+                    const req = http.get(`http://${machine.ip}:${vredPort}/python?value=${encodeURIComponent('vrFileIOService.newFile()')}`, (res) => {
+                        let responseData = '';
+                        res.on('data', (chunk) => responseData += chunk);
+                        res.on('end', () => {
+                            console.log('newFile Response:', responseData);
+                            resolve(responseData);
+                        });
+                    });
+                    req.on('error', (e) => {
+                        console.error('newFile Request Error:', e);
+                        reject(e);
+                    });
+                    req.setTimeout(15000, () => {
+                        req.destroy();
+                        reject(new Error('newFile timeout'));
+                    });
+                });
+            }
+
+            // Call VRED WebInterface to load the project file
             await new Promise((resolve, reject) => {
-                const req = http.get(`http://${machine.ip}:${vredPort}/pythonasyncr?value=${encodeURIComponent(pythonCommand)}`, (res) => {
+                const req = http.get(`http://${machine.ip}:${vredPort}/pythonasyncr?value=${encodeURIComponent(loadCommand)}`, (res) => {
                     let responseData = '';
                     res.on('data', (chunk) => responseData += chunk);
                     res.on('end', () => {
