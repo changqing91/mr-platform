@@ -6,7 +6,7 @@ module.exports = {
     { method: 'POST', path: '/processes/kill',           handler: 'process.kill' },
     { method: 'POST', path: '/processes/kill-all',       handler: 'process.killAll' },
     { method: 'POST', path: '/processes/batch-kill',     handler: 'process.batchKill' },
-    { method: 'POST', path: '/processes/execute-python', handler: 'process.executePython' },
+    { method: 'POST', path: '/processes/execute-python', handler: 'process.executePython', config: { auth: false } },
     { method: 'GET',  path: '/processes/script-config',  handler: 'process.getScriptConfig' },
     { method: 'PUT',  path: '/processes/script-config',  handler: 'process.saveScriptConfig' },
   ]

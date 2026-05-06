@@ -2004,6 +2004,10 @@ else:
             self._eraserTimer = vrTimer()
             self._eraserTimerConnected = False
 
+            # ── pending node creation (deferred to release) ──
+            self._pending_position = None
+            self._pending_rotation = None
+
             # ── misc ──
             self.isEnabled = False
             self.registry_key = "tool_voice_note"
@@ -2323,48 +2327,35 @@ else:
             path = os.path.join(base_dir, "voice_note_" + ts + ".wav")
             recorder = self._ensure_recorder()
             recorder.setOutputLocation(QtCore.QUrl.fromLocalFile(path))
-            rect, annotation = self._create_note_node(ts + " Recording", position, rotation)
             recorder.record()
             self._is_recording = True
-            self._current_rect = rect
-            self._current_annotation = annotation
+            self._current_rect = None
+            self._current_annotation = None
             self._current_audio_path = path
             self._current_label = ts
-            if rect:
-                key = self._get_rect_key(rect)
-                print("key2: " + key)
-                if key:
-                    self._rect_audio_paths[key] = path
+            self._pending_position = position
+            self._pending_rotation = rotation
 
         def _stop_recording(self):
             self._ensure_recorder().stop()
             self._is_recording = False
-            rect = self._current_rect
-            if rect:
-                old_key = self._get_rect_key(rect)
-                print("key4: " + old_key)
-                label = self._current_label
-                try:
-                    rect.setName("VNR_" + label)
-                except Exception:
-                    pass
-                if self._current_annotation:
-                    try:
-                        self._current_annotation.setText(label)
-                    except Exception:
-                        pass
-                new_key = self._get_rect_key(rect)
-                if old_key and new_key and old_key != new_key:
-                    for d in (self._rect_audio_paths, self._rect_base_scales,
-                                self._rect_annotations, self._rect_labels,
-                                self._voice_note_nodes):
-                        if old_key in d:
-                            d[new_key] = d.pop(old_key)
-                final_key = new_key or old_key
-                if final_key:
-                    self._rect_labels[final_key] = label
-                self._last_rect = rect
-            self._last_audio_path = self._current_audio_path
+            label = self._current_label
+            path = self._current_audio_path
+            position = self._pending_position
+            rotation = self._pending_rotation
+            self._pending_position = None
+            self._pending_rotation = None
+            rect = None
+            if label and path:
+                rect, annotation = self._create_note_node(label, position, rotation)
+                if rect:
+                    key = self._get_rect_key(rect)
+                    print("key4: " + str(key))
+                    if key:
+                        self._rect_audio_paths[key] = path
+                        self._rect_labels[key] = label
+            self._last_rect = rect
+            self._last_audio_path = path
             self._current_rect = None
             self._current_annotation = None
             self._current_audio_path = None
@@ -2470,27 +2461,29 @@ else:
             self._bTimer.stop()
             self._b_down = False
             findNode("CtrllrR_UI").fields().setInt32("choice", 8)
-            pos = None
-            rot = None
-            try:
-                mrRight = findNode("MRcontrollerRight")
-                if mrRight:
-                    wpos = mrRight.getWorldTranslation()
-                    wrot = mrRight.getWorldRotation()
-                    pos = Vec3f(wpos[0], wpos[1], wpos[2])
-                    rot = Vec3f(wrot[0], wrot[1], wrot[2])
-            except Exception:
-                pass
-            if pos is None:
-                pos = self._get_controller_forward_position(self.rightController)
-            self._start_recording(pos, rot)
-            print("[VoiceNotes] A pressed → 开始录音，位置: " + str(pos))
+            self._start_recording(None, None)
+            print("[VoiceNotes] A pressed → 开始录音")
 
         def on_a_released(self, action_obj=None, device_obj=None):
             if self._is_recording:
+                pos = None
+                rot = None
+                try:
+                    mrRight = findNode("MRcontrollerRight")
+                    if mrRight:
+                        wpos = mrRight.getWorldTranslation()
+                        wrot = mrRight.getWorldRotation()
+                        pos = Vec3f(wpos[0], wpos[1], wpos[2])
+                        rot = Vec3f(wrot[0], wrot[1], wrot[2])
+                except Exception:
+                    pass
+                if pos is None:
+                    pos = self._get_controller_forward_position(self.rightController)
+                self._pending_position = pos
+                self._pending_rotation = rot
                 self._stop_recording()
                 findNode("CtrllrR_UI").fields().setInt32("choice", 7)
-                print("[VoiceNotes] A released → 结束录音")
+                print("[VoiceNotes] A released → 结束录音，位置: " + str(pos))
 
         def on_trigger_pressed(self, action_obj=None, device_obj=None):
             print("[VoiceNotes] Trigger pressed → 射线检测播放")
@@ -3246,15 +3239,6 @@ def _sp_hide():
 
 def _sp_toggle():
     global _stream_panel_visible
-    try:
-        # 仅在 Locomotion（无激活工具）时允许 Y 键切换串流面板。
-        if _tool_manager.get_active() is not None:
-            if _stream_panel_visible:
-                _sp_hide()
-                _stream_panel_visible = False
-            return
-    except Exception:
-        pass
     _stream_panel_visible = not _stream_panel_visible
     if _stream_panel_visible:
         _sp_show()

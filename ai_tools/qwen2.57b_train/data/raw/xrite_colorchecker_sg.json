@@ -1,0 +1,58 @@
+[
+  {
+    "chart": "ColorChecker SG",
+    "total_patches": 140,
+    "description": "X-Rite ColorChecker SG (Semi-Gloss) with 140 patches for professional color profiling",
+    "note": "此文件为部分示例数据，完整数据需从X-Rite官方获取或通过测量设备采集",
+    "patches": [
+      {
+        "patch_id": "A1",
+        "name": "Near Black",
+        "name_zh": "近黑色",
+        "Lab": {"L": 14.31, "a": 0.12, "b": -0.33},
+        "RGB_sRGB": {"R": 34, "G": 34, "B": 35},
+        "category": "neutral"
+      },
+      {
+        "patch_id": "A2",
+        "name": "Very Dark Gray",
+        "name_zh": "极深灰",
+        "Lab": {"L": 22.05, "a": 0.08, "b": -0.19},
+        "RGB_sRGB": {"R": 52, "G": 52, "B": 53},
+        "category": "neutral"
+      },
+      {
+        "patch_id": "A3",
+        "name": "Dark Gray",
+        "name_zh": "深灰",
+        "Lab": {"L": 29.73, "a": 0.03, "b": -0.25},
+        "RGB_sRGB": {"R": 70, "G": 70, "B": 71},
+        "category": "neutral"
+      },
+      {
+        "patch_id": "B1",
+        "name": "Vivid Red",
+        "name_zh": "鲜红色",
+        "Lab": {"L": 41.22, "a": 58.34, "b": 31.45},
+        "RGB_sRGB": {"R": 176, "G": 39, "B": 47},
+        "category": "chromatic"
+      },
+      {
+        "patch_id": "B2",
+        "name": "Vivid Orange",
+        "name_zh": "鲜橙色",
+        "Lab": {"L": 61.87, "a": 39.72, "b": 63.21},
+        "RGB_sRGB": {"R": 217, "G": 118, "B": 33},
+        "category": "chromatic"
+      },
+      {
+        "patch_id": "B3",
+        "name": "Vivid Yellow",
+        "name_zh": "鲜黄色",
+        "Lab": {"L": 85.42, "a": -5.23, "b": 86.11},
+        "RGB_sRGB": {"R": 240, "G": 216, "B": 0},
+        "category": "chromatic"
+      }
+    ]
+  }
+]

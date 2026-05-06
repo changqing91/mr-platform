@@ -2,7 +2,7 @@
 /**
  * generate.js - 厂商许可证签名生成工具
  * 用法: node generate.js --machine-id <id> --customer <name> --expires <YYYY-MM-DD> [--out <file>]
- * 示例: node generate.js --machine-id "a3f8c2..." --customer "某某集团" --expires "2027-03-26"
+ * 示例: node generate.js --machine-id "75a787808ffd7741a8f93d2e20705a0f3a37f4eaf7fb5e61ed6c6b8ee71f6280" --customer "某某集团" --expires "2027-03-26"
  */
 'use strict';
 

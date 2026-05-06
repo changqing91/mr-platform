@@ -55,20 +55,20 @@ const executePythonOnVRED = async (ip, port, code) => {
     const totalChunks = Math.ceil(b64.length / B64_CHUNK_SIZE);
     console.log(`[executePython] Code too large (${code.length} chars, encoded ${encodedLength}). Splitting into ${totalChunks} base64 chunks.`);
 
-    // 第一块: 初始化变量
+    // 第一块: 用字典初始化（键为整数索引，确保无论执行顺序如何都能按序拼接）
     const firstChunk = b64.slice(0, B64_CHUNK_SIZE);
-    await sendPythonToVRED(ip, port, `_py_b64_code = "${firstChunk}"`);
+    await sendPythonToVRED(ip, port, `_py_b64 = {0: "${firstChunk}"}`);
 
-    // 后续块: 追加
+    // 后续块: 写入对应索引
     for (let i = 1; i < totalChunks; i++) {
         const chunk = b64.slice(i * B64_CHUNK_SIZE, (i + 1) * B64_CHUNK_SIZE);
-        await sendPythonToVRED(ip, port, `_py_b64_code += "${chunk}"`);
+        await sendPythonToVRED(ip, port, `_py_b64[${i}] = "${chunk}"`);
     }
 
-    // 解码并执行
+    // 按索引排序后拼接、解码并执行
     const result = await sendPythonToVRED(
         ip, port,
-        `exec(__import__('base64').b64decode(_py_b64_code).decode('utf-8'))`,
+        `exec(__import__('base64').b64decode(''.join(_py_b64[k] for k in sorted(_py_b64))).decode('utf-8'))`,
         30000  // 大代码执行可能需要更长时间
     );
 

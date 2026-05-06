@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { ArrowLeft, Activity, Glasses, SplitSquareHorizontal, ImageIcon, Headset, FolderOpen, Monitor, RotateCcw, Power, Zap, Save, CheckCircle, XCircle } from 'lucide-react';
+import { ArrowLeft, Activity, Glasses, SplitSquareHorizontal, ImageIcon, Headset, FolderOpen, Monitor, RotateCcw, Power, Zap, Save, CheckCircle, XCircle, Mic, MicOff } from 'lucide-react';
 import ProjectThumbnail from './ProjectThumbnail';
 import { api } from '../services/api';
 import { api as vredApi } from '../services/vredPython';
@@ -257,14 +257,14 @@ const StreamingView = ({
         updateStreamParam('displayMode', 'xr');
         sendPython('setDisplayMode(VR_DISPLAY_OPEN_XR)');
         await removeSceneplateFloor();
-        await ensureStreamPanelInjected();
+        // await ensureStreamPanelInjected();
     };
 
     const handleEnterMR = async () => {
         updateStreamParam('displayMode', 'mr');
         sendPython('setDisplayMode(VR_DISPLAY_OPEN_XR)');
         await createSceneplateFloor();
-        await ensureStreamPanelInjected();
+        // await ensureStreamPanelInjected();
     };
 
     const createSceneplateFloor = async () => {
@@ -452,6 +452,139 @@ vrOSGWidget.enableSceneplates(False)
     const [isSaving, setIsSaving] = useState(false);
     const [saveResult, setSaveResult] = useState(null); // { ok: bool, msg: string } | null
 
+    // --- Voice control state ---
+    // Use same-origin proxy (/voice-api) so getUserMedia works over HTTPS
+    const VOICE_SERVICE_URL = '/voice-api';
+    const [isRecording, setIsRecording] = useState(false);
+    const [voiceStatus, setVoiceStatus] = useState(null); // { ok, msg } | null
+    const [voiceTranscript, setVoiceTranscript] = useState('');
+    const [variantSets, setVariantSets] = useState([]);
+    const [chatInput, setChatInput] = useState('');
+    const [chatLoading, setChatLoading] = useState(false);
+    const mediaRecorderRef = useRef(null);
+    const audioChunksRef = useRef([]);
+
+    const fetchVariantSets = async () => {
+        if (!machine) return;
+        try {
+            const params = new URLSearchParams({
+                vred_ip: machine.ip,
+                vred_port: machine.port || 8888,
+            });
+            const resp = await fetch(`${VOICE_SERVICE_URL}/variant-sets?${params}`);
+            if (resp.ok) {
+                const data = await resp.json();
+                setVariantSets(data.variant_sets || []);
+            }
+        } catch (e) {
+            console.error('Failed to fetch variant sets:', e);
+        }
+    };
+
+    const sendTextCommand = async (text) => {
+        if (!text.trim() || chatLoading) return;
+        setChatLoading(true);
+        setVoiceStatus({ ok: null, msg: '处理中…' });
+        setVoiceTranscript('');
+        try {
+            const form = new FormData();
+            form.append('text', text.trim());
+            if (machine) {
+                form.append('vred_ip', machine.ip);
+                form.append('vred_port', String(machine.port || 8888));
+            }
+            const resp = await fetch(`${VOICE_SERVICE_URL}/text-command`, { method: 'POST', body: form });
+            if (!resp.ok) throw new Error(await resp.text());
+            const data = await resp.json();
+            setVoiceTranscript(data.transcript || text.trim());
+            if (data.intent?.action === 'activate_variant') {
+                const ok = data.vred_result?.ok ?? false;
+                setVoiceStatus({ ok, msg: ok ? `已切换: ${data.intent.name}` : `切换失败: ${data.intent.name}` });
+            } else {
+                setVoiceStatus({ ok: false, msg: data.intent?.reason || '未识别到指令' });
+            }
+        } catch (e) {
+            setVoiceStatus({ ok: false, msg: '请求失败: ' + e.message });
+        } finally {
+            setChatLoading(false);
+            setTimeout(() => setVoiceStatus(null), 6000);
+        }
+    };
+
+    const startRecording = async () => {
+        if (isRecording) return;
+        if (!navigator.mediaDevices?.getUserMedia) {
+            setVoiceStatus({ ok: false, msg: '浏览器不支持麦克风访问（需要 HTTPS 或 localhost）' });
+            return;
+        }
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            const recorder = new MediaRecorder(stream);
+            audioChunksRef.current = [];
+            recorder.ondataavailable = (e) => {
+                if (e.data.size > 0) audioChunksRef.current.push(e.data);
+            };
+            mediaRecorderRef.current = recorder;
+            recorder.start(100); // collect data every 100 ms
+            setIsRecording(true);
+            setVoiceStatus(null);
+            setVoiceTranscript('');
+        } catch (e) {
+            setVoiceStatus({ ok: false, msg: '麦克风权限被拒绝: ' + e.message });
+        }
+    };
+
+    const stopRecordingAndSend = async () => {
+        if (!isRecording || !mediaRecorderRef.current) return;
+        setIsRecording(false);
+        const recorder = mediaRecorderRef.current;
+        await new Promise((resolve) => {
+            recorder.onstop = resolve;
+            recorder.stop();
+        });
+        // Stop all mic tracks
+        recorder.stream?.getTracks().forEach(t => t.stop());
+
+        const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        audioChunksRef.current = [];
+
+        if (blob.size < 512) {
+            setVoiceStatus({ ok: false, msg: '录音太短，请按住按钮说话后再松开' });
+            setTimeout(() => setVoiceStatus(null), 4000);
+            return;
+        }
+
+        setVoiceStatus({ ok: null, msg: '识别中…' });
+        try {
+            const form = new FormData();
+            form.append('audio', blob, 'audio.webm');
+            if (machine) {
+                form.append('vred_ip', machine.ip);
+                form.append('vred_port', String(machine.port || 8888));
+            }
+            const resp = await fetch(`${VOICE_SERVICE_URL}/voice-command`, {
+                method: 'POST',
+                body: form,
+            });
+            if (!resp.ok) {
+                const err = await resp.text();
+                throw new Error(err);
+            }
+            const data = await resp.json();
+            setVoiceTranscript(data.transcript || '');
+            if (data.intent?.action === 'activate_variant') {
+                const ok = data.vred_result?.ok ?? false;
+                setVoiceStatus({ ok, msg: ok ? `已切换: ${data.intent.name}` : `切换失败: ${data.intent.name}` });
+            } else {
+                setVoiceStatus({ ok: false, msg: data.intent?.reason || '未识别到指令' });
+            }
+        } catch (e) {
+            setVoiceStatus({ ok: false, msg: '请求失败: ' + e.message });
+        } finally {
+            setTimeout(() => setVoiceStatus(null), 6000);
+        }
+    };
+
     const onIframeLoad = () => {
         setIframeLoading(false);
     };
@@ -625,6 +758,12 @@ except Exception as e:
                         >
                             MR 工具
                         </button>
+                        <button
+                            onClick={() => { setActiveTab(2); fetchVariantSets(); }}
+                            className={`flex-1 py-3 text-xs font-bold tracking-wide transition-colors border-b-2 ${activeTab === 2 ? 'text-[#39C5BB] border-[#39C5BB]' : 'text-gray-500 border-transparent hover:text-gray-300'}`}
+                        >
+                            语音控制
+                        </button>
                     </div>
 
                     {/* Tab 1: 控制面板 */}
@@ -766,6 +905,121 @@ except Exception as e:
                                         </button>
                                     );
                                 })}
+                            </div>
+                        </div>
+                    )}
+                    {/* Tab 3: 语音控制 */}
+                    {activeTab === 2 && (
+                        <div className="flex-1 flex flex-col p-4 overflow-y-auto custom-scrollbar">
+                            <div className="mb-4">
+                                <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">语音切换变量集</span>
+                            </div>
+
+                            {/* Push-to-talk button */}
+                            <div className="flex flex-col items-center gap-4 mb-6">
+                                <button
+                                    onMouseDown={startRecording}
+                                    onMouseUp={stopRecordingAndSend}
+                                    onTouchStart={(e) => { e.preventDefault(); startRecording(); }}
+                                    onTouchEnd={(e) => { e.preventDefault(); stopRecordingAndSend(); }}
+                                    className={`w-24 h-24 rounded-full flex flex-col items-center justify-center gap-2 border-2 transition-all select-none ${
+                                        isRecording
+                                            ? 'bg-red-500/20 border-red-500 shadow-lg shadow-red-500/30 scale-110'
+                                            : 'bg-[#39C5BB]/10 border-[#39C5BB]/50 hover:bg-[#39C5BB]/20 hover:border-[#39C5BB]'
+                                    }`}
+                                >
+                                    {isRecording
+                                        ? <MicOff size={32} className="text-red-400 animate-pulse" />
+                                        : <Mic size={32} className="text-[#39C5BB]" />
+                                    }
+                                    <span className="text-[10px] font-bold" style={{ color: isRecording ? '#f87171' : '#39C5BB' }}>
+                                        {isRecording ? '松开发送' : '按住说话'}
+                                    </span>
+                                </button>
+
+                                {/* Transcript */}
+                                {voiceTranscript && (
+                                    <div className="w-full px-3 py-2 bg-gray-800 rounded-lg border border-gray-700 text-xs text-gray-300 text-center animate-in fade-in duration-300">
+                                        "{voiceTranscript}"
+                                    </div>
+                                )}
+
+                                {/* Status */}
+                                {voiceStatus && (
+                                    <div className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-bold animate-in fade-in duration-300 ${
+                                        voiceStatus.ok === null
+                                            ? 'bg-gray-800 border-gray-600 text-gray-400'
+                                            : voiceStatus.ok
+                                                ? 'bg-green-900/40 border-green-700 text-green-400'
+                                                : 'bg-red-900/40 border-red-700 text-red-400'
+                                    }`}>
+                                        {voiceStatus.ok === null && <div className="w-3 h-3 border border-t-transparent border-gray-400 rounded-full animate-spin" />}
+                                        {voiceStatus.ok === true && <CheckCircle size={14} />}
+                                        {voiceStatus.ok === false && <XCircle size={14} />}
+                                        <span>{voiceStatus.msg}</span>
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Chat input */}
+                            <div className="flex gap-2 mb-6">
+                                <input
+                                    type="text"
+                                    value={chatInput}
+                                    onChange={(e) => setChatInput(e.target.value)}
+                                    onKeyDown={(e) => { if (e.key === 'Enter') { sendTextCommand(chatInput); setChatInput(''); } }}
+                                    placeholder="输入指令，如：切换红色"
+                                    disabled={chatLoading}
+                                    className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-xs text-white placeholder-gray-600 focus:border-[#39C5BB] outline-none disabled:opacity-50"
+                                />
+                                <button
+                                    onClick={() => { sendTextCommand(chatInput); setChatInput(''); }}
+                                    disabled={chatLoading || !chatInput.trim()}
+                                    className="px-3 py-2 rounded-lg bg-[#39C5BB]/20 border border-[#39C5BB]/50 text-[#39C5BB] hover:bg-[#39C5BB]/30 transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-xs font-bold"
+                                >
+                                    {chatLoading ? <div className="w-4 h-4 border border-t-transparent border-[#39C5BB] rounded-full animate-spin" /> : '发送'}
+                                </button>
+                            </div>
+
+                            {/* Variant sets list */}
+                            <div>
+                                <div className="flex items-center justify-between mb-2">
+                                    <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">可用变量集</span>
+                                    <button
+                                        onClick={fetchVariantSets}
+                                        className="text-[10px] px-2 py-1 rounded border border-gray-700 text-gray-400 hover:text-white hover:border-gray-500 transition-colors"
+                                    >
+                                        刷新
+                                    </button>
+                                </div>
+                                {variantSets.length === 0 ? (
+                                    <p className="text-xs text-gray-600 text-center py-4">暂无数据 — 点击刷新或检查语音服务连接</p>
+                                ) : (
+                                    <div className="space-y-1">
+                                        {variantSets.map((name) => (
+                                            <button
+                                                key={name}
+                                                onClick={async () => {
+                                                    setVoiceStatus({ ok: null, msg: `切换中: ${name}` });
+                                                    try {
+                                                        const resp = await fetch(`${VOICE_SERVICE_URL}/voice-command`, {
+                                                            method: 'POST',
+                                                            body: (() => { const f = new FormData(); /* direct switch via text intent */ return f; })(),
+                                                        });
+                                                    } catch (_) {}
+                                                    // Direct VRED execution via Strapi
+                                                    const safeName = name.replace(/'/g, "\\'");
+                                                    await sendPython(`vrVariantSets.activateVariantSet('${safeName}')`);
+                                                    setVoiceStatus({ ok: true, msg: `已切换: ${name}` });
+                                                    setTimeout(() => setVoiceStatus(null), 4000);
+                                                }}
+                                                className="w-full text-left px-3 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-[#39C5BB]/50 text-xs text-gray-300 hover:text-white transition-all"
+                                            >
+                                                {name}
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
                             </div>
                         </div>
                     )}
