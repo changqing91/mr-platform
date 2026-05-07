@@ -7,25 +7,25 @@ import './index.css'
 // VRED WebEngine VR pointer shim + event diagnostics overlay
 ;(function installVRPointerShim() {
   // ---------- Debug overlay ----------
-  const dbg = document.createElement('div')
-  dbg.style.cssText = [
-    'position:fixed', 'bottom:6px', 'right:6px', 'z-index:2147483647',
-    'background:rgba(0,0,0,0.88)', 'color:#39C5BB', 'font:11px/1.6 monospace',
-    'padding:8px 12px', 'border-radius:8px', 'border:1px solid #39C5BB44',
-    'pointer-events:none', 'max-width:340px', 'white-space:pre',
-  ].join(';')
-  const appendLog = (() => {
-    const lines = []
-    return (msg) => {
-      const ts = new Date().toISOString().slice(11, 23)
-      lines.unshift(`${ts} ${msg}`)
-      if (lines.length > 10) lines.pop()
-      dbg.textContent = lines.join('\n')
-    }
-  })()
-  const attachDbg = () => { if (document.body) document.body.appendChild(dbg) }
-  if (document.body) attachDbg()
-  else document.addEventListener('DOMContentLoaded', attachDbg, { once: true })
+  // const dbg = document.createElement('div')
+  // dbg.style.cssText = [
+  //   'position:fixed', 'bottom:6px', 'right:6px', 'z-index:2147483647',
+  //   'background:rgba(0,0,0,0.88)', 'color:#39C5BB', 'font:11px/1.6 monospace',
+  //   'padding:8px 12px', 'border-radius:8px', 'border:1px solid #39C5BB44',
+  //   'pointer-events:none', 'max-width:340px', 'white-space:pre',
+  // ].join(';')
+  // const appendLog = (() => {
+  //   const lines = []
+  //   return (msg) => {
+  //     const ts = new Date().toISOString().slice(11, 23)
+  //     lines.unshift(`${ts} ${msg}`)
+  //     if (lines.length > 10) lines.pop()
+  //     dbg.textContent = lines.join('\n')
+  //   }
+  // })()
+  // const attachDbg = () => { if (document.body) document.body.appendChild(dbg) }
+  // if (document.body) attachDbg()
+  // else document.addEventListener('DOMContentLoaded', attachDbg, { once: true })
 
   // ---------- Watch all candidate events ----------
   const WATCH = ['pointerdown','pointerup','mousedown','mouseup','click']

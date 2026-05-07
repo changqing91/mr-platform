@@ -1831,8 +1831,11 @@ else:
             self.pointer = vrDeviceService.getInteraction("Pointer")
             self.pointer.addSupportedInteractionGroup("FlashlightGroup")
 
-            self.aPressedAction = self.multiButtonPad.createControllerAction("right-a-pressed")
-            self.bPressedAction = self.multiButtonPad.createControllerAction("right-b-pressed")
+            # A/B 键通过 getButtonState 轮询（OpenXR 存在 xa/yb 串扰 bug，不使用 createControllerAction）
+            self._aHeld = False
+            self._bHeld = False
+            self._abTimer = vrTimer()
+            self._abTimerConnected = False
 
         def _create_spotlight(self):
             if self.lightNode is not None:
@@ -1850,10 +1853,8 @@ else:
                 print("[FlashlightTool] _create_spotlight 失败: " + str(e))
                 self.lightNode = None
                 return
-            try:
-                self.lightSceneNode = vrNodeService.findNode("VR_Flashlight_Spot")
-            except Exception:
-                self.lightSceneNode = None
+            # vrdLightNode IS a vrdNode — use it directly for transform updates
+            self.lightSceneNode = self.lightNode
             self._start_light_timer()
 
         def _remove_spotlight(self):
@@ -1861,10 +1862,15 @@ else:
             try:
                 if self.lightNode:
                     self.lightNode.setOn(False)
-                    vrNodeService.removeNode(self.lightNode)
+                    vrLightService.deleteLight(self.lightNode)
                     self.lightNode = None
             except Exception:
-                pass
+                try:
+                    if self.lightNode:
+                        vrNodeService.removeNode(self.lightNode)
+                        self.lightNode = None
+                except Exception:
+                    self.lightNode = None
             self.lightSceneNode = None
             self.lightOn = False
 
@@ -1913,20 +1919,43 @@ else:
         def _stop_light_timer(self):
             self.lightTimer.setActive(0)
 
-        def toggle_light(self, action=None, device=None):
-            """A 键切换手电筒开/关。"""
+        def _poll_ab(self):
+            try:
+                a_pressed = self.rightController.getButtonState("xa").isPressed()
+                if a_pressed and not self._aHeld:
+                    self._aHeld = True
+                    self.turn_on_light()
+                elif not a_pressed:
+                    self._aHeld = False
+            except Exception:
+                pass
+            try:
+                b_pressed = self.rightController.getButtonState("yb").isPressed()
+                if b_pressed and not self._bHeld:
+                    self._bHeld = True
+                    self.turn_off_light()
+                elif not b_pressed:
+                    self._bHeld = False
+            except Exception:
+                pass
+
+        def turn_on_light(self):
+            """A 键：开启手电筒。"""
             if self.lightNode is None:
                 self._create_spotlight()
             if not self.lightNode:
                 return
-            if self.lightOn:
-                self.lightNode.setOn(False)
-                self.lightOn = False
-                print("[FlashlightTool] 手电筒关闭")
-            else:
-                self.lightNode.setOn(True)
-                self.lightOn = True
-                print("[FlashlightTool] 手电筒开启")
+            self.lightNode.setOn(True)
+            self.lightOn = True
+            print("[FlashlightTool] 手电筒开启")
+
+        def turn_off_light(self):
+            """B 键：关闭手电筒。"""
+            if self.lightNode is None:
+                return
+            self.lightNode.setOn(False)
+            self.lightOn = False
+            print("[FlashlightTool] 手电筒关闭")
 
         def _activate_flashlight_controller(self):
             self.newRightCon = findNode("MRcontrollerRight")
@@ -1972,13 +2001,12 @@ else:
             _stream_panel_visible = False
             _sp_hide()
             vrDeviceService.setActiveInteractionGroup("FlashlightGroup")
-            # 只连接 aPressedAction；bPressedAction 在此 VRED 环境中与 A 键共用同一物理信号，
-            # 不连接 bPressedAction 可确保每次 A 键只触发一次 toggle。
-            try:
-                self.aPressedAction.signal().triggered.disconnect(self.toggle_light)
-            except Exception:
-                pass
-            self.aPressedAction.signal().triggered.connect(self.toggle_light)
+            if not self._abTimerConnected:
+                self._abTimer.connect(self._poll_ab)
+                self._abTimerConnected = True
+            self._aHeld = False
+            self._bHeld = False
+            self._abTimer.setActive(1)
 
             self._fly_enable()
 
@@ -1995,9 +2023,11 @@ else:
             except Exception:
                 pass
             try:
-                self.aPressedAction.signal().triggered.disconnect(self.toggle_light)
+                self._abTimer.setActive(0)
             except Exception:
                 pass
+            self._aHeld = False
+            self._bHeld = False
             self._remove_spotlight()
             self._deactivate_flashlight_controller()
             print("[AllTools] FlashlightTool disabled")
@@ -3303,6 +3333,10 @@ def cleanup_all_tools():
     _all_tools_initialized = False
     # 清除 interaction 和 guard 标记，允许重新初始化
     _sp_geom_node = None
+    try:
+        _menu_controller.deactivate()
+    except Exception:
+        pass
     if '_sp_interaction' in globals():
         del globals()['_sp_interaction']
     if '_left_x_return_guard' in globals():
@@ -3316,9 +3350,7 @@ print("[AllTools] Script loaded. Available commands: switch_tool(name), disable_
 # 串流面板 + X 键守卫 — 仅首次注入时初始化
 # OpenXR action set 在会话启动后锁定，重注入时不可再创建新 action。
 # ======================================================================
-global _stream_panel_url, _stream_panel_visible, _sp_geom_node, _sp_prev_group
-if '_stream_panel_url' not in globals():
-    _stream_panel_url = globals().get('_STREAM_PANEL_URL', '')
+global _stream_panel_visible, _sp_geom_node, _sp_prev_group
 if '_stream_panel_visible' not in globals():
     _stream_panel_visible = False
 if '_sp_geom_node' not in globals():
@@ -3327,10 +3359,151 @@ if '_sp_prev_group' not in globals():
     _sp_prev_group = None
 
 _SP_NODE_NAME   = "MenuPanel_L"
-_SP_ENGINE_NAME = "MRmenu"
+
+# ======================================================================
+# 菜单控制器 —— 使用 Pointer interaction "start" 回调检测按钮点击
+# ======================================================================
+class _MenuController:
+    """
+    菜单打开时监听 Pointer interaction 的 "start" 事件（trigger 按下 + 射线命中）。
+    使用延迟执行模式：在信号回调中仅记录目标工具，下一帧再执行切换，
+    避免在信号回调内部 connect/disconnect 导致的 Qt 信号重入问题。
+    菜单显示时调用 activate()，隐藏时调用 deactivate()。
+    """
+
+    _BUTTON_MAP = {
+        "tags_tool_button":        ("draw_note",   "Selected#1"),
+        "voice_note_button":       ("voice_note",  "Selected#2"),
+        "Measurement_tool_button": ("measure",     "Selected#3"),
+        "flash_tool_button":       ("flashlight",  "Selected#4"),
+        "color_bot_button":        (None,          "Selected#5"),
+        "clip_tool_button":        ("section",     "Selected#6"),
+        "move_tool_button":        ("adjust",      "Selected#7"),
+        "rotato_tool_button":      ("turntable",   "Selected#8"),
+    }
+
+    # 反向映射: tool_name → Selected node name
+    _TOOL_TO_SELECTED = {v[0]: v[1] for v in _BUTTON_MAP.values() if v[0] is not None}
+
+    def __init__(self):
+        self._connected = False
+        self._pending_tool = None
+        self._pointer = vrDeviceService.getInteraction("Pointer")
+        self._deferTimer = vrTimer()
+        self._deferTimer.connect(self._deferred_switch)
+        self._deferTimer.setActive(0)
+
+    def activate(self):
+        """菜单显示时调用：连接 Pointer start 回调，更新选中指示器。"""
+        self._pending_tool = None
+        try:
+            active = _tool_manager.get_active()
+        except Exception:
+            active = None
+        self._update_selected_nodes(active)
+        if not self._connected:
+            try:
+                self._pointer.getControllerAction("start").signal().triggered.connect(
+                    self._on_pointer_start)
+                self._connected = True
+            except Exception as _e:
+                print("[MenuController] failed to connect pointer start: " + str(_e))
+
+    def deactivate(self):
+        """菜单隐藏时调用：断开 Pointer start 回调，取消待执行切换。"""
+        self._pending_tool = None
+        self._deferTimer.setActive(0)
+        if self._connected:
+            try:
+                self._pointer.getControllerAction("start").signal().triggered.disconnect(
+                    self._on_pointer_start)
+            except Exception:
+                pass
+            self._connected = False
+
+    def _update_selected_nodes(self, active_tool):
+        """仅激活与当前工具对应的 Selected 节点，其余全部隐藏。"""
+        target_sel = self._TOOL_TO_SELECTED.get(active_tool) if active_tool else None
+        for sel_name in ["Selected#1", "Selected#2", "Selected#3", "Selected#4",
+                         "Selected#5", "Selected#6", "Selected#7", "Selected#8"]:
+            try:
+                sel_node = findNode(sel_name)
+                if sel_node:
+                    sel_node.setActive(sel_name == target_sel)
+            except Exception:
+                pass
+
+    def _on_pointer_start(self, action, device):
+        """Pointer trigger 按下时，记录目标工具并触发延迟切换。
+        不在此处直接调用 switch_tool / disconnect，避免信号重入。"""
+        if not self._connected:
+            return
+        try:
+            picked = device.pick().getNode()
+            if not picked:
+                return
+            # 向上遍历最多 6 级寻找按钮节点
+            node = picked
+            button_name = None
+            for _ in range(6):
+                try:
+                    name = node.getName()
+                except Exception:
+                    break
+                if name in self._BUTTON_MAP:
+                    button_name = name
+                    break
+                try:
+                    parent = node.getParent()
+                    if not parent or parent == getRootNode():
+                        break
+                    node = parent
+                except Exception:
+                    break
+            if button_name is None:
+                return
+            tool_name, _sel = self._BUTTON_MAP[button_name]
+            if tool_name is None:
+                print("[MenuController] " + button_name + " clicked (no tool assigned)")
+                return
+            # 立即阻止重入，延迟一帧再执行切换
+            self._connected = False
+            self._pending_tool = tool_name
+            self._deferTimer.setActive(1)
+            print("[MenuController] " + button_name + " -> " + tool_name + " (deferred)")
+        except Exception as _e:
+            print("[MenuController] on_pointer_start error: " + str(_e))
+
+    def _deferred_switch(self):
+        """下一帧执行：安全地断开信号连接，切换工具，更新选中状态，然后重新连接信号。"""
+        self._deferTimer.setActive(0)
+        # 此时已在信号回调之外，可以安全地 disconnect
+        try:
+            self._pointer.getControllerAction("start").signal().triggered.disconnect(
+                self._on_pointer_start)
+        except Exception:
+            pass
+        tool = self._pending_tool
+        self._pending_tool = None
+        if tool:
+            global _sp_keep_open
+            _sp_keep_open = True
+            try:
+                switch_tool(tool)
+            finally:
+                _sp_keep_open = False
+            self._update_selected_nodes(tool)
+        # 重新连接，菜单保持打开
+        try:
+            self._pointer.getControllerAction("start").signal().triggered.connect(
+                self._on_pointer_start)
+            self._connected = True
+        except Exception as _e:
+            print("[MenuController] reconnect failed: " + str(_e))
+
 
 def _sp_build():
-    """找到 OSB 中已有的 MenuPanel_L 节点，设置 WebEngine URL，初始隐藏。"""
+    """找到 OSB 中已有的 MenuPanel_L 节点，初始隐藏。"""
     global _sp_geom_node
     node = findNode(_SP_NODE_NAME)
     if not node:
@@ -3343,44 +3516,12 @@ def _sp_build():
     except AttributeError:
         pass  # vrNodePtr 无 isNull()，跳过检查
     _sp_geom_node = node
-
-    # 设置 URL：直接按媒体编辑器中的 WebEngine 名称查找
-    if _stream_panel_url:
-        _url_set = False
-        try:
-            eng = vrWebEngineService.getWebEngine(_SP_ENGINE_NAME)
-            if eng.isValid():
-                eng.setUrl(_stream_panel_url)
-                print("[StreamPanel] URL set on '" + _SP_ENGINE_NAME + "': " + _stream_panel_url)
-                _url_set = True
-        except Exception as _e:
-            print("[StreamPanel] getWebEngine failed: " + str(_e))
-        if not _url_set:
-            # 兜底：遍历所有 WebEngine 找绑定到该节点材质的那个
-            try:
-                geo = vrdGeometryNode(node)
-                mat = geo.getMaterial()
-                if mat and mat.isValid():
-                    for _eng in vrWebEngineService.getWebEngines():
-                        try:
-                            if _eng.getMaterial().getObjectId() == mat.getObjectId():
-                                _eng.setUrl(_stream_panel_url)
-                                print("[StreamPanel] URL set via material match: " + _stream_panel_url)
-                                _url_set = True
-                                break
-                        except Exception:
-                            pass
-            except Exception as _e2:
-                print("[StreamPanel] material fallback failed: " + str(_e2))
-        if not _url_set:
-            print("[StreamPanel] WARNING: could not set URL, no matching WebEngine found")
-
     # 初始隐藏
     node.setActive(False)
     print("[StreamPanel] ready. Node: " + _SP_NODE_NAME)
 
 def _sp_show():
-    """激活 MRmenu 节点，并切换到 MenuGroup 以确保 Pointer 交互生效。"""
+    """激活菜单节点，启动按钮轮询，并切换到 MenuGroup 以确保 Pointer 交互生效。"""
     global _sp_geom_node, _sp_prev_group
     if _sp_geom_node is None:
         _sp_build()
@@ -3389,6 +3530,10 @@ def _sp_show():
         return
     _sp_geom_node.setActive(True)
     try:
+        _menu_controller.activate()
+    except Exception as _me:
+        print("[StreamPanel] menu controller activate failed: " + str(_me))
+    try:
         _sp_prev_group = vrDeviceService.getActiveInteractionGroup()
         vrDeviceService.setActiveInteractionGroup("MenuGroup")
         print("[StreamPanel] shown (prev group: " + str(_sp_prev_group) + ")")
@@ -3396,12 +3541,22 @@ def _sp_show():
         _sp_prev_group = None
         print("[StreamPanel] shown (group switch failed: " + str(_e) + ")")
 
+global _sp_keep_open
+if '_sp_keep_open' not in globals():
+    _sp_keep_open = False
+
 def _sp_hide():
-    """隐藏 MRmenu 节点，并恢复之前的交互组。"""
-    global _sp_geom_node, _sp_prev_group
+    """隐藏菜单节点，停止按钮轮询，并恢复之前的交互组。"""
+    global _sp_geom_node, _sp_prev_group, _sp_keep_open
+    if _sp_keep_open:
+        return
     try:
         if _sp_geom_node is not None:
             _sp_geom_node.setActive(False)
+    except Exception:
+        pass
+    try:
+        _menu_controller.deactivate()
     except Exception:
         pass
     try:
@@ -3422,9 +3577,14 @@ def _sp_toggle():
     else:
         _sp_hide()
 
-# 注入时初始化（找节点、设 URL、隐藏）——仅首次执行
+# 注入时初始化（找节点、隐藏）——仅首次执行
 if _sp_geom_node is None:
     _sp_build()
+
+# 菜单控制器（重注入时幂等重建，无 OpenXR action 限制）
+global _menu_controller
+_menu_controller = _MenuController()
+print("[StreamPanel] MenuController ready")
 
 # 以下 interaction 注册仅首次注入时执行（OpenXR action set 会话中锁定，不可重建）
 # 每次注入都执行——确保 Tools Menu 始终被真正禁用

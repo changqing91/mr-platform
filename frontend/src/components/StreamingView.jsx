@@ -798,12 +798,12 @@ except Exception as e:
                         >
                             MR 工具
                         </button>
-                        <button
+                        {/* <button
                             onClick={() => { setActiveTab(2); fetchVariantSets(); }}
                             className={`flex-1 py-3 text-xs font-bold tracking-wide transition-colors border-b-2 ${activeTab === 2 ? 'text-[#39C5BB] border-[#39C5BB]' : 'text-gray-500 border-transparent hover:text-gray-300'}`}
                         >
                             语音控制
-                        </button>
+                        </button> */}
                     </div>
 
                     {/* Tab 1: 控制面板 */}
