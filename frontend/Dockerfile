@@ -10,6 +10,7 @@ COPY package.json pnpm-lock.yaml* ./
 RUN corepack enable
 RUN corepack prepare pnpm@9.15.4 --activate
 RUN pnpm config set strict-ssl false
+RUN pnpm config set registry https://registry.npmmirror.com
 RUN if [ -f pnpm-lock.yaml ]; then pnpm install --frozen-lockfile; else pnpm install --no-frozen-lockfile; fi
 
 COPY . .

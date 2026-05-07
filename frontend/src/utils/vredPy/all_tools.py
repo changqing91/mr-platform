@@ -1157,7 +1157,7 @@ else:
                 vrSessionService.sendPython("setClippingPlanePosition(point)")
                 try:
                     rot = getTransformNodeRotation(node)
-                    r = "%f,%f,%f" % (rot.x() + 90 - 36.48, rot.y(), rot.z())
+                    r = "%f,%f,%f" % (rot.x() + 90 - 36.48, rot.y() + 0.000079, rot.z() + 7.61596)
                     vrSessionService.sendPython("setClippingPlaneRotation(" + r + ")")
                 except Exception:
                     pass
@@ -2038,6 +2038,9 @@ else:
     class VoiceNotes:
         _TOUCH_DIST = 150.0      # mm — controller must be within this distance to trigger playback
         _FORWARD_OFFSET = 200.0  # mm — how far in front of the controller a new note is placed
+        _ERASER_DIST = 60.0      # mm — eraser detection radius (measured from eraser tip)
+        # Local offset of eraser tip center relative to controller model origin (mm)
+        _ERASER_LOCAL_OFFSET = QVector3D(2.58472, -60.0048, 6.26285)
 
         def __init__(self):
             # ── VRED devices ──
@@ -2298,13 +2301,23 @@ else:
 
         def _eraser_tick(self):
             """Called by eraserTimer while eraser mode is active.
-            Uses world-space distance between controller and VNR_ nodes.
+            Uses world-space distance between eraser tip and VNR_ nodes.
             pick() raycast is not used here: it requires the controller to
             point at a node from a distance and fails for physical proximity."""
             try:
-                ctrl_pos = getTransformNodeTranslation(
-                    self.rightController.getNode(), 1)
-                cx, cy, cz = ctrl_pos.x(), ctrl_pos.y(), ctrl_pos.z()
+                # Compute world position of eraser tip using controller world transform
+                # plus the local offset of the eraser tip on the controller model.
+                node = self.newRightCon if (hasattr(self, 'newRightCon') and self.newRightCon) else self.rightController.getNode()
+                mat = node.getWorldTransform()
+                local = QMatrix4x4()
+                t = VoiceNotes._ERASER_LOCAL_OFFSET
+                local.translate(t.x(), t.y(), t.z())
+                out = QMatrix4x4(mat)
+                out *= local
+                # Extract world translation from the resulting matrix
+                cx = out.column(3).x()
+                cy = out.column(3).y()
+                cz = out.column(3).z()
             except Exception:
                 return
             in_range_now = set()
@@ -2318,7 +2331,7 @@ else:
                     dy = p.y() - cy
                     dz = p.z() - cz
                     dist = math.sqrt(dx*dx + dy*dy + dz*dz)
-                    if dist <= VoiceNotes._TOUCH_DIST:
+                    if dist <= VoiceNotes._ERASER_DIST:
                         if key not in self._eraser_in_range:
                             # 首次进入范围 → 删除 annotation 及节点
                             print("首次进入范围 → 删除 annotation 及节点")
