@@ -135,6 +135,13 @@ else:
                 mat = self.rightController.getTrackingMatrix()
                 col = mat.column(3)
                 self._flyBasePos = (col.x(), col.y(), col.z())
+                # 记录按下时摄像机朝向（参考 fly.py camPos 矩阵）
+                camMat = getCamNode(-1).getWorldTransform()
+                # camPos 列主序: [0..3]=col0, [4..7]=col1, [8..11]=col2, [12..15]=col3
+                # 前向 = -col2, 右向 = col0, 上向 = col1 (Y-up)
+                self._flyCamFwd   = (-camMat[2],  -camMat[6],  -camMat[10])
+                self._flyCamRight = ( camMat[0],   camMat[4],   camMat[8])
+                self._flyCamUp    = ( camMat[1],   camMat[5],   camMat[9])
             except Exception as e:
                 print("[GripFly][PRESS] ERROR: " + str(e))
                 self._flyBasePos = None
@@ -175,14 +182,34 @@ else:
                     d = dist - self._flyDeadZone
                     speed = self.flySpeed + d * self._flyAccel + d * d * 0.0006
                     speed = min(speed, self._flyMaxStep)
-                    nx, ny, nz = dx / dist, dy / dist, dz / dist
+                    # 将手柄位移投影到按下时摄像机局部坐标轴（参考 fly.py camDirForward/Sideways）
+                    fwd   = getattr(self, '_flyCamFwd',   (0, 1, 0))
+                    right = getattr(self, '_flyCamRight', (1, 0, 0))
+                    up    = getattr(self, '_flyCamUp',    (0, 0, 1))
+                    # 归一化各轴
+                    def norm3(v):
+                        l = math.sqrt(v[0]*v[0] + v[1]*v[1] + v[2]*v[2])
+                        return (v[0]/l, v[1]/l, v[2]/l) if l > 1e-6 else v
+                    fwd   = norm3(fwd)
+                    right = norm3(right)
+                    up    = norm3(up)
+                    # 手柄位移在各轴的分量（即虚拟摇杆输入）
+                    proj_fwd   = dx*fwd[0]   + dy*fwd[1]   + dz*fwd[2]
+                    proj_right = dx*right[0] + dy*right[1] + dz*right[2]
+                    proj_up    = dx*up[0]    + dy*up[1]    + dz*up[2]
+                    # 沿各摄像机轴合成移动向量
+                    mx = proj_fwd*fwd[0] + proj_right*right[0] + proj_up*up[0]
+                    my = proj_fwd*fwd[1] + proj_right*right[1] + proj_up*up[1]
+                    mz = proj_fwd*fwd[2] + proj_right*right[2] + proj_up*up[2]
+                    ml = math.sqrt(mx*mx + my*my + mz*mz)
+                    if ml > 1e-6:
+                        mx, my, mz = mx/ml, my/ml, mz/ml
                     origin = vrDeviceService.getTrackingOrigin()
-                    new_o = QVector3D(
-                        origin.x() - nx * speed,
-                        origin.y() - ny * speed,
-                        origin.z() - nz * speed
-                    )
-                    vrDeviceService.setTrackingOrigin(new_o)
+                    vrDeviceService.setTrackingOrigin(QVector3D(
+                        origin.x() - mx * speed,
+                        origin.y() - my * speed,
+                        origin.z() - mz * speed
+                    ))
             except Exception as e:
                 print("[GripFly] ERROR: " + str(e))
 
@@ -208,6 +235,8 @@ else:
             self.stickRight = False
             self.moveSpeed = 3.0
             self.rotateSpeed = 0.8
+            self._prev_move_pos = None
+            self._prev_move_rot = None
             self._fly_init()
 
             self.leftController = vrDeviceService.getVRDevice("left-controller")
@@ -374,12 +403,16 @@ else:
                 fx, fy = self._get_camera_forward_xy()
                 direction = self.moveSpeed if self.stickForward else -self.moveSpeed
                 setTransformNodeTranslation(self.node, pos.x() + fx * direction, pos.y() + fy * direction, pos.z(), 1)
+                new_pos = getTransformNodeTranslation(self.node, 1)
+                _apply_annotation_translation(new_pos.x() - pos.x(), new_pos.y() - pos.y())
                 moved = True
             if self.stickLeft:
                 setTransformNodeRotation(self.node, rot.x(), rot.y(), rot.z() + self.rotateSpeed)
+                _apply_annotation_rotation_pivot(pos.x(), pos.y(), self.rotateSpeed)
                 moved = True
             elif self.stickRight:
                 setTransformNodeRotation(self.node, rot.x(), rot.y(), rot.z() - self.rotateSpeed)
+                _apply_annotation_rotation_pivot(pos.x(), pos.y(), -self.rotateSpeed)
                 moved = True
             if moved:
                 self._sync_transform()
@@ -389,6 +422,8 @@ else:
             if not self.node.isNull():
                 self.originalNodeRot = getTransformNodeRotation(self.node)
                 self.originalNodePos = getTransformNodeTranslation(self.node, 1)
+                self._prev_move_pos = (self.originalNodePos.x(), self.originalNodePos.y(), self.originalNodePos.z())
+                self._prev_move_rot = self.originalNodeRot.z()
                 self.constraint = vrConstraintService.createParentConstraint([device.getNode()], self.node, True)
                 self.startMoveFlag = True
                 self._prepare_node_ref()
@@ -402,6 +437,30 @@ else:
                 vrConstraintService.deleteConstraint(self.constraint)
                 self.startMoveFlag = False
                 self._sync_transform()
+                # Apply combined translate+rotate transform to annotations
+                if self._prev_move_pos is not None:
+                    new_pos = getTransformNodeTranslation(self.node, 1)
+                    x0, y0 = self._prev_move_pos[0], self._prev_move_pos[1]
+                    x1, y1 = new_pos.x(), new_pos.y()
+                    r0 = self._prev_move_rot if self._prev_move_rot is not None else rot.z()
+                    r1 = rot.z()
+                    delta_r = r1 - r0
+                    cos_d = math.cos(math.radians(delta_r))
+                    sin_d = math.sin(math.radians(delta_r))
+                    for ann_node in _get_annotation_nodes():
+                        try:
+                            ann_pos = getTransformNodeTranslation(ann_node, 1)
+                            rx = ann_pos.x() - x0
+                            ry = ann_pos.y() - y0
+                            nx = rx * cos_d - ry * sin_d + x1
+                            ny = rx * sin_d + ry * cos_d + y1
+                            setTransformNodeTranslation(ann_node, nx, ny, ann_pos.z(), 1)
+                            ann_rot = getTransformNodeRotation(ann_node)
+                            setTransformNodeRotation(ann_node, ann_rot.x(), ann_rot.y(), ann_rot.z() + delta_r)
+                        except Exception:
+                            pass
+                self._prev_move_pos = None
+                self._prev_move_rot = None
 
         def on_up_touched(self, action=None, device=None):
             self._ensure_node()
@@ -839,7 +898,12 @@ else:
                 self._drag_constraint = None
             self._grip_held = False
             self._dragging_node = None
-            self._set_controller_choice(1)
+            if self.isAddMode:
+                self._set_controller_choice(2)
+            elif self.deleteNoteIsActive:
+                self._set_controller_choice(3)
+            else:
+                self._set_controller_choice(1)
             print("[Notes] Grip released → 停止拖动")
 
         def _on_pointer_start(self, action, device):
@@ -1274,6 +1338,7 @@ else:
             self.currentAngle = 0.0
             self.originalAngle = 0.0
             self._sessionOriginalAngleSaved = False
+            self._prev_rotation_angle = None
             self.dragStartX = 0.0
             self.rotationStartAngle = 0.0
             self.rotationSensitivity = 0.2   # degrees per mm of controller X movement
@@ -1521,11 +1586,13 @@ else:
             except Exception:
                 self.rotationStartAngle = self.currentAngle
             self.currentAngle = self.rotationStartAngle
+            self._prev_rotation_angle = self.rotationStartAngle
             self.aHeld = True
             self._start_timer()
 
         def stop_rotation(self, action=None, device=None):
             self.aHeld = False
+            self._prev_rotation_angle = None
             self._stop_timer()
 
         def updateRotation(self):
@@ -1555,6 +1622,16 @@ else:
                 setTransformNodeRotation(self.node, rot.x(), rot.y(), self.currentAngle)
             except Exception:
                 pass
+            # Propagate incremental rotation to annotations
+            if self._prev_rotation_angle is not None:
+                delta_angle = self.currentAngle - self._prev_rotation_angle
+                if abs(delta_angle) > 0.001:
+                    try:
+                        pivot = getTransformNodeTranslation(self.node, 1)
+                        _apply_annotation_rotation_pivot(pivot.x(), pivot.y(), delta_angle)
+                    except Exception:
+                        pass
+            self._prev_rotation_angle = self.currentAngle
             if self.nodeRefReady:
                 try:
                     rot = getTransformNodeRotation(self.node)
@@ -2729,17 +2806,16 @@ else:
     class LeftGripTraction:
         """
         左手柄 Grip 牵引 —— 全局常驻，不随工具切换而开关。
-        按住左手 grip 移动控制器，场景随之平移（反向，放大 TRACTION_SCALE 倍）。
-        参考 fly.py 的 grip0Pressed + isGripPressed 分支实现。
+        按住左手 grip 移动控制器，摄像机随之平移。
+        使用追踪空间增量模式：每帧只累加本帧实际位移，避免世界空间反馈循环。
         """
         TRACTION_SCALE = 2.0
         _GRIP_THRESHOLD = 0.5
 
         def __init__(self):
             self._held = False
-            self._basePos = None        # 按下时左手柄位置 (x, y, z)
-            self._originBase = None     # 按下时 tracking origin (x, y, z)
-            self._gripHeld = False      # polling 状态
+            self._prevTrackingPos = None  # 上一帧的追踪空间位置
+            self._gripHeld = False        # polling 状态
             self._leftController = vrDeviceService.getVRDevice("left-controller")
             self._timer = vrTimer()
             self._timer.connect(self._tick)
@@ -2758,8 +2834,7 @@ else:
                 if self._gripHeld or self._held:
                     self._gripHeld = False
                     self._held = False
-                    self._basePos = None
-                    self._originBase = None
+                    self._prevTrackingPos = None
                 return
             try:
                 state = self._leftController.getButtonState("grip")
@@ -2770,42 +2845,51 @@ else:
                 elif not pressed and self._gripHeld:
                     self._gripHeld = False
                     self._on_released()
-                if self._held and self._basePos is not None:
+                if self._held and self._prevTrackingPos is not None:
                     self._do_traction()
             except Exception as e:
                 print("[LeftGripTraction] tick ERROR: " + str(e))
 
         def _on_pressed(self):
             try:
+                # 记录当前追踪空间位置作为增量基准
                 mat = self._leftController.getTrackingMatrix()
                 col = mat.column(3)
-                self._basePos = (col.x(), col.y(), col.z())
-                origin = vrDeviceService.getTrackingOrigin()
-                self._originBase = (origin.x(), origin.y(), origin.z())
+                self._prevTrackingPos = (col.x(), col.y(), col.z())
                 self._held = True
                 print("[LeftGripTraction] grip pressed")
             except Exception as e:
                 print("[LeftGripTraction][PRESS] ERROR: " + str(e))
-                self._basePos = None
-                self._originBase = None
+                self._prevTrackingPos = None
 
         def _on_released(self):
             self._held = False
-            self._basePos = None
-            self._originBase = None
+            self._prevTrackingPos = None
             print("[LeftGripTraction] grip released")
 
         def _do_traction(self):
             try:
+                # 追踪空间位置不受 tracking origin 影响，可安全做增量累加
                 mat = self._leftController.getTrackingMatrix()
                 col = mat.column(3)
-                dx = col.x() - self._basePos[0]
-                dy = col.y() - self._basePos[1]
-                dz = col.z() - self._basePos[2]
+                cx, cy, cz = col.x(), col.y(), col.z()
+                px, py, pz = self._prevTrackingPos
+                # 本帧实际位移（追踪空间）
+                dx = cx - px
+                dy = cy - py
+                dz = cz - pz
+                # 更新基准为当前帧（事件驱动：只有真正移动才产生位移）
+                self._prevTrackingPos = (cx, cy, cz)
+                # 位移足够小才忽略（过滤追踪抖动）
+                dist = math.sqrt(dx*dx + dy*dy + dz*dz)
+                if dist < 0.5:
+                    return
+                s = self.TRACTION_SCALE
+                origin = vrDeviceService.getTrackingOrigin()
                 vrDeviceService.setTrackingOrigin(QVector3D(
-                    self._originBase[0] - self.TRACTION_SCALE * dx,
-                    self._originBase[1] - self.TRACTION_SCALE * dy,
-                    self._originBase[2] - self.TRACTION_SCALE * dz,
+                    origin.x() + s * dx,
+                    origin.y() + s * dy,
+                    origin.z() + s * dz,
                 ))
             except Exception as e:
                 print("[LeftGripTraction] ERROR: " + str(e))
@@ -2882,6 +2966,11 @@ else:
                 mat = self._right.getTrackingMatrix()
                 col = mat.column(3)
                 self._flyBasePos = (col.x(), col.y(), col.z())
+                # 记录按下时摄像机朝向（参考 fly.py camPos 矩阵）
+                camMat = getCamNode(-1).getWorldTransform()
+                self._flyCamFwd   = (-camMat[2],  -camMat[6],  -camMat[10])
+                self._flyCamRight = ( camMat[0],   camMat[4],   camMat[8])
+                self._flyCamUp    = ( camMat[1],   camMat[5],   camMat[9])
             except Exception as e:
                 print("[LocomotionMode][GRIP] ERROR: " + str(e))
                 self._flyBasePos = None
@@ -2904,12 +2993,30 @@ else:
                     d     = dist - self.FLY_DEAD_ZONE
                     speed = self.FLY_SPEED + d * self.FLY_ACCEL + d * d * 0.0006
                     speed = min(speed, self.FLY_MAX_STEP)
-                    nx, ny, nz = dx/dist, dy/dist, dz/dist
+                    # 将手柄位移投影到按下时摄像机局部坐标轴（参考 fly.py camDirForward/Sideways）
+                    fwd   = getattr(self, '_flyCamFwd',   (0, 1, 0))
+                    right = getattr(self, '_flyCamRight', (1, 0, 0))
+                    up    = getattr(self, '_flyCamUp',    (0, 0, 1))
+                    def norm3(v):
+                        l = math.sqrt(v[0]*v[0] + v[1]*v[1] + v[2]*v[2])
+                        return (v[0]/l, v[1]/l, v[2]/l) if l > 1e-6 else v
+                    fwd   = norm3(fwd)
+                    right = norm3(right)
+                    up    = norm3(up)
+                    proj_fwd   = dx*fwd[0]   + dy*fwd[1]   + dz*fwd[2]
+                    proj_right = dx*right[0] + dy*right[1] + dz*right[2]
+                    proj_up    = dx*up[0]    + dy*up[1]    + dz*up[2]
+                    mx = proj_fwd*fwd[0] + proj_right*right[0] + proj_up*up[0]
+                    my = proj_fwd*fwd[1] + proj_right*right[1] + proj_up*up[1]
+                    mz = proj_fwd*fwd[2] + proj_right*right[2] + proj_up*up[2]
+                    ml = math.sqrt(mx*mx + my*my + mz*mz)
+                    if ml > 1e-6:
+                        mx, my, mz = mx/ml, my/ml, mz/ml
                     origin = vrDeviceService.getTrackingOrigin()
                     vrDeviceService.setTrackingOrigin(QVector3D(
-                        origin.x() - nx * speed,
-                        origin.y() - ny * speed,
-                        origin.z() - nz * speed,
+                        origin.x() - mx * speed,
+                        origin.y() - my * speed,
+                        origin.z() - mz * speed,
                     ))
             except Exception as e:
                 print("[LocomotionMode][FLY] ERROR: " + str(e))
@@ -2926,6 +3033,60 @@ else:
                 print("[LocomotionMode] Screenshot saved: " + path)
             except Exception as e:
                 print("[LocomotionMode] Screenshot failed: " + str(e))
+
+    # ======================================================================
+    # 标注跟随辅助函数 - 让图形标注和语音标注跟随 Movable 节点变换
+    # ======================================================================
+
+    def _get_annotation_nodes():
+        """返回所有图形标注（Cloned Note 标签）和语音标注（VNR_ 前缀）节点。"""
+        result = []
+        try:
+            for node in getAllNodes():
+                try:
+                    name = node.getName()
+                    is_cloned_note = False
+                    try:
+                        is_cloned_note = hasNodeTag(node, 'Cloned Note')
+                    except Exception:
+                        pass
+                    if is_cloned_note or name.startswith("VNR_"):
+                        result.append(node)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        return result
+
+    def _apply_annotation_translation(dx, dy, dz=0.0):
+        """将所有标注节点平移 (dx, dy, dz)。"""
+        if abs(dx) < 0.001 and abs(dy) < 0.001 and abs(dz) < 0.001:
+            return
+        for node in _get_annotation_nodes():
+            try:
+                pos = getTransformNodeTranslation(node, 1)
+                setTransformNodeTranslation(node, pos.x() + dx, pos.y() + dy, pos.z() + dz, 1)
+            except Exception:
+                pass
+
+    def _apply_annotation_rotation_pivot(pivot_x, pivot_y, delta_angle_deg):
+        """将所有标注节点绕 (pivot_x, pivot_y) 旋转 delta_angle_deg 度（绕 Z 轴）。"""
+        if abs(delta_angle_deg) < 0.001:
+            return
+        cos_a = math.cos(math.radians(delta_angle_deg))
+        sin_a = math.sin(math.radians(delta_angle_deg))
+        for node in _get_annotation_nodes():
+            try:
+                pos = getTransformNodeTranslation(node, 1)
+                rx = pos.x() - pivot_x
+                ry = pos.y() - pivot_y
+                nx = rx * cos_a - ry * sin_a + pivot_x
+                ny = rx * sin_a + ry * cos_a + pivot_y
+                setTransformNodeTranslation(node, nx, ny, pos.z(), 1)
+                rot = getTransformNodeRotation(node)
+                setTransformNodeRotation(node, rot.x(), rot.y(), rot.z() + delta_angle_deg)
+            except Exception:
+                pass
 
     # ======================================================================
     # 工具管理器 + 全局 API
@@ -3155,13 +3316,15 @@ print("[AllTools] Script loaded. Available commands: switch_tool(name), disable_
 # 串流面板 + X 键守卫 — 仅首次注入时初始化
 # OpenXR action set 在会话启动后锁定，重注入时不可再创建新 action。
 # ======================================================================
-global _stream_panel_url, _stream_panel_visible, _sp_geom_node
+global _stream_panel_url, _stream_panel_visible, _sp_geom_node, _sp_prev_group
 if '_stream_panel_url' not in globals():
     _stream_panel_url = globals().get('_STREAM_PANEL_URL', '')
 if '_stream_panel_visible' not in globals():
     _stream_panel_visible = False
 if '_sp_geom_node' not in globals():
     _sp_geom_node = None
+if '_sp_prev_group' not in globals():
+    _sp_prev_group = None
 
 _SP_NODE_NAME   = "MenuPanel_L"
 _SP_ENGINE_NAME = "MRmenu"
@@ -3217,25 +3380,39 @@ def _sp_build():
     print("[StreamPanel] ready. Node: " + _SP_NODE_NAME)
 
 def _sp_show():
-    """激活 MRmenu 节点（位置由 OSB 约束控制）。"""
-    global _sp_geom_node
+    """激活 MRmenu 节点，并切换到 MenuGroup 以确保 Pointer 交互生效。"""
+    global _sp_geom_node, _sp_prev_group
     if _sp_geom_node is None:
         _sp_build()
     if _sp_geom_node is None:
         print("[StreamPanel] show failed: node not available")
         return
     _sp_geom_node.setActive(True)
-    print("[StreamPanel] shown")
+    try:
+        _sp_prev_group = vrDeviceService.getActiveInteractionGroup()
+        vrDeviceService.setActiveInteractionGroup("MenuGroup")
+        print("[StreamPanel] shown (prev group: " + str(_sp_prev_group) + ")")
+    except Exception as _e:
+        _sp_prev_group = None
+        print("[StreamPanel] shown (group switch failed: " + str(_e) + ")")
 
 def _sp_hide():
-    """隐藏 MRmenu 节点。"""
-    global _sp_geom_node
+    """隐藏 MRmenu 节点，并恢复之前的交互组。"""
+    global _sp_geom_node, _sp_prev_group
     try:
         if _sp_geom_node is not None:
             _sp_geom_node.setActive(False)
     except Exception:
         pass
-    print("[StreamPanel] hidden")
+    try:
+        if _sp_prev_group:
+            vrDeviceService.setActiveInteractionGroup(_sp_prev_group)
+            print("[StreamPanel] hidden (restored group: " + str(_sp_prev_group) + ")")
+            _sp_prev_group = None
+        else:
+            print("[StreamPanel] hidden")
+    except Exception as _e:
+        print("[StreamPanel] hidden (group restore failed: " + str(_e) + ")")
 
 def _sp_toggle():
     global _stream_panel_visible
@@ -3258,6 +3435,14 @@ try:
     print("[StreamPanel] Tools Menu disabled (Y key freed)")
 except Exception as _tme:
     print("[StreamPanel] Tools Menu disable failed: " + str(_tme))
+
+# 每次注入都执行：确保 Pointer 交互支持 MenuGroup（重注入时幂等）
+try:
+    _sp_pointer = vrDeviceService.getInteraction("Pointer")
+    _sp_pointer.addSupportedInteractionGroup("MenuGroup")
+    print("[StreamPanel] Pointer registered for MenuGroup")
+except Exception as _spe:
+    print("[StreamPanel] Pointer MenuGroup registration failed: " + str(_spe))
 
 # X / Y 按键通过 _LeftXReturnGuard 轮询处理（OpenXR left-x-pressed 会同时触发 left-y-pressed）
 # StreamPanelToggle createInteraction 不再需要

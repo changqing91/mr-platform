@@ -897,6 +897,7 @@ except Exception as e:
                         projects={projects}
                         runningMachines={runningMachines}
                         setKillCandidate={setKillCandidate}
+                        onProjectCreated={(project) => setProjects(prev => [project, ...prev])}
                     />
                 )}
                 <Header currentUser={currentUser} handleLogout={handleLogout} onAccountManagement={() => setShowAccountManagement(true)} />

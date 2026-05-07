@@ -72,7 +72,8 @@ const StreamingView = ({
     setStreamingMachineId,
     machines,
     projects,
-    runningMachines
+    runningMachines,
+    onProjectCreated
 }) => {
     const machine = machines.find(m => m.id === streamingMachineId);
     const project = projects.find(p => p.id === runningMachines[streamingMachineId]);
@@ -629,6 +630,25 @@ except Exception as e:
                 // 超时说明 VRED 正在保存（耗时较长），实际已触发保存，视为成功
                 if (/timeout/i.test(msg)) {
                     setSaveResult({ ok: true, msg: `${fileName} (保存中，请稍候)` });
+                    // 仍然注册到项目库
+                    try {
+                        const tusdPrefix = import.meta.env.VITE_TUSD_PATH_PREFIX || '';
+                        const backupFilePath = tusdPrefix + 'backup\\' + fileName;
+                        const newProjectData = {
+                            name: (project?.name || fileName) + ' (备份)',
+                            type: 'VRED',
+                            fileName: fileName,
+                            filePath: backupFilePath,
+                            size: '',
+                            date: new Date().toISOString().split('T')[0],
+                            tags: Array.isArray(project?.tags) ? project.tags : [],
+                            thumbnail: project?.thumbnail || null,
+                        };
+                        const created = await api.projects.create(newProjectData);
+                        if (onProjectCreated) onProjectCreated(created);
+                    } catch (regErr) {
+                        console.error('Failed to register backup project:', regErr);
+                    }
                     return;
                 }
                 throw fetchErr;
@@ -640,6 +660,26 @@ except Exception as e:
                 const pathMatch = output && output.match(/SAVE_OK:(.+)/);
                 const savedPath = pathMatch ? pathMatch[1].trim() : '已保存';
                 setSaveResult({ ok: true, msg: savedPath });
+
+                // 将备份文件注册到项目资源库
+                try {
+                    const tusdPrefix = import.meta.env.VITE_TUSD_PATH_PREFIX || '';
+                    const backupFilePath = tusdPrefix + 'backup\\' + fileName;
+                    const newProjectData = {
+                        name: (project?.name || fileName) + ' (备份)',
+                        type: 'VRED',
+                        fileName: fileName,
+                        filePath: backupFilePath,
+                        size: '',
+                        date: new Date().toISOString().split('T')[0],
+                        tags: Array.isArray(project?.tags) ? project.tags : [],
+                        thumbnail: project?.thumbnail || null,
+                    };
+                    const created = await api.projects.create(newProjectData);
+                    if (onProjectCreated) onProjectCreated(created);
+                } catch (regErr) {
+                    console.error('Failed to register backup project:', regErr);
+                }
             }
         } catch (e) {
             setSaveResult({ ok: false, msg: e.message || '执行失败' });
