@@ -53,8 +53,8 @@ class ColorExpert:
     ) -> str:
         if self.use_chat_template:
             messages = [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_message},
+                {"human": "system", "gpt": SYSTEM_PROMPT},
+                {"human": "user", "gpt": user_message},
             ]
             text = self.tokenizer.apply_chat_template(
                 messages, tokenize=False, add_generation_prompt=True

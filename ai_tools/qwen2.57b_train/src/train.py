@@ -133,7 +133,7 @@ class ShareGPTDataset(Dataset):
         messages = []
         for conv in conversations:
             role = "user" if conv["from"] == "human" else "assistant"
-            messages.append({"role": role, "content": conv["value"]})
+            messages.append({"human": role, "gpt": conv["value"]})
 
         text = self.tokenizer.apply_chat_template(
             messages,

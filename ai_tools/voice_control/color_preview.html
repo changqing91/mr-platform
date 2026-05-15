@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>颜色色卡预览</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #1a1a1a;
+      color: #fff;
+      min-height: 100vh;
+      padding: 40px 24px;
+    }
+
+    h1 {
+      font-size: 18px;
+      font-weight: 500;
+      color: #aaa;
+      margin-bottom: 24px;
+      letter-spacing: 0.05em;
+    }
+
+    .input-area {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 40px;
+      flex-wrap: wrap;
+    }
+
+    textarea {
+      flex: 1;
+      min-width: 260px;
+      height: 80px;
+      background: #2a2a2a;
+      border: 1px solid #444;
+      border-radius: 8px;
+      color: #fff;
+      font-size: 14px;
+      padding: 12px 14px;
+      resize: vertical;
+      outline: none;
+      font-family: monospace;
+      line-height: 1.6;
+    }
+
+    textarea:focus { border-color: #666; }
+
+    textarea::placeholder { color: #555; }
+
+    button {
+      align-self: flex-start;
+      padding: 12px 28px;
+      background: #fff;
+      color: #000;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.15s;
+      white-space: nowrap;
+    }
+
+    button:hover { opacity: 0.85; }
+
+    .swatches {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 16px;
+    }
+
+    .swatch {
+      width: 120px;
+      border-radius: 12px;
+      overflow: hidden;
+      background: #2a2a2a;
+      transition: transform 0.15s;
+      cursor: pointer;
+    }
+
+    .swatch:hover { transform: translateY(-4px); }
+
+    .swatch-color {
+      height: 100px;
+      width: 100%;
+    }
+
+    .swatch-info {
+      padding: 10px 12px;
+    }
+
+    .swatch-hex {
+      font-family: monospace;
+      font-size: 13px;
+      color: #ddd;
+      letter-spacing: 0.03em;
+    }
+
+    .swatch-rgb {
+      font-size: 11px;
+      color: #777;
+      margin-top: 3px;
+    }
+
+    .copied-tip {
+      position: fixed;
+      bottom: 32px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #fff;
+      color: #000;
+      padding: 8px 20px;
+      border-radius: 20px;
+      font-size: 13px;
+      font-weight: 500;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s;
+    }
+
+    .copied-tip.show { opacity: 1; }
+
+    .empty-hint {
+      color: #555;
+      font-size: 14px;
+      margin-top: 8px;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>MR 颜色预览</h1>
+
+  <div class="input-area">
+    <textarea id="hexInput" placeholder="输入 HEX 列表，支持多种格式：
+'#DC0C45', '#D6434C', '#DA268C'
+或每行一个 #DC0C45"></textarea>
+    <button onclick="renderSwatches()">生成色卡</button>
+  </div>
+
+  <div class="swatches" id="swatches">
+    <div class="empty-hint">输入 HEX 颜色代码后点击生成色卡</div>
+  </div>
+
+  <div class="copied-tip" id="copiedTip">已复制</div>
+
+  <script>
+    // 解析输入，提取所有合法 HEX 值
+    function parseHexList(input) {
+      const matches = input.match(/#[0-9A-Fa-f]{6}\b|#[0-9A-Fa-f]{3}\b/g);
+      if (!matches) return [];
+      // 去重保持顺序
+      return [...new Set(matches.map(h => h.toUpperCase()))];
+    }
+
+    // HEX → RGB
+    function hexToRgb(hex) {
+      let h = hex.replace("#", "");
+      if (h.length === 3) h = h.split("").map(c => c + c).join("");
+      const n = parseInt(h, 16);
+      return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+    }
+
+    // 判断文字颜色（深色背景用白字）
+    function textColor(hex) {
+      const [r, g, b] = hexToRgb(hex);
+      const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+      return luminance > 0.5 ? "#000" : "#fff";
+    }
+
+    function renderSwatches() {
+      const input = document.getElementById("hexInput").value;
+      const hexList = parseHexList(input);
+      const container = document.getElementById("swatches");
+
+      if (hexList.length === 0) {
+        container.innerHTML = '<div class="empty-hint">未找到合法的 HEX 颜色代码</div>';
+        return;
+      }
+
+      container.innerHTML = hexList.map(hex => {
+        const [r, g, b] = hexToRgb(hex);
+        return `
+          <div class="swatch" onclick="copyHex('${hex}')" title="点击复制 ${hex}">
+            <div class="swatch-color" style="background:${hex}"></div>
+            <div class="swatch-info">
+              <div class="swatch-hex">${hex}</div>
+              <div class="swatch-rgb">${r}, ${g}, ${b}</div>
+            </div>
+          </div>`;
+      }).join("");
+    }
+
+    function copyHex(hex) {
+      navigator.clipboard.writeText(hex).then(() => {
+        const tip = document.getElementById("copiedTip");
+        tip.textContent = `已复制 ${hex}`;
+        tip.classList.add("show");
+        setTimeout(() => tip.classList.remove("show"), 1500);
+      });
+    }
+
+    // 回车触发
+    document.getElementById("hexInput").addEventListener("keydown", e => {
+      if (e.key === "Enter" && e.metaKey) renderSwatches();
+    });
+
+    // 预填示例
+    document.getElementById("hexInput").value = "'#DC0C45', '#D6434C', '#DA268C', '#FF6347', '#8B0000'";
+    renderSwatches();
+  </script>
+
+</body>
+</html>

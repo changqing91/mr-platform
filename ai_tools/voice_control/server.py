@@ -214,7 +214,7 @@ async def parse_intent(transcript: str, variant_sets: list[str]) -> dict:
 
     payload = {
         "model": LMSTUDIO_MODEL,
-        "messages": [
+        "conversations": [
             {"role": "system", "content": system_prompt},
             # /no_think suppresses Qwen3 chain-of-thought so content is never empty
             {"role": "user", "content": transcript + " /no_think"},

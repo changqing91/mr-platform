@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { ArrowLeft, Activity, Glasses, SplitSquareHorizontal, ImageIcon, Headset, FolderOpen, Monitor, RotateCcw, Power, Zap, Save, CheckCircle, XCircle, Mic, MicOff } from 'lucide-react';
+import { ArrowLeft, Activity, Glasses, SplitSquareHorizontal, ImageIcon, Headset, FolderOpen, Monitor, RotateCcw, Power, Zap, Save, CheckCircle, XCircle, Mic, MicOff, Gamepad2 } from 'lucide-react';
 import ProjectThumbnail from './ProjectThumbnail';
 import { api } from '../services/api';
 import { api as vredApi } from '../services/vredPython';
@@ -65,6 +65,42 @@ const eulerDistance = (a, b) => {
         sum += diff * diff;
     }
     return Math.sqrt(sum);
+};
+
+// Build Python script for gamepad camera movement (pure function, no React deps)
+// QMatrix4x4 is not iterable in PySide6 — extract with [row,col] tuple indexing (row-major),
+// then reconstruct via QMatrix4x4(*m) for setWorldTransform.
+// Yaw rotates around world Y axis (only x/z components change) to keep horizon level.
+// Pitch rotates around local X (right) axis.
+const buildGamepadPython = (lx, ly, rx, ry, roll, vz, ms, rs) => {
+    const f = (n) => n.toFixed(4);
+    return `import math
+from PySide6.QtGui import QMatrix4x4
+cam=vrCameraService.getActiveCamera()
+_t=cam.getWorldTransform()
+m=[_t[i//4,i%4] for i in range(16)]
+ms=${ms};rs=${rs};lx=${f(lx)};ly=${f(ly)};rx_v=${f(rx)};ry_v=${f(-ry)};roll_v=${f(roll)};vz=${f(vz)}
+right=[m[0],m[4],m[8]];fwd=[m[2],m[6],m[10]]
+m[3]+=right[0]*lx*ms+fwd[0]*ly*ms;m[7]+=right[1]*lx*ms+fwd[1]*ly*ms;m[11]+=right[2]*lx*ms+fwd[2]*ly*ms+vz*ms
+if abs(rx_v)>0.001:
+ cy=math.cos(math.radians(rx_v*rs));sy=math.sin(math.radians(rx_v*rs))
+ a,b=m[0],m[4];c,d=m[1],m[5];e,g=m[2],m[6]
+ m[0]=cy*a+sy*b;m[4]=-sy*a+cy*b
+ m[1]=cy*c+sy*d;m[5]=-sy*c+cy*d
+ m[2]=cy*e+sy*g;m[6]=-sy*e+cy*g
+if abs(ry_v)>0.001:
+ up=[m[1],m[5],m[9]];fwd=[m[2],m[6],m[10]]
+ cp=math.cos(math.radians(ry_v*rs));sp=math.sin(math.radians(ry_v*rs))
+ nu0=cp*up[0]+sp*fwd[0];nu1=cp*up[1]+sp*fwd[1];nu2=cp*up[2]+sp*fwd[2]
+ nf0=-sp*up[0]+cp*fwd[0];nf1=-sp*up[1]+cp*fwd[1];nf2=-sp*up[2]+cp*fwd[2]
+ m[1],m[5],m[9]=nu0,nu1,nu2;m[2],m[6],m[10]=nf0,nf1,nf2
+if abs(roll_v)>0.001:
+ right=[m[0],m[4],m[8]];up=[m[1],m[5],m[9]]
+ cr=math.cos(math.radians(roll_v*rs));sr=math.sin(math.radians(roll_v*rs))
+ nr0=cr*right[0]-sr*up[0];nr1=cr*right[1]-sr*up[1];nr2=cr*right[2]-sr*up[2]
+ nu0=sr*right[0]+cr*up[0];nu1=sr*right[1]+cr*up[1];nu2=sr*right[2]+cr*up[2]
+ m[0],m[4],m[8]=nr0,nr1,nr2;m[1],m[5],m[9]=nu0,nu1,nu2
+cam.setWorldTransform(QMatrix4x4(*m))`;
 };
 
 const StreamingView = ({
@@ -412,8 +448,117 @@ vrOSGWidget.enableSceneplates(False)
         }
     };
 
+    // --- Gamepad control ---
+    const [gamepadConnected, setGamepadConnected] = useState(false);
+    const [gamepadEnabled, setGamepadEnabled] = useState(false);
+    const [gamepadMoveSpeed, setGamepadMoveSpeed] = useState('300');
+    const [gamepadRotSpeed, setGamepadRotSpeed] = useState('2.0');
+    const [cameraHeight, setCameraHeight] = useState('175'); // cm
+    const gamepadRafRef = useRef(null);
+    const gamepadSendingRef = useRef(false);   // request in-flight
+    const gamepadPendingRef = useRef(null);    // latest input buffered while in-flight
+    const gamepadEnabledRef = useRef(false);
+    const machineRef = useRef(null);
+    const gamepadMoveSpeedRef = useRef(300);
+    const gamepadRotSpeedRef = useRef(2.0);
+
+    // Keep refs in sync with state/props for use inside rAF callback
+    useEffect(() => { machineRef.current = machine; });
+    useEffect(() => { gamepadEnabledRef.current = gamepadEnabled; }, [gamepadEnabled]);
+    useEffect(() => { gamepadMoveSpeedRef.current = parseFloat(gamepadMoveSpeed) || 300; }, [gamepadMoveSpeed]);
+    useEffect(() => { gamepadRotSpeedRef.current = parseFloat(gamepadRotSpeed) || 2.0; }, [gamepadRotSpeed]);
+
+    const handleSetCameraHeight = () => {
+        if (!machine) return;
+        const heightMm = (parseFloat(cameraHeight) || 170) * 10; // cm → mm
+        const code = `from PySide6.QtGui import QMatrix4x4
+cam=vrCameraService.getActiveCamera()
+_t=cam.getWorldTransform()
+m=[_t[i//4,i%4] for i in range(16)]
+m[11]=${heightMm}
+cam.setWorldTransform(QMatrix4x4(*m))`;
+        api.processes.executePython(machine.ip, machine.port || 8888, code).catch(() => {});
+    };
+
+    // Listen for gamepad connect/disconnect events
+    useEffect(() => {
+        const onConnect = () => setGamepadConnected(true);
+        const onDisconnect = () => {
+            setGamepadConnected(false);
+            setGamepadEnabled(false);
+        };
+        window.addEventListener('gamepadconnected', onConnect);
+        window.addEventListener('gamepaddisconnected', onDisconnect);
+        // Check if a gamepad is already connected on mount
+        const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+        for (const pad of pads) { if (pad) { setGamepadConnected(true); break; } }
+        return () => {
+            window.removeEventListener('gamepadconnected', onConnect);
+            window.removeEventListener('gamepaddisconnected', onDisconnect);
+        };
+    }, []);
+
+    // Gamepad rAF loop — reassigned each render so it always reads latest refs
+    const gamepadTick = useRef(null);
+    gamepadTick.current = () => {
+        const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+        const pad = pads[0];
+        if (pad && gamepadEnabledRef.current && machineRef.current) {
+            const DEAD = 0.12;
+            const lx = Math.abs(pad.axes[0] || 0) > DEAD ? (pad.axes[0] || 0) : 0;
+            const ly = Math.abs(pad.axes[1] || 0) > DEAD ? (pad.axes[1] || 0) : 0;
+            const rx = Math.abs(pad.axes[2] || 0) > DEAD ? (pad.axes[2] || 0) : 0;
+            const ry = Math.abs(pad.axes[3] || 0) > DEAD ? (pad.axes[3] || 0) : 0;
+            const b4 = pad.buttons[4]?.pressed ? -1 : 0; // LB = roll left
+            const b5 = pad.buttons[5]?.pressed ?  1 : 0; // RB = roll right
+            const roll = b4 + b5;
+            const b0 = pad.buttons[12]?.pressed ?  1 : 0; // DPad Up = move up
+            const b3 = pad.buttons[13]?.pressed ? -1 : 0; // DPad Down = move down
+            const vz = b0 + b3;
+            // Blur any focused input to prevent iPad system keyboard from popping up
+            // when gamepad buttons (mapped to Tab by Safari) shift focus to inputs
+            if ((roll || vz || lx || ly || rx || ry) && document.activeElement && document.activeElement !== document.body) {
+                document.activeElement.blur();
+            }
+            const hasInput = lx || ly || rx || ry || roll || vz;
+            if (hasInput) {
+                // Always store latest values; will be consumed by sendPending
+                gamepadPendingRef.current = { lx, ly, rx, ry, roll, vz };
+                if (!gamepadSendingRef.current) {
+                    const sendPending = () => {
+                        const input = gamepadPendingRef.current;
+                        if (!input || !machineRef.current) return;
+                        gamepadPendingRef.current = null;
+                        gamepadSendingRef.current = true;
+                        const code = buildGamepadPython(input.lx, input.ly, input.rx, input.ry, input.roll, input.vz, gamepadMoveSpeedRef.current, gamepadRotSpeedRef.current);
+                        api.processes.executePython(machineRef.current.ip, machineRef.current.port || 8888, code)
+                            .catch(() => {})
+                            .finally(() => {
+                                gamepadSendingRef.current = false;
+                                // If new input arrived while request was in-flight, send it immediately
+                                if (gamepadPendingRef.current) sendPending();
+                            });
+                    };
+                    sendPending();
+                }
+                // else: in-flight — pending updated above, will be flushed on complete
+            }
+        }
+        gamepadRafRef.current = requestAnimationFrame(gamepadTick.current);
+    };
+
+    useEffect(() => {
+        if (gamepadEnabled) {
+            gamepadRafRef.current = requestAnimationFrame(gamepadTick.current);
+        } else {
+            if (gamepadRafRef.current) { cancelAnimationFrame(gamepadRafRef.current); gamepadRafRef.current = null; }
+        }
+        return () => { if (gamepadRafRef.current) { cancelAnimationFrame(gamepadRafRef.current); gamepadRafRef.current = null; } };
+    }, [gamepadEnabled]);
+
     // --- Tab & MR Tools state ---
     const [activeTab, setActiveTab] = useState(0); // 0: 控制面板, 1: MR 工具
+    const [gamepadPanelOpen, setGamepadPanelOpen] = useState(false);
     const [activeTool, setActiveTool] = useState(null);
     const [isToolsInjected, setIsToolsInjected] = useState(false);
 
@@ -798,12 +943,6 @@ except Exception as e:
                         >
                             MR 工具
                         </button>
-                        {/* <button
-                            onClick={() => { setActiveTab(2); fetchVariantSets(); }}
-                            className={`flex-1 py-3 text-xs font-bold tracking-wide transition-colors border-b-2 ${activeTab === 2 ? 'text-[#39C5BB] border-[#39C5BB]' : 'text-gray-500 border-transparent hover:text-gray-300'}`}
-                        >
-                            语音控制
-                        </button> */}
                     </div>
 
                     {/* Tab 1: 控制面板 */}
@@ -948,123 +1087,115 @@ except Exception as e:
                             </div>
                         </div>
                     )}
-                    {/* Tab 3: 语音控制 */}
+                    {/* Tab 3: 手柄控制 */}
                     {activeTab === 2 && (
                         <div className="flex-1 flex flex-col p-4 overflow-y-auto custom-scrollbar">
-                            <div className="mb-4">
-                                <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">语音切换变量集</span>
-                            </div>
-
-                            {/* Push-to-talk button */}
-                            <div className="flex flex-col items-center gap-4 mb-6">
-                                <button
-                                    onMouseDown={startRecording}
-                                    onMouseUp={stopRecordingAndSend}
-                                    onTouchStart={(e) => { e.preventDefault(); startRecording(); }}
-                                    onTouchEnd={(e) => { e.preventDefault(); stopRecordingAndSend(); }}
-                                    className={`w-24 h-24 rounded-full flex flex-col items-center justify-center gap-2 border-2 transition-all select-none ${
-                                        isRecording
-                                            ? 'bg-red-500/20 border-red-500 shadow-lg shadow-red-500/30 scale-110'
-                                            : 'bg-[#39C5BB]/10 border-[#39C5BB]/50 hover:bg-[#39C5BB]/20 hover:border-[#39C5BB]'
-                                    }`}
-                                >
-                                    {isRecording
-                                        ? <MicOff size={32} className="text-red-400 animate-pulse" />
-                                        : <Mic size={32} className="text-[#39C5BB]" />
-                                    }
-                                    <span className="text-[10px] font-bold" style={{ color: isRecording ? '#f87171' : '#39C5BB' }}>
-                                        {isRecording ? '松开发送' : '按住说话'}
-                                    </span>
-                                </button>
-
-                                {/* Transcript */}
-                                {voiceTranscript && (
-                                    <div className="w-full px-3 py-2 bg-gray-800 rounded-lg border border-gray-700 text-xs text-gray-300 text-center animate-in fade-in duration-300">
-                                        "{voiceTranscript}"
-                                    </div>
-                                )}
-
-                                {/* Status */}
-                                {voiceStatus && (
-                                    <div className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-bold animate-in fade-in duration-300 ${
-                                        voiceStatus.ok === null
-                                            ? 'bg-gray-800 border-gray-600 text-gray-400'
-                                            : voiceStatus.ok
-                                                ? 'bg-green-900/40 border-green-700 text-green-400'
-                                                : 'bg-red-900/40 border-red-700 text-red-400'
-                                    }`}>
-                                        {voiceStatus.ok === null && <div className="w-3 h-3 border border-t-transparent border-gray-400 rounded-full animate-spin" />}
-                                        {voiceStatus.ok === true && <CheckCircle size={14} />}
-                                        {voiceStatus.ok === false && <XCircle size={14} />}
-                                        <span>{voiceStatus.msg}</span>
-                                    </div>
-                                )}
-                            </div>
-
-                            {/* Chat input */}
-                            <div className="flex gap-2 mb-6">
-                                <input
-                                    type="text"
-                                    value={chatInput}
-                                    onChange={(e) => setChatInput(e.target.value)}
-                                    onKeyDown={(e) => { if (e.key === 'Enter') { sendTextCommand(chatInput); setChatInput(''); } }}
-                                    placeholder="输入指令，如：切换红色"
-                                    disabled={chatLoading}
-                                    className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-xs text-white placeholder-gray-600 focus:border-[#39C5BB] outline-none disabled:opacity-50"
-                                />
-                                <button
-                                    onClick={() => { sendTextCommand(chatInput); setChatInput(''); }}
-                                    disabled={chatLoading || !chatInput.trim()}
-                                    className="px-3 py-2 rounded-lg bg-[#39C5BB]/20 border border-[#39C5BB]/50 text-[#39C5BB] hover:bg-[#39C5BB]/30 transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-xs font-bold"
-                                >
-                                    {chatLoading ? <div className="w-4 h-4 border border-t-transparent border-[#39C5BB] rounded-full animate-spin" /> : '发送'}
-                                </button>
-                            </div>
-
-                            {/* Variant sets list */}
-                            <div>
-                                <div className="flex items-center justify-between mb-2">
-                                    <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">可用变量集</span>
-                                    <button
-                                        onClick={fetchVariantSets}
-                                        className="text-[10px] px-2 py-1 rounded border border-gray-700 text-gray-400 hover:text-white hover:border-gray-500 transition-colors"
-                                    >
-                                        刷新
-                                    </button>
-                                </div>
-                                {variantSets.length === 0 ? (
-                                    <p className="text-xs text-gray-600 text-center py-4">暂无数据 — 点击刷新或检查语音服务连接</p>
-                                ) : (
-                                    <div className="space-y-1">
-                                        {variantSets.map((name) => (
-                                            <button
-                                                key={name}
-                                                onClick={async () => {
-                                                    setVoiceStatus({ ok: null, msg: `切换中: ${name}` });
-                                                    try {
-                                                        const resp = await fetch(`${VOICE_SERVICE_URL}/voice-command`, {
-                                                            method: 'POST',
-                                                            body: (() => { const f = new FormData(); /* direct switch via text intent */ return f; })(),
-                                                        });
-                                                    } catch (_) {}
-                                                    // Direct VRED execution via Strapi
-                                                    const safeName = name.replace(/'/g, "\\'");
-                                                    await sendPython(`vrVariantSets.activateVariantSet('${safeName}')`);
-                                                    setVoiceStatus({ ok: true, msg: `已切换: ${name}` });
-                                                    setTimeout(() => setVoiceStatus(null), 4000);
-                                                }}
-                                                className="w-full text-left px-3 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-[#39C5BB]/50 text-xs text-gray-300 hover:text-white transition-all"
-                                            >
-                                                {name}
-                                            </button>
-                                        ))}
-                                    </div>
-                                )}
-                            </div>
                         </div>
                     )}
                 </div>
             </div>
+
+            {/* Gamepad floating button — only when connected */}
+            {gamepadConnected && (
+                <button
+                    onClick={() => setGamepadPanelOpen(v => !v)}
+                    className={`absolute bottom-6 right-[340px] z-40 flex items-center gap-2 px-3 py-2 rounded-xl shadow-lg border transition-all ${
+                        gamepadEnabled
+                            ? 'bg-[#39C5BB] border-[#39C5BB] text-white shadow-[#39C5BB]/30'
+                            : 'bg-gray-800/90 border-gray-700 text-gray-300 hover:border-[#39C5BB]/50 hover:text-[#39C5BB]'
+                    }`}
+                    title="手柄控制"
+                >
+                    <Gamepad2 size={16} />
+                    {gamepadEnabled && <div className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />}
+                </button>
+            )}
+
+            {/* Gamepad floating panel */}
+            {gamepadPanelOpen && gamepadConnected && (
+                <div className="absolute bottom-16 right-[340px] z-40 w-72 bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-200">
+                    {/* Panel header */}
+                    <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800">
+                        <div className="flex items-center gap-2">
+                            <Gamepad2 size={14} className="text-[#39C5BB]" />
+                            <span className="text-xs font-bold text-gray-200">手柄控制</span>
+                            <div className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-[#39C5BB]/10 border border-[#39C5BB]/30">
+                                <div className="w-1 h-1 rounded-full bg-[#39C5BB] animate-pulse" />
+                                <span className="text-[9px] font-bold text-[#39C5BB]">已连接</span>
+                            </div>
+                        </div>
+                        <button onClick={() => setGamepadPanelOpen(false)} className="text-gray-500 hover:text-gray-200 transition-colors text-xs">✕</button>
+                    </div>
+
+                    <div className="p-4 space-y-4 overflow-y-auto max-h-[70vh] custom-scrollbar">
+                        {/* Speed Settings */}
+                        <div className="space-y-2">
+                            <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">速度设置</p>
+                            <div className="grid grid-cols-2 gap-2">
+                                <div>
+                                    <label className="block text-[10px] text-gray-500 mb-1">移动 (mm/步)</label>
+                                    <input type="number" min="1" max="500" value={gamepadMoveSpeed} onChange={(e) => setGamepadMoveSpeed(e.target.value)}
+                                        className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-xs text-white focus:border-[#39C5BB] outline-none" />
+                                </div>
+                                <div>
+                                    <label className="block text-[10px] text-gray-500 mb-1">旋转 (°/步)</label>
+                                    <input type="number" min="0.1" max="10" step="0.1" value={gamepadRotSpeed} onChange={(e) => setGamepadRotSpeed(e.target.value)}
+                                        className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-xs text-white focus:border-[#39C5BB] outline-none" />
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Camera Height */}
+                        <div className="space-y-2">
+                            <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">摄像机高度</p>
+                            <div className="flex gap-2">
+                                <div className="flex-1">
+                                    <label className="block text-[10px] text-gray-500 mb-1">身高 (cm)</label>
+                                    <input type="number" min="50" max="250" step="1" value={cameraHeight} onChange={(e) => setCameraHeight(e.target.value)}
+                                        className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-xs text-white focus:border-[#39C5BB] outline-none" />
+                                </div>
+                                <div className="flex items-end">
+                                    <button onClick={handleSetCameraHeight} disabled={!machine}
+                                        className="px-3 py-1.5 rounded text-xs font-bold bg-[#39C5BB]/20 border border-[#39C5BB]/40 text-[#39C5BB] hover:bg-[#39C5BB]/30 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+                                        应用
+                                    </button>
+                                </div>
+                            </div>
+                            <p className="text-[9px] text-gray-600">{cameraHeight} cm = {((parseFloat(cameraHeight)||0)*10).toFixed(0)} mm</p>
+                        </div>
+
+                        {/* Stick legend */}
+                        <div className="space-y-2">
+                            <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">按键映射</p>
+                            <div className="grid grid-cols-2 gap-1.5 text-[10px]">
+                                <div className="bg-gray-800 rounded-lg p-2"><span className="text-[#39C5BB] font-bold">L STICK</span><br/><span className="text-gray-400">↑↓ 前后 · ←→ 左右</span></div>
+                                <div className="bg-gray-800 rounded-lg p-2"><span className="text-[#39C5BB] font-bold">R STICK</span><br/><span className="text-gray-400">←→ 偏航 · ↑↓ 俯仰</span></div>
+                                <div className="bg-gray-800 rounded-lg p-2"><span className="text-[#39C5BB] font-bold">LB / RB</span><br/><span className="text-gray-400">向左 / 向右横滚</span></div>
+                                <div className="bg-gray-800 rounded-lg p-2"><span className="text-[#39C5BB] font-bold">十字键 ↑↓</span><br/><span className="text-gray-400">上升 / 下降</span></div>
+                            </div>
+                        </div>
+
+                        {/* Enable / Disable — bottom */}
+                        <div className="pt-1 border-t border-gray-800">
+                            <div className="flex rounded-lg overflow-hidden border border-gray-700 w-full">
+                                <button
+                                    onClick={() => { setGamepadEnabled(true); setTimeout(() => setGamepadPanelOpen(false), 5000); }}
+                                    className={`flex-1 py-2.5 text-xs font-bold transition-colors ${gamepadEnabled ? 'bg-[#39C5BB] text-white' : 'bg-gray-800 text-gray-500 hover:bg-gray-700'}`}
+                                >
+                                    启用飞行控制
+                                </button>
+                                <div className="w-[1px] bg-gray-700"></div>
+                                <button
+                                    onClick={() => { setGamepadEnabled(false); setTimeout(() => setGamepadPanelOpen(false), 5000); }}
+                                    className={`flex-1 py-2.5 text-xs font-bold transition-colors ${!gamepadEnabled ? 'bg-gray-700 text-white' : 'bg-gray-800 text-gray-500 hover:bg-gray-700'}`}
+                                >
+                                    停用
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

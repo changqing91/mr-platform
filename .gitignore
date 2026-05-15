@@ -5,3 +5,5 @@ vrdemo
 tools/license-gen/private.pem
 server/license.lic
 *.epub
+ai_tools/voice_control/color_index/colors_meta.json
+ai_tools/voice_control/color_index/embeddings.npy

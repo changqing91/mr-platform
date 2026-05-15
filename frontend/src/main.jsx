@@ -27,42 +27,42 @@ import './index.css'
   // if (document.body) attachDbg()
   // else document.addEventListener('DOMContentLoaded', attachDbg, { once: true })
 
-  // ---------- Watch all candidate events ----------
-  const WATCH = ['pointerdown','pointerup','mousedown','mouseup','click']
-  WATCH.forEach(type => {
-    document.addEventListener(type, (e) => {
-      const tag = e.target?.tagName ?? '?'
-      const pt  = e.pointerType !== undefined ? `pt=${e.pointerType}` : ''
-      const pos = `(${Math.round(e.clientX)},${Math.round(e.clientY)})`
-      appendLog(`[${type}] <${tag}> ${pt} ${pos}`)
-    }, { capture: true, passive: true })
-  })
+  // // ---------- Watch all candidate events ----------
+  // const WATCH = ['pointerdown','pointerup','mousedown','mouseup','click']
+  // WATCH.forEach(type => {
+  //   document.addEventListener(type, (e) => {
+  //     const tag = e.target?.tagName ?? '?'
+  //     const pt  = e.pointerType !== undefined ? `pt=${e.pointerType}` : ''
+  //     const pos = `(${Math.round(e.clientX)},${Math.round(e.clientY)})`
+  //     appendLog(`[${type}] <${tag}> ${pt} ${pos}`)
+  //   }, { capture: true, passive: true })
+  // })
 
-  // ---------- Shim: promote pointerdown -> click (mousedown removed to prevent double-fire) ----------
-  const INTERACTIVE = 'button, a, input, select, textarea, [role="button"], [tabindex]'
-  const fireClick = (() => {
-    let lastFired = 0
-    return (e, src) => {
-      const now = Date.now()
-      if (now - lastFired < 300) {
-        appendLog(`[shim-${src}] debounced (${now - lastFired}ms)`)
-        return
-      }
-      lastFired = now
-      const target = e.target instanceof Element ? e.target.closest(INTERACTIVE) : null
-      if (!target) {
-        appendLog(`[shim-${src}] no interactive target @ <${e.target?.tagName ?? '?'}>`)
-        return
-      }
-      appendLog(`[shim-${src}] -> click on <${target.tagName}> "${(target.textContent || '').trim().slice(0, 20)}"`)
-      target.dispatchEvent(new MouseEvent('click', {
-        bubbles: true, cancelable: true, view: window,
-        clientX: e.clientX, clientY: e.clientY,
-      }))
-    }
-  })()
+  // // ---------- Shim: promote pointerdown -> click (mousedown removed to prevent double-fire) ----------
+  // const INTERACTIVE = 'button, a, input, select, textarea, [role="button"], [tabindex]'
+  // const fireClick = (() => {
+  //   let lastFired = 0
+  //   return (e, src) => {
+  //     const now = Date.now()
+  //     if (now - lastFired < 300) {
+  //       appendLog(`[shim-${src}] debounced (${now - lastFired}ms)`)
+  //       return
+  //     }
+  //     lastFired = now
+  //     const target = e.target instanceof Element ? e.target.closest(INTERACTIVE) : null
+  //     if (!target) {
+  //       appendLog(`[shim-${src}] no interactive target @ <${e.target?.tagName ?? '?'}>`)
+  //       return
+  //     }
+  //     appendLog(`[shim-${src}] -> click on <${target.tagName}> "${(target.textContent || '').trim().slice(0, 20)}"`)
+  //     target.dispatchEvent(new MouseEvent('click', {
+  //       bubbles: true, cancelable: true, view: window,
+  //       clientX: e.clientX, clientY: e.clientY,
+  //     }))
+  //   }
+  // })()
 
-  document.addEventListener('pointerdown', (e) => fireClick(e, 'PD'), { capture: true })
+  // document.addEventListener('pointerdown', (e) => fireClick(e, 'PD'), { capture: true })
 })()
 
 ReactDOM.createRoot(document.getElementById('root')).render(

@@ -84,6 +84,55 @@ else:
     # ======================================================================
 
     # ------------------------------------------------------------------
+    # 辅助函数：获取本地用户 HMD 在追踪空间的位置
+    # ------------------------------------------------------------------
+    _hmd_api_ok = [None]   # [None=未检测, True=method1, False=method2, 'abs'=无法获取]
+
+    def _get_hmd_tracking_pos():
+        """
+        返回本地 HMD 在追踪空间（Y-up）的 (x, y, z)。
+        依次尝试多种 API，首次成功后固定使用该方法。失败返回 None。
+        """
+        # Method 1: vrDeviceService.getVRDevice("hmd")
+        if _hmd_api_ok[0] in (None, True):
+            try:
+                hmd = vrDeviceService.getVRDevice("hmd")
+                col = hmd.getTrackingMatrix().column(3)
+                pos = (col.x(), col.y(), col.z())
+                if _hmd_api_ok[0] is None:
+                    print("[HMD] Using vrDeviceService.getVRDevice('hmd')")
+                    _hmd_api_ok[0] = True
+                return pos
+            except Exception:
+                if _hmd_api_ok[0] is None:
+                    _hmd_api_ok[0] = False  # 不可用，尝试下一个
+
+        # Method 2: vrSessionService.getUsers()
+        if _hmd_api_ok[0] in (False, None):
+            try:
+                users = vrSessionService.getUsers()
+                for u in users:
+                    if not u.getIsRemote():
+                        col = u.getHeadTrackingMatrix().column(3)
+                        if _hmd_api_ok[0] == False:
+                            print("[HMD] Using vrSessionService.getUsers()")
+                            _hmd_api_ok[0] = 'session'
+                        return (col.x(), col.y(), col.z())
+                if users:
+                    col = users[0].getHeadTrackingMatrix().column(3)
+                    if _hmd_api_ok[0] == False:
+                        print("[HMD] Using vrSessionService.getUsers()[0] (no local user found)")
+                        _hmd_api_ok[0] = 'session'
+                    return (col.x(), col.y(), col.z())
+            except Exception:
+                pass
+
+        if _hmd_api_ok[0] not in (True, 'session'):
+            print("[HMD] WARNING: HMD tracking unavailable — body-translation compensation disabled")
+            _hmd_api_ok[0] = 'abs'
+        return None
+
+    # ------------------------------------------------------------------
     # GripFlyMixin - Grip 飞行模式公共 Mixin
     # ------------------------------------------------------------------
     class GripFlyMixin:
@@ -99,6 +148,7 @@ else:
             """初始化飞行模式状态。在子类 __init__ 中调用。"""
             self._flyHeld = False
             self._flyBasePos = None
+            self._flyRelative = False   # True = flyBasePos 是相对于 HMD 的相对坐标
             self._flyVelX = 0.0
             self._flyVelY = 0.0
             self._flyVelZ = 0.0
@@ -132,19 +182,24 @@ else:
         def on_grip_pressed(self, action=None, device=None):
             self._flyHeld = True
             try:
-                mat = self.rightController.getTrackingMatrix()
-                col = mat.column(3)
-                self._flyBasePos = (col.x(), col.y(), col.z())
-                # 记录按下时摄像机朝向（参考 fly.py camPos 矩阵）
-                camMat = getCamNode(-1).getWorldTransform()
-                # camPos 列主序: [0..3]=col0, [4..7]=col1, [8..11]=col2, [12..15]=col3
-                # 前向 = -col2, 右向 = col0, 上向 = col1 (Y-up)
-                self._flyCamFwd   = (-camMat[2],  -camMat[6],  -camMat[10])
-                self._flyCamRight = ( camMat[0],   camMat[4],   camMat[8])
-                self._flyCamUp    = ( camMat[1],   camMat[5],   camMat[9])
+                ctrl_col = self.rightController.getTrackingMatrix().column(3)
+                hmd = _get_hmd_tracking_pos()
+                if hmd is not None:
+                    # 记录控制器相对于 HMD 的位置 —— 与身体平移无关（参考 fly.py 的 world-space 方案）
+                    self._flyBasePos = (
+                        ctrl_col.x() - hmd[0],
+                        ctrl_col.y() - hmd[1],
+                        ctrl_col.z() - hmd[2],
+                    )
+                    self._flyRelative = True
+                else:
+                    # 无法获取 HMD，退回到绝对追踪坐标
+                    self._flyBasePos = (ctrl_col.x(), ctrl_col.y(), ctrl_col.z())
+                    self._flyRelative = False
             except Exception as e:
                 print("[GripFly][PRESS] ERROR: " + str(e))
                 self._flyBasePos = None
+                self._flyRelative = False
 
         def on_grip_released(self, action=None, device=None):
             self._flyHeld = False
@@ -171,9 +226,19 @@ else:
             if not (self._flyHeld and self._flyBasePos is not None):
                 return
             try:
-                mat = self.rightController.getTrackingMatrix()
-                col = mat.column(3)
-                cx, cy, cz = col.x(), col.y(), col.z()
+                ctrl_col = self.rightController.getTrackingMatrix().column(3)
+                if self._flyRelative:
+                    hmd = _get_hmd_tracking_pos()
+                    if hmd is not None:
+                        # 用控制器相对于 HMD 的当前位置对比按下时的相对位置
+                        # delta = 手相对于头的移动量，与身体平移完全无关
+                        cx = ctrl_col.x() - hmd[0]
+                        cy = ctrl_col.y() - hmd[1]
+                        cz = ctrl_col.z() - hmd[2]
+                    else:
+                        cx, cy, cz = ctrl_col.x(), ctrl_col.y(), ctrl_col.z()
+                else:
+                    cx, cy, cz = ctrl_col.x(), ctrl_col.y(), ctrl_col.z()
                 dx = cx - self._flyBasePos[0]
                 dy = cy - self._flyBasePos[1]
                 dz = cz - self._flyBasePos[2]
@@ -182,28 +247,8 @@ else:
                     d = dist - self._flyDeadZone
                     speed = self.flySpeed + d * self._flyAccel + d * d * 0.0006
                     speed = min(speed, self._flyMaxStep)
-                    # 将手柄位移投影到按下时摄像机局部坐标轴（参考 fly.py camDirForward/Sideways）
-                    fwd   = getattr(self, '_flyCamFwd',   (0, 1, 0))
-                    right = getattr(self, '_flyCamRight', (1, 0, 0))
-                    up    = getattr(self, '_flyCamUp',    (0, 0, 1))
-                    # 归一化各轴
-                    def norm3(v):
-                        l = math.sqrt(v[0]*v[0] + v[1]*v[1] + v[2]*v[2])
-                        return (v[0]/l, v[1]/l, v[2]/l) if l > 1e-6 else v
-                    fwd   = norm3(fwd)
-                    right = norm3(right)
-                    up    = norm3(up)
-                    # 手柄位移在各轴的分量（即虚拟摇杆输入）
-                    proj_fwd   = dx*fwd[0]   + dy*fwd[1]   + dz*fwd[2]
-                    proj_right = dx*right[0] + dy*right[1] + dz*right[2]
-                    proj_up    = dx*up[0]    + dy*up[1]    + dz*up[2]
-                    # 沿各摄像机轴合成移动向量
-                    mx = proj_fwd*fwd[0] + proj_right*right[0] + proj_up*up[0]
-                    my = proj_fwd*fwd[1] + proj_right*right[1] + proj_up*up[1]
-                    mz = proj_fwd*fwd[2] + proj_right*right[2] + proj_up*up[2]
-                    ml = math.sqrt(mx*mx + my*my + mz*mz)
-                    if ml > 1e-6:
-                        mx, my, mz = mx/ml, my/ml, mz/ml
+                    # 手柄位移与 tracking origin 同处追踪空间，直接归一化即为飞行方向
+                    mx, my, mz = dx / dist, dy / dist, dz / dist
                     origin = vrDeviceService.getTrackingOrigin()
                     vrDeviceService.setTrackingOrigin(QVector3D(
                         origin.x() - mx * speed,
@@ -2957,6 +3002,7 @@ else:
             self._right      = vrDeviceService.getVRDevice("right-controller")
             self._flyHeld    = False
             self._flyBasePos = None
+            self._flyRelative = False
             self._gripHeld   = False
 
             # polling timer
@@ -3006,17 +3052,22 @@ else:
         def _on_grip_pressed(self):
             self._flyHeld = True
             try:
-                mat = self._right.getTrackingMatrix()
-                col = mat.column(3)
-                self._flyBasePos = (col.x(), col.y(), col.z())
-                # 记录按下时摄像机朝向（参考 fly.py camPos 矩阵）
-                camMat = getCamNode(-1).getWorldTransform()
-                self._flyCamFwd   = (-camMat[2],  -camMat[6],  -camMat[10])
-                self._flyCamRight = ( camMat[0],   camMat[4],   camMat[8])
-                self._flyCamUp    = ( camMat[1],   camMat[5],   camMat[9])
+                ctrl_col = self._right.getTrackingMatrix().column(3)
+                hmd = _get_hmd_tracking_pos()
+                if hmd is not None:
+                    self._flyBasePos = (
+                        ctrl_col.x() - hmd[0],
+                        ctrl_col.y() - hmd[1],
+                        ctrl_col.z() - hmd[2],
+                    )
+                    self._flyRelative = True
+                else:
+                    self._flyBasePos = (ctrl_col.x(), ctrl_col.y(), ctrl_col.z())
+                    self._flyRelative = False
             except Exception as e:
                 print("[LocomotionMode][GRIP] ERROR: " + str(e))
                 self._flyBasePos = None
+                self._flyRelative = False
 
         def _on_grip_released(self):
             self._flyHeld    = False
@@ -3026,35 +3077,27 @@ else:
             if not (self._flyHeld and self._flyBasePos is not None):
                 return
             try:
-                mat  = self._right.getTrackingMatrix()
-                col  = mat.column(3)
-                dx   = col.x() - self._flyBasePos[0]
-                dy   = col.y() - self._flyBasePos[1]
-                dz   = col.z() - self._flyBasePos[2]
+                ctrl_col = self._right.getTrackingMatrix().column(3)
+                if self._flyRelative:
+                    hmd = _get_hmd_tracking_pos()
+                    if hmd is not None:
+                        cx = ctrl_col.x() - hmd[0]
+                        cy = ctrl_col.y() - hmd[1]
+                        cz = ctrl_col.z() - hmd[2]
+                    else:
+                        cx, cy, cz = ctrl_col.x(), ctrl_col.y(), ctrl_col.z()
+                else:
+                    cx, cy, cz = ctrl_col.x(), ctrl_col.y(), ctrl_col.z()
+                dx   = cx - self._flyBasePos[0]
+                dy   = cy - self._flyBasePos[1]
+                dz   = cz - self._flyBasePos[2]
                 dist = math.sqrt(dx*dx + dy*dy + dz*dz)
                 if dist > self.FLY_DEAD_ZONE:
                     d     = dist - self.FLY_DEAD_ZONE
                     speed = self.FLY_SPEED + d * self.FLY_ACCEL + d * d * 0.0006
                     speed = min(speed, self.FLY_MAX_STEP)
-                    # 将手柄位移投影到按下时摄像机局部坐标轴（参考 fly.py camDirForward/Sideways）
-                    fwd   = getattr(self, '_flyCamFwd',   (0, 1, 0))
-                    right = getattr(self, '_flyCamRight', (1, 0, 0))
-                    up    = getattr(self, '_flyCamUp',    (0, 0, 1))
-                    def norm3(v):
-                        l = math.sqrt(v[0]*v[0] + v[1]*v[1] + v[2]*v[2])
-                        return (v[0]/l, v[1]/l, v[2]/l) if l > 1e-6 else v
-                    fwd   = norm3(fwd)
-                    right = norm3(right)
-                    up    = norm3(up)
-                    proj_fwd   = dx*fwd[0]   + dy*fwd[1]   + dz*fwd[2]
-                    proj_right = dx*right[0] + dy*right[1] + dz*right[2]
-                    proj_up    = dx*up[0]    + dy*up[1]    + dz*up[2]
-                    mx = proj_fwd*fwd[0] + proj_right*right[0] + proj_up*up[0]
-                    my = proj_fwd*fwd[1] + proj_right*right[1] + proj_up*up[1]
-                    mz = proj_fwd*fwd[2] + proj_right*right[2] + proj_up*up[2]
-                    ml = math.sqrt(mx*mx + my*my + mz*mz)
-                    if ml > 1e-6:
-                        mx, my, mz = mx/ml, my/ml, mz/ml
+                    # 手柄位移与 tracking origin 同处追踪空间，直接归一化即为飞行方向
+                    mx, my, mz = dx / dist, dy / dist, dz / dist
                     origin = vrDeviceService.getTrackingOrigin()
                     vrDeviceService.setTrackingOrigin(QVector3D(
                         origin.x() - mx * speed,
