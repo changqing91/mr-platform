@@ -209,7 +209,7 @@ const MachineList = ({
                     )}
 
                     {/* Persistent Control Row */}
-                    <button onClick={toggleBatchMode} className={`flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg transition-all shadow-sm text-xs font-bold ${isBatchMode ? `bg-gray-800 text-white` : 'bg-white border border-gray-200 text-gray-600 hover:border-primary hover:text-primary'}`} title="批量控制模式">
+                    <button onClick={toggleBatchMode} className={`flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg transition-all shadow-sm text-xs font-bold ${isBatchMode ? `bg-amber-400 border border-amber-500 text-amber-900` : 'bg-white border border-gray-200 text-gray-600 hover:border-primary hover:text-primary'}`} title="批量控制模式">
                         {isBatchMode ? <CheckSquare size={16} /> : <Copy size={16} />} {isBatchMode ? '退出批量' : '批量模式'}
                     </button>
 
@@ -266,7 +266,7 @@ const MachineList = ({
                          <div 
                             onClick={() => { if(isClickable) handleMachineClick(machine); }}
                             className={`
-                                relative p-3 rounded-xl border-2 transition-all duration-200 group shadow-sm hover:shadow-md flex gap-3 
+                                relative p-3 rounded-xl border-2 transition-all duration-200 group shadow-sm hover:shadow-md flex gap-3 touch-manipulation
                                 ${borderClass} ${ringClass} ${bgClass}
                                 ${!isClickable && isBatchMode ? 'opacity-40 cursor-not-allowed grayscale' : ''}
                                 ${isOffline ? 'opacity-60 grayscale cursor-not-allowed' : ''}
@@ -352,7 +352,7 @@ const MachineList = ({
                                          <>
                                              {isRunning && (
                                                  <label 
-                                                    className="flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-100 transition-colors text-sm font-bold cursor-pointer"
+                                                    className="flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-100 transition-colors text-sm font-bold cursor-pointer whitespace-nowrap"
                                                     onClick={(e) => e.stopPropagation()}
                                                     title="加入VRED协作"
                                                  >

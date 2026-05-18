@@ -1849,13 +1849,13 @@ else:
     # FlashlightTool - 手电筒工具
     #   A: 开启手电筒   B: 关闭手电筒
     #   右手柄样式: Flashlight_R (choice=12)
+    #   使用场景内置 MR_FlashLight 节点，通过父约束跟随右手柄
     # ------------------------------------------------------------------
     class FlashlightTool(GripFlyMixin):
         def __init__(self):
             self.isEnabled = False
             self.registry_key = "tool_flashlight"
-            self.lightNode = None
-            self.lightSceneNode = None
+            self.lightSceneNode = None   # findNode("MR_FlashLight") 结果
             self.lightOn = False
             self.lightTimer = vrTimer()
             self.lightTimerConnected = False
@@ -1882,82 +1882,37 @@ else:
             self._abTimer = vrTimer()
             self._abTimerConnected = False
 
-        def _create_spotlight(self):
-            if self.lightNode is not None:
+        def _find_light_node(self):
+            """找到场景中已有的 MR_FlashLight 节点（已在数据中绑定右手柄，无需额外约束）。"""
+            if self.lightSceneNode is not None:
                 return
-            try:
-                self.lightNode = vrLightService.createLight(
-                    "VR_Flashlight_Spot", vrLightTypes.LightType.Spot)
-                self.lightNode.setOn(False)
-                self.lightNode.setIntensity(500.0)
-                self.lightNode.setDiffuseColor(QVector3D(1.0, 0.98, 0.95))
-                self.lightNode.setConeAngle(25.0)
-                self.lightNode.setPenumbraAngle(5.0)
-                self.lightNode.setVisualizationVisible(False)
-            except Exception as e:
-                print("[FlashlightTool] _create_spotlight 失败: " + str(e))
-                self.lightNode = None
+            node = findNode("MR_FlashLight")
+            if not node:
+                print("[FlashlightTool] WARNING: MR_FlashLight node not found in scene")
                 return
-            # vrdLightNode IS a vrdNode — use it directly for transform updates
-            self.lightSceneNode = self.lightNode
-            self._start_light_timer()
+            self.lightSceneNode = node
+            # 初始隐藏，等待 A 键开启
+            node.setActive(0)
+            print("[FlashlightTool] MR_FlashLight 节点已就绪")
 
-        def _remove_spotlight(self):
-            self._stop_light_timer()
+        def _release_light_node(self):
+            """隐藏 MR_FlashLight 节点。"""
             try:
-                if self.lightNode:
-                    self.lightNode.setOn(False)
-                    vrLightService.deleteLight(self.lightNode)
-                    self.lightNode = None
+                if self.lightSceneNode:
+                    self.lightSceneNode.setActive(0)
             except Exception:
-                try:
-                    if self.lightNode:
-                        vrNodeService.removeNode(self.lightNode)
-                        self.lightNode = None
-                except Exception:
-                    self.lightNode = None
+                pass
             self.lightSceneNode = None
             self.lightOn = False
 
-        # 聚光灯相对手柄的局部变换（单位: mm / degree）
-        _LIGHT_LOCAL_TRANSLATION = QVector3D(3.12888, -72.0161, -10.7245)
-        _LIGHT_LOCAL_ROTATION_EULER = QVector3D(-34.617, -2.95854, 2.04049)
-
-        def _update_light_transform(self):
-            """Timer 回调：将聚光灯姿态同步到手柄，并叠加局部平移/旋转偏移。"""
-            if not self.lightSceneNode:
-                # 即使光节点不可用，也允许 grip 飞行逻辑继续运行
-                self._fly_tick()
-                return
-            try:
-                node = self.newRightCon if self.newRightCon else self.rightController.getNode()
-                mat = node.getWorldTransform()
-
-                # 先构建局部偏移矩阵，再乘到手柄世界矩阵上
-                local = QMatrix4x4()
-                t = self._LIGHT_LOCAL_TRANSLATION
-                r = self._LIGHT_LOCAL_ROTATION_EULER
-                local.translate(t.x(), t.y(), t.z())
-                local.rotate(r.x(), 1.0, 0.0, 0.0)
-                local.rotate(r.y(), 0.0, 1.0, 0.0)
-                local.rotate(r.z(), 0.0, 0.0, 1.0)
-
-                out = QMatrix4x4(mat)
-                out *= local
-                self.lightSceneNode.setWorldTransform(out)
-            except Exception:
-                # 降级：直接跟随手柄
-                try:
-                    node = self.newRightCon if self.newRightCon else self.rightController.getNode()
-                    self.lightSceneNode.setWorldTransform(node.getWorldTransform())
-                except Exception:
-                    pass
+        def _fly_timer_tick(self):
+            """Timer 回调：仅驱动 grip 飞行逻辑（位置跟随由约束负责）。"""
             self._fly_tick()
 
         def _start_light_timer(self):
             self.lightTimer.setActive(0)
             if not self.lightTimerConnected:
-                self.lightTimer.connect(self._update_light_transform)
+                self.lightTimer.connect(self._fly_timer_tick)
                 self.lightTimerConnected = True
             self.lightTimer.setActive(1)
 
@@ -1986,19 +1941,19 @@ else:
 
         def turn_on_light(self):
             """A 键：开启手电筒。"""
-            if self.lightNode is None:
-                self._create_spotlight()
-            if not self.lightNode:
+            if self.lightSceneNode is None:
+                self._find_light_node()
+            if self.lightSceneNode is None:
                 return
-            self.lightNode.setOn(True)
+            self.lightSceneNode.setActive(1)
             self.lightOn = True
             print("[FlashlightTool] 手电筒开启")
 
         def turn_off_light(self):
             """B 键：关闭手电筒。"""
-            if self.lightNode is None:
+            if self.lightSceneNode is None:
                 return
-            self.lightNode.setOn(False)
+            self.lightSceneNode.setActive(0)
             self.lightOn = False
             print("[FlashlightTool] 手电筒关闭")
 
@@ -2055,8 +2010,9 @@ else:
 
             self._fly_enable()
 
-            self._create_spotlight()
             self._activate_flashlight_controller()
+            self._find_light_node()
+            self._start_light_timer()
             print("[AllTools] FlashlightTool enabled (A=开启, B=关闭)")
 
         def disable(self):
@@ -2073,7 +2029,8 @@ else:
                 pass
             self._aHeld = False
             self._bHeld = False
-            self._remove_spotlight()
+            self._stop_light_timer()
+            self._release_light_node()
             self._deactivate_flashlight_controller()
             print("[AllTools] FlashlightTool disabled")
 
@@ -3324,7 +3281,6 @@ def cleanup_all_tools():
         "MRcontrollerRight",
         "MR_Stuff",
         "Cloned_ref_obj",
-        "VR_Flashlight",
     ]
 
     for nodeName in _nodes_to_remove:

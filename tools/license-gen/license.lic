@@ -1,8 +1,8 @@
 {
   "version": 1,
   "customer": "某某集团",
-  "machine_id": "ccd6baad28ebca8ecee09837132308bd2dc1b507318c478b7bfffdd8a120a97e",
+  "machine_id": "c0bd94d24eb9e110780c0d386a052620cd95d11cbd4feca28a6f80d93810f51f",
   "issued_at": "2026-05-18",
   "expires_at": "2027-03-26",
-  "signature": "VEFBYmA/Pf9GarCnxZLTpwvcpe1C6grVF13eB94/WDVSSYLkblIUpeobzSyjOHvgc25rkXRdUrCmD6gV2Dlu4lkto9mxQaKz6q1mCMYHLYkRSQBbldOjFA8h64HnLRHEkAH3Is22Syvg6UDIi/6GiHu4bXTwyYxnkcw0Y7TW5U3MqFuZDwryE60pUgZnBKlUIvYb8hXrAHZ8oFmG45EAsZHBoAsNF3T2SAmxhcehIDp40Pe0IGtck14dmye6JRJz2RCvM3//8/4mniQiDPFSrcVEhpK3GuhLPIwoOd3OYiuYEbxbNX42dyIK06++Hy3b3WkF+qZWJEAdSqZUByxphg=="
+  "signature": "iUd2sRERDpJLERtFJI6E8ieCn8lRku6wC9iTaXbENZ7mXt6mlp7ldg2QpX7+JbN0BPDiqJWJPPvr5nzkHGKqS3/YqA2ZFb2goLAS2+UPj4PzEynzB1Ufa0KK2kLK/1qATJI4/aqx49q1CLR1VgZzgxbWsYxwTDfjV+5U2VwukR2nuE5Ksu/tgWr2rlepZo2DlP9qFKQ8CJSzM083de2uJ4aQ3eH1gXKc496NDZ18oKibncIkGK4d1TCURGEhoP34Hv8g68c+PnaQFQBDRAODiHYnZBr/3HRXSKVbffaLoREj77mPut66wdkimq5CJWRQQzCWYXznUfzkxGzeUIodlw=="
 }

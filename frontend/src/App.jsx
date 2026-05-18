@@ -551,8 +551,20 @@ const MainApp = () => {
             const newSet = new Set(selectedBatchIds);
             if (newSet.has(machine.id)) {
                 newSet.delete(machine.id);
+                // Remove pending launch when deselecting
+                if (activeProject) {
+                    setPendingLaunches(prev => {
+                        const next = { ...prev };
+                        delete next[machine.id];
+                        return next;
+                    });
+                }
             } else {
                 newSet.add(machine.id);
+                // Auto-assign active project if one is already selected
+                if (activeProject) {
+                    setPendingLaunches(prev => ({ ...prev, [machine.id]: activeProject }));
+                }
             }
             setSelectedBatchIds(newSet);
         } else {
