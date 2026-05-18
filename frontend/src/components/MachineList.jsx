@@ -59,7 +59,7 @@ const MachineList = ({
         const next = { ...globalScriptConfig, ...updates };
         onScriptConfigChange(next);
     };
-    const hasScriptConfig = (globalScriptConfig?.dlssQuality !== undefined && globalScriptConfig?.dlssQuality !== null) || !!globalScriptConfig?.customScript?.trim() || globalScriptConfig?.realtimeShadows !== undefined;
+    const hasScriptConfig = !!globalScriptConfig?.customScript?.trim() || globalScriptConfig?.realtimeShadows !== undefined || globalScriptConfig?.dlssQuality !== undefined || globalScriptConfig?.realtimeAA !== undefined;
 
     return (
         <aside className="w-[320px] lg:w-[30%] max-w-[480px] bg-gray-50 border-l border-gray-200 flex flex-col relative shrink-0">
@@ -115,16 +115,31 @@ const MachineList = ({
                                 <div className="space-y-1.5">
                                     <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">DLSS 超分辨率</label>
                                     <select
-                                        value={globalScriptConfig?.dlssQuality ?? ''}
-                                        onChange={e => updateGlobalConfig({ dlssQuality: e.target.value === '' ? null : Number(e.target.value) })}
+                                        value={globalScriptConfig?.dlssQuality ?? 0}
+                                        onChange={e => updateGlobalConfig({ dlssQuality: Number(e.target.value) })}
                                         className="w-full text-xs border border-gray-200 rounded-lg px-3 py-2 bg-gray-50 focus:outline-none focus:border-violet-400 focus:bg-white transition-colors"
                                     >
-                                        <option value={''}>不设置</option>
                                         <option value={0}>关闭 (VR_DLSS_OFF)</option>
                                         <option value={2}>性能 (VR_DLSS_PERFORMANCE)</option>
                                         <option value={3}>均衡 (VR_DLSS_BALANCED)</option>
                                         <option value={4}>质量 (VR_DLSS_QUALITY)</option>
                                         <option value={5}>超高性能 (VR_DLSS_ULTRA_PERFORMANCE)</option>
+                                    </select>
+                                </div>
+
+                                {/* Realtime Anti-Aliasing */}
+                                <div className="space-y-1.5">
+                                    <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">实时抗锯齿</label>
+                                    <select
+                                        value={globalScriptConfig?.realtimeAA ?? 0}
+                                        onChange={e => updateGlobalConfig({ realtimeAA: Number(e.target.value) })}
+                                        className="w-full text-xs border border-gray-200 rounded-lg px-3 py-2 bg-gray-50 focus:outline-none focus:border-violet-400 focus:bg-white transition-colors"
+                                    >
+                                        <option value={0}>禁用</option>
+                                        <option value={1}>低</option>
+                                        <option value={2}>中等</option>
+                                        <option value={3}>高</option>
+                                        <option value={4}>超高</option>
                                     </select>
                                 </div>
 

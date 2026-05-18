@@ -356,8 +356,24 @@ module.exports = createCoreController('api::process.process', ({ strapi }) => ({
             const store = strapi.store({ type: 'global' });
             const scriptConfig = (await store.get({ key: 'mr_platform_startup_script_config' })) || {};
             const startupLines = [];
-            if (scriptConfig.dlssQuality !== undefined && scriptConfig.dlssQuality !== null) {
+            if (scriptConfig.dlssQuality !== undefined) {
                 startupLines.push(`vrOSGWidget.setDLSSQuality(${Number(scriptConfig.dlssQuality)})`);
+            }
+            if (scriptConfig.realtimeAA !== undefined) {
+                const aaMode = Number(scriptConfig.realtimeAA);
+                if (aaMode === 0) {
+                    // 禁用
+                    startupLines.push(`vrOSGWidget.setSuperSampling(False)`);
+                } else {
+                    const qualityMap = {
+                        1: 'VR_SS_QUALITY_LOW',
+                        2: 'VR_SS_QUALITY_MEDIUM',
+                        3: 'VR_SS_QUALITY_HIGH',
+                        4: 'VR_SS_QUALITY_ULTRA_HIGH',
+                    };
+                    const q = qualityMap[aaMode] || 'VR_SS_QUALITY_LOW';
+                    startupLines.push(`vrOSGWidget.setSuperSampling(True)\nvrOSGWidget.setSuperSamplingQuality(${q})`);
+                }
             }
             const realtimeShadows = scriptConfig.realtimeShadows === true;
             startupLines.push(
