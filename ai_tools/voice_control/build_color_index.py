@@ -27,6 +27,30 @@ print(f"载入颜色数量：{len(df)}")
 
 # ========= 构建语义文本 =========
 # 把颜色的多维属性拼成一段语义丰富的描述，用于 Embedding
+
+def _hue_label(h: float) -> str:
+    if h < 15 or h >= 345:  return "pure red hue"
+    elif h < 45:            return "orange-red hue"
+    elif h < 75:            return "orange hue"
+    elif h < 105:           return "yellow hue"
+    elif h < 150:           return "green hue"
+    elif h < 195:           return "cyan hue"
+    elif h < 255:           return "blue hue"
+    elif h < 285:           return "blue-purple hue"
+    else:                   return "purple-red hue"
+
+def _sat_label(s: float) -> str:
+    if s > 70:   return "highly saturated"
+    elif s > 40: return "moderately saturated"
+    else:        return "low saturation"
+
+def _light_label(l: float) -> str:
+    if l < 20:   return "very dark"
+    elif l < 35: return "dark"
+    elif l < 55: return "medium lightness"
+    elif l < 75: return "light"
+    else:        return "very light"
+
 def build_semantic_text(row):
     parts = []
     if row["Color Name"]:
@@ -47,6 +71,19 @@ def build_semantic_text(row):
         parts.append(f"Use Case: {row['Use Case']}")
     if row["Keywords"]:
         parts.append(f"Keywords: {row['Keywords']}")
+    # HSL 文字描述：让同情绪/同分类但色相不同的颜色在向量空间中区分开
+    try:
+        h = float(row["Hue"]) if str(row["Hue"]).strip() else None
+        s = float(row["Saturation"]) if str(row["Saturation"]).strip() else None
+        l = float(row["Lightness"]) if str(row["Lightness"]).strip() else None
+        if h is not None:
+            parts.append(f"Hue: {_hue_label(h)}")
+        if s is not None:
+            parts.append(f"Saturation: {_sat_label(s)}")
+        if l is not None:
+            parts.append(f"Lightness: {_light_label(l)}")
+    except (ValueError, TypeError):
+        pass
     return ". ".join(parts)
 
 df["semantic_text"] = df.apply(build_semantic_text, axis=1)
@@ -65,10 +102,12 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 # 保存向量
 np.save(os.path.join(OUTPUT_DIR, "embeddings.npy"), embeddings.astype(np.float32))
 
-# 保存颜色元数据
-meta = df[["Color Name", "HEX Code", "Category", "Emotion", "Mood",
-           "Description", "Keywords", "R", "G", "B",
-           "Hue", "Saturation", "Lightness"]].to_dict(orient="records")
+# 保存颜色元数据（含 Personality / Symbolism / Use Case 供调试用）
+extra_cols = [c for c in ["Personality", "Symbolism", "Use Case"] if c in df.columns]
+meta_cols = ["Color Name", "HEX Code", "Category", "Emotion", "Mood",
+             "Description", "Keywords", "R", "G", "B",
+             "Hue", "Saturation", "Lightness"] + extra_cols
+meta = df[meta_cols].to_dict(orient="records")
 
 with open(os.path.join(OUTPUT_DIR, "colors_meta.json"), "w", encoding="utf-8") as f:
     json.dump(meta, f, ensure_ascii=False, indent=2)

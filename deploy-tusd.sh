@@ -5,6 +5,7 @@ ROOT=$(cd "$(dirname "$0")" && pwd)
 TUSD_IMAGE=${TUSD_IMAGE:-tusproject/tusd:latest}
 TUSD_HOOK_IMAGE=${TUSD_HOOK_IMAGE:-mr-tusd-hook:arm64}
 NETWORK=${NETWORK:-mr-net}
+RESTART_POLICY=${RESTART_POLICY:-unless-stopped}
 
 TUSD_PORT=${TUSD_PORT:-9000}
 TUSD_HOOK_PORT=${TUSD_HOOK_PORT:-3001}
@@ -25,9 +26,9 @@ chmod -R 0777 "$UPLOADS_HOST_DIR" >/dev/null 2>&1 || true
 
 docker rm -f tusd tusd-hook >/dev/null 2>&1 || true
 
-docker run -d --name tusd-hook --network "$NETWORK" -p "$TUSD_HOOK_PORT:$TUSD_HOOK_PORT" -e TUSD_HOOK_PORT="$TUSD_HOOK_PORT" -e TUSD_UPLOAD_DIR="$TUSD_UPLOAD_DIR" -v "$UPLOADS_HOST_DIR:$TUSD_UPLOAD_DIR" "$TUSD_HOOK_IMAGE"
+docker run -d --name tusd-hook --restart "$RESTART_POLICY" --network "$NETWORK" -p "$TUSD_HOOK_PORT:$TUSD_HOOK_PORT" -e TUSD_HOOK_PORT="$TUSD_HOOK_PORT" -e TUSD_UPLOAD_DIR="$TUSD_UPLOAD_DIR" -v "$UPLOADS_HOST_DIR:$TUSD_UPLOAD_DIR" "$TUSD_HOOK_IMAGE"
 
-docker run -d --name tusd --network "$NETWORK" -p "$TUSD_PORT:$TUSD_PORT" -e TUSD_PORT="$TUSD_PORT" -e TUSD_UPLOAD_DIR="$TUSD_UPLOAD_DIR" -e TUSD_BASE_PATH="$TUSD_BASE_PATH" -v "$UPLOADS_HOST_DIR:$TUSD_UPLOAD_DIR" "$TUSD_IMAGE" \
+docker run -d --name tusd --restart "$RESTART_POLICY" --network "$NETWORK" -p "$TUSD_PORT:$TUSD_PORT" -e TUSD_PORT="$TUSD_PORT" -e TUSD_UPLOAD_DIR="$TUSD_UPLOAD_DIR" -e TUSD_BASE_PATH="$TUSD_BASE_PATH" -v "$UPLOADS_HOST_DIR:$TUSD_UPLOAD_DIR" "$TUSD_IMAGE" \
   -port "$TUSD_PORT" \
   -upload-dir "$TUSD_UPLOAD_DIR" \
   -base-path "$TUSD_BASE_PATH" \

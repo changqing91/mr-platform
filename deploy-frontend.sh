@@ -4,6 +4,7 @@ ROOT=$(cd "$(dirname "$0")" && pwd)
 
 FRONTEND_IMAGE=${FRONTEND_IMAGE:-mr-frontend:arm64}
 NETWORK=${NETWORK:-mr-net}
+RESTART_POLICY=${RESTART_POLICY:-unless-stopped}
 
 VITE_TUSD_ENDPOINT=${VITE_TUSD_ENDPOINT:-/files}
 VITE_TUSD_PATH_PREFIX=${VITE_TUSD_PATH_PREFIX:-\\\\192.168.7.80\\upload\\}
@@ -14,4 +15,4 @@ docker network inspect "$NETWORK" >/dev/null 2>&1 || docker network create "$NET
 
 docker rm -f frontend >/dev/null 2>&1 || true
 
-docker run -d --name frontend --network "$NETWORK" -p 80:80 "$FRONTEND_IMAGE"
+docker run -d --name frontend --restart "$RESTART_POLICY" --network "$NETWORK" -p 80:80 "$FRONTEND_IMAGE"

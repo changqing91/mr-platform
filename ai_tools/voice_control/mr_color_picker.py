@@ -16,19 +16,22 @@ sys.path.insert(0, os.path.dirname(__file__))
 from color_search import ColorSearcher
 
 
-def mr_color_picker(query: str, top_k: int = 6) -> list[str]:
+def mr_color_picker(query: str, top_k: int = 6, use_llm: bool = None) -> list[str]:
     """
     MR 改色工具主入口。
     Args:
-        query:  用户语音识别结果（自然语言）
-        top_k:  返回颜色数量
+        query:    用户语音识别结果（自然语言）
+        top_k:    返回颜色数量
+        use_llm:  是否启用 LLM 查询扩展（默认跟随 ColorSearcher 实例设置）
     Returns:
         HEX 颜色列表，如 ['#D62559', '#FF4500', ...]
     """
     searcher = mr_color_picker._searcher
-    results = searcher.search(query, top_k=top_k)
+    results = searcher.search(query, top_k=top_k, use_llm=use_llm)
 
     print(f'\n[MR 改色] 用户说："{query}"')
+    if results and results[0].get("expanded_query"):
+        print(f"[LLM 扩展] {results[0]['expanded_query']}")
     print(f"推荐颜色（{len(results)} 个）：")
     hex_list = []
     for i, r in enumerate(results, 1):
@@ -43,11 +46,12 @@ def mr_color_picker(query: str, top_k: int = 6) -> list[str]:
 mr_color_picker._searcher = None
 
 
-def init(index_dir=None):
+def init(index_dir=None, llm_expand: bool = True):
     """初始化（首次调用时加载模型，约 10~30 秒）"""
     from color_search import ColorSearcher, INDEX_DIR
     mr_color_picker._searcher = ColorSearcher(
-        index_dir=index_dir or INDEX_DIR
+        index_dir=index_dir or INDEX_DIR,
+        llm_expand=llm_expand,
     )
 
 

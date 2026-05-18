@@ -15,6 +15,31 @@ chmod +x deploy.sh
 ./deploy.sh
 ```
 
+## 开机自动恢复（Hyper-V Ubuntu）
+
+说明：部署脚本已内置 `RESTART_POLICY`（默认 `unless-stopped`），新创建容器会在 Ubuntu 重启后自动恢复。
+
+1. 确保 Docker 服务开机启动：
+   ```bash
+   sudo systemctl enable docker
+   sudo systemctl start docker
+   ```
+2. 对“历史已存在容器”一次性补齐重启策略：
+   ```bash
+   docker update --restart unless-stopped tusd tusd-hook mysql server frontend
+   ```
+3. 验证策略是否生效：
+   ```bash
+   docker inspect -f '{{.Name}} -> {{.HostConfig.RestartPolicy.Name}}' tusd tusd-hook mysql server frontend
+   ```
+4. Hyper-V 主机上确认虚拟机自动启动：
+   - Hyper-V Manager -> 选中 Ubuntu 虚拟机 -> Settings -> Automatic Start Action -> `Automatically start if it was running when the service stopped`
+
+可选：覆盖脚本中的容器重启策略（示例）：
+```bash
+RESTART_POLICY=always ./deploy.sh
+```
+
 ## 自动部署（GitHub Actions 自托管 Runner）
 
 在服务器上安装自托管 Runner，并在仓库中添加工作流文件后，推送到 main 分支会自动执行部署脚本。
