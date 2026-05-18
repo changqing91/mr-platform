@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { 
     Monitor, Layers2, Copy, CheckSquare, Power, Trash2, Plus, 
     Play, RefreshCw, Link, Rocket, Server, RotateCcw, Square, Edit2, Sliders
@@ -38,12 +38,28 @@ const MachineList = ({
 }) => {
     const pendingCount = Object.keys(pendingLaunches).length;
     const [showScriptPanel, setShowScriptPanel] = useState(false);
+    const scriptPanelRef = useRef(null);
+    const scriptBtnRef = useRef(null);
+
+    useEffect(() => {
+        if (!showScriptPanel) return;
+        const handleClickOutside = (e) => {
+            if (
+                scriptPanelRef.current && !scriptPanelRef.current.contains(e.target) &&
+                scriptBtnRef.current && !scriptBtnRef.current.contains(e.target)
+            ) {
+                setShowScriptPanel(false);
+            }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, [showScriptPanel]);
 
     const updateGlobalConfig = (updates) => {
         const next = { ...globalScriptConfig, ...updates };
         onScriptConfigChange(next);
     };
-    const hasScriptConfig = (globalScriptConfig?.dlssQuality !== undefined && globalScriptConfig?.dlssQuality !== null) || !!globalScriptConfig?.customScript?.trim();
+    const hasScriptConfig = (globalScriptConfig?.dlssQuality !== undefined && globalScriptConfig?.dlssQuality !== null) || !!globalScriptConfig?.customScript?.trim() || globalScriptConfig?.realtimeShadows !== undefined;
 
     return (
         <aside className="w-[320px] lg:w-[30%] max-w-[480px] bg-gray-50 border-l border-gray-200 flex flex-col relative shrink-0">
@@ -60,62 +76,108 @@ const MachineList = ({
                         </p>
                     </div>
                     <button
+                        ref={scriptBtnRef}
                         onClick={() => setShowScriptPanel(v => !v)}
-                        className={`p-2 rounded-lg transition-colors ${showScriptPanel || hasScriptConfig ? 'bg-violet-100 text-violet-600' : 'text-gray-400 hover:bg-gray-100 hover:text-violet-500'}`}
+                        className={`relative p-2 rounded-lg transition-colors ${showScriptPanel || hasScriptConfig ? 'bg-violet-100 text-violet-600' : 'text-gray-400 hover:bg-gray-100 hover:text-violet-500'}`}
                         title="全局启动脚本配置"
                     >
                         <Sliders size={18} />
+                        {hasScriptConfig && (
+                            <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-violet-500"></span>
+                        )}
                     </button>
                 </div>
 
-                {/* Global Script Config Panel */}
+                {/* Global Script Config Floating Panel */}
                 {showScriptPanel && (
-                    <div className="mb-4 rounded-xl border border-violet-200 bg-violet-50/60 p-3 space-y-3">
-                        <div className="text-xs font-bold text-violet-500 uppercase tracking-wider flex items-center gap-1.5">
-                            <Sliders size={12} />
-                            全局启动脚本配置
-                        </div>
+                    <>
+                        {/* Backdrop */}
+                        <div className="fixed inset-0 z-40" aria-hidden="true" />
+                        {/* Panel */}
+                        <div
+                            ref={scriptPanelRef}
+                            className="absolute right-4 top-[4.5rem] z-50 w-72 bg-white rounded-2xl border border-violet-200 shadow-2xl shadow-violet-100/50 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-150"
+                        >
+                            {/* Panel Header */}
+                            <div className="flex items-center justify-between px-4 py-3 bg-violet-50 border-b border-violet-100">
+                                <div className="flex items-center gap-2">
+                                    <Sliders size={14} className="text-violet-500" />
+                                    <span className="text-xs font-bold text-violet-600 uppercase tracking-wider">启动脚本配置</span>
+                                </div>
+                                <button
+                                    onClick={() => setShowScriptPanel(false)}
+                                    className="text-gray-400 hover:text-gray-600 transition-colors text-xs leading-none"
+                                >✕</button>
+                            </div>
 
-                        {/* DLSS */}
-                        <div className="space-y-2 pb-2 border-b border-violet-200">
-                            <div className="flex items-center justify-between">
-                                <span className="text-xs font-medium text-gray-700">DLSS</span>
-                                <select
-                                    value={globalScriptConfig?.dlssQuality ?? ''}
-                                    onChange={e => updateGlobalConfig({ dlssQuality: e.target.value === '' ? null : Number(e.target.value) })}
-                                    className="text-xs border border-violet-200 rounded px-2 py-0.5 bg-white focus:outline-none focus:border-violet-400"
-                                >
-                                    <option value={''}>不设置</option>
-                                    <option value={0}>关闭 (VR_DLSS_OFF)</option>
-                                    <option value={2}>性能 (VR_DLSS_PERFORMANCE)</option>
-                                    <option value={3}>均衡 (VR_DLSS_BALANCED)</option>
-                                    <option value={4}>质量 (VR_DLSS_QUALITY)</option>
-                                    <option value={5}>超高性能 (VR_DLSS_ULTRA_PERFORMANCE)</option>
-                                </select>
+                            <div className="p-4 space-y-4">
+                                {/* DLSS */}
+                                <div className="space-y-1.5">
+                                    <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">DLSS 超分辨率</label>
+                                    <select
+                                        value={globalScriptConfig?.dlssQuality ?? ''}
+                                        onChange={e => updateGlobalConfig({ dlssQuality: e.target.value === '' ? null : Number(e.target.value) })}
+                                        className="w-full text-xs border border-gray-200 rounded-lg px-3 py-2 bg-gray-50 focus:outline-none focus:border-violet-400 focus:bg-white transition-colors"
+                                    >
+                                        <option value={''}>不设置</option>
+                                        <option value={0}>关闭 (VR_DLSS_OFF)</option>
+                                        <option value={2}>性能 (VR_DLSS_PERFORMANCE)</option>
+                                        <option value={3}>均衡 (VR_DLSS_BALANCED)</option>
+                                        <option value={4}>质量 (VR_DLSS_QUALITY)</option>
+                                        <option value={5}>超高性能 (VR_DLSS_ULTRA_PERFORMANCE)</option>
+                                    </select>
+                                </div>
+
+                                {/* Shadow Mode */}
+                                <div className="space-y-1.5">
+                                    <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">光栅化阴影</label>
+                                    <div className="grid grid-cols-2 gap-2">
+                                        {[{ value: false, label: '烘焙阴影' }, { value: true, label: '实时环境阴影' }].map(opt => {
+                                            const isActive = (globalScriptConfig?.realtimeShadows === true) === opt.value;
+                                            return (
+                                                <button
+                                                    key={String(opt.value)}
+                                                    onClick={() => updateGlobalConfig({ realtimeShadows: opt.value })}
+                                                    className={`py-2 px-3 rounded-lg text-xs font-medium border transition-all ${
+                                                        isActive
+                                                            ? 'bg-violet-500 border-violet-500 text-white shadow-sm'
+                                                            : 'bg-gray-50 border-gray-200 text-gray-600 hover:border-violet-300 hover:text-violet-600'
+                                                    }`}
+                                                >
+                                                    {opt.label}
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+
+                                {/* Custom Script */}
+                                <div className="space-y-1.5">
+                                    <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">自定义 Python 脚本</label>
+                                    <textarea
+                                        value={globalScriptConfig?.customScript || ''}
+                                        onChange={e => updateGlobalConfig({ customScript: e.target.value })}
+                                        placeholder="# 项目加载后执行..."
+                                        className="w-full text-xs font-mono border border-gray-200 rounded-lg p-2.5 resize-none focus:outline-none focus:border-violet-400 focus:bg-white bg-gray-50 placeholder-gray-300 transition-colors"
+                                        rows={4}
+                                    />
+                                </div>
+
+                                {/* Footer */}
+                                <div className="flex items-center justify-between pt-1 border-t border-gray-100">
+                                    <span className="text-[10px] text-gray-400">项目加载完成后执行</span>
+                                    {hasScriptConfig && (
+                                        <button
+                                            onClick={() => { onScriptConfigChange({}); }}
+                                            className="text-[10px] text-gray-400 hover:text-red-400 transition-colors font-medium"
+                                        >
+                                            清除全部
+                                        </button>
+                                    )}
+                                </div>
                             </div>
                         </div>
-
-                        {/* Custom Script */}
-                        <div className="space-y-1.5">
-                            <div className="text-xs font-medium text-gray-700">自定义 Python 脚本</div>
-                            <textarea
-                                value={globalScriptConfig?.customScript || ''}
-                                onChange={e => updateGlobalConfig({ customScript: e.target.value })}
-                                placeholder="# 项目加载后执行..."
-                                className="w-full text-xs font-mono border border-violet-200 rounded-lg p-2 resize-none focus:outline-none focus:border-violet-400 bg-white placeholder-gray-300"
-                                rows={3}
-                            />
-                        </div>
-
-                        {hasScriptConfig && (
-                            <button
-                                onClick={() => onScriptConfigChange({})}
-                                className="text-xs text-gray-400 hover:text-red-400 transition-colors"
-                            >
-                                清除配置
-                            </button>
-                        )}
-                    </div>
+                    </>
                 )}
 
                 <div className="grid grid-cols-2 gap-3">

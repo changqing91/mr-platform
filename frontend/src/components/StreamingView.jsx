@@ -290,9 +290,16 @@ const StreamingView = ({
         }
     };
 
+    const setShadowPlaneVisibility = (visible) => {
+        sendPython(`node = vrNodeService.findNode("ShadowPlane")
+if node.isValid():
+    node.setVisibilityFlag(${visible ? 'True' : 'False'})`);
+    };
+
     const handleEnterXR = async () => {
         updateStreamParam('displayMode', 'xr');
         sendPython('setDisplayMode(VR_DISPLAY_OPEN_XR)');
+        setShadowPlaneVisibility(true);
         await removeSceneplateFloor();
         // await ensureStreamPanelInjected();
     };
@@ -300,6 +307,7 @@ const StreamingView = ({
     const handleEnterMR = async () => {
         updateStreamParam('displayMode', 'mr');
         sendPython('setDisplayMode(VR_DISPLAY_OPEN_XR)');
+        setShadowPlaneVisibility(false);
         await createSceneplateFloor();
         // await ensureStreamPanelInjected();
     };

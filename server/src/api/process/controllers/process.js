@@ -359,6 +359,11 @@ module.exports = createCoreController('api::process.process', ({ strapi }) => ({
             if (scriptConfig.dlssQuality !== undefined && scriptConfig.dlssQuality !== null) {
                 startupLines.push(`vrOSGWidget.setDLSSQuality(${Number(scriptConfig.dlssQuality)})`);
             }
+            const realtimeShadows = scriptConfig.realtimeShadows === true;
+            startupLines.push(
+                `renderSettings = vrRenderSettingsService.getSettings()\nrenderSettings.setUseRealtimeEnvironmentShadows(${realtimeShadows ? 'True' : 'False'})` +
+                (realtimeShadows ? `\nrenderSettings.setRealtimeEnvironmentShadowsMode(vrRenderSettingsTypes.RaytracedEnvironmentShadows)` : '')
+            );
             if (scriptConfig.customScript?.trim()) {
                 startupLines.push(scriptConfig.customScript.trim());
             }
