@@ -39,7 +39,7 @@ else:
     # 模块级资源加载
     # ======================================================================
 
-    _MMR_OSB_PATH = r"\\192.168.7.80\upload\VRED\MMR_Stuff.osb"
+    _MMR_OSB_PATH = r"\\192.168.1.80\upload\VRED\MMR_Stuff.osb"
 
     _mmrLoaded = False
     try:
@@ -2946,9 +2946,9 @@ else:
         """
         Locomotion 状态下右手柄交互（全局常驻，只在无工具激活时生效）：
         - Grip: 飞行模式（与 GripFlyMixin 一致）
-        - A 键: 截图，保存到 \\\\192.167.7.80\\upload\\screenshot
+        - A 键: 截图，保存到 \\\\192.167.1.80\\upload\\screenshot
         """
-        SCREENSHOT_DIR  = r"\\192.167.7.80\upload\screenshot"
+        SCREENSHOT_DIR  = r"\\192.167.1.80\upload\screenshot"
         FLY_SPEED       = 0.35
         FLY_ACCEL       = 0.015
         FLY_DEAD_ZONE   = 20.0

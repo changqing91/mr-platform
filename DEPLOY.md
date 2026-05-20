@@ -132,15 +132,15 @@ chmod +x deploy-tusd.sh
    ```
 6. 验证端口连通性（Ubuntu 本机或其他主机）：
    ```bash
-   nc -vz 192.168.7.80 445
+   nc -vz 192.168.1.80 445
    ```
 
 Windows 客户端访问：
-- 在资源管理器输入：`\\192.168.7.80\upload`，使用步骤 4 中的 `youruser`/密码登录
+- 在资源管理器输入：`\\192.168.1.80\upload`，使用步骤 4 中的 `youruser`/密码登录
 
 前端路径前缀（根据消费者操作系统选择）：
-- 如果由 Windows 节点读取：建议 `VITE_TUSD_PATH_PREFIX=\\\\192.168.7.80\\upload\\`
-- 如果由 Linux 节点读取：建议 `VITE_TUSD_PATH_PREFIX=/mnt/upload/` 或 `smb://192.168.7.80/upload/`
+- 如果由 Windows 节点读取：建议 `VITE_TUSD_PATH_PREFIX=\\\\192.168.1.80\\upload\\`
+- 如果由 Linux 节点读取：建议 `VITE_TUSD_PATH_PREFIX=/mnt/upload/` 或 `smb://192.168.1.80/upload/`
 
 ## 常用环境变量
 
@@ -151,7 +151,7 @@ TUSD_IMAGE=mr-tusd:arm64
 NETWORK=mr-net
 
 VITE_TUSD_ENDPOINT=/files
-VITE_TUSD_PATH_PREFIX=\\\\192.168.7.80\\upload\\
+VITE_TUSD_PATH_PREFIX=\\\\192.168.1.80\\upload\\
 
 TUSD_PORT=9000
 TUSD_HOOK_PORT=3001

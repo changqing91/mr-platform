@@ -2,7 +2,7 @@
 
 ## 目标
 
-将 `frontend/src/utils/vredPy/all_tools.py` 中所有工具特定的 OSB 文件引用，统一替换为单一 `\\192.168.7.80\upload\VRED\MMR_Stuff.osb`，并根据 `mrToolsInfo.txt` 交互文档更新所有工具的按钮交互逻辑。
+将 `frontend/src/utils/vredPy/all_tools.py` 中所有工具特定的 OSB 文件引用，统一替换为单一 `\\192.168.1.80\upload\VRED\MMR_Stuff.osb`，并根据 `mrToolsInfo.txt` 交互文档更新所有工具的按钮交互逻辑。
 
 **原则**：避免兜底逻辑，不增加不必要的代码量。
 
@@ -13,7 +13,7 @@
 | 项目 | 值 |
 |------|-----|
 | 目标文件 | `frontend/src/utils/vredPy/all_tools.py`（~3280行） |
-| 新 OSB 路径 | `\\192.168.7.80\upload\VRED\MMR_Stuff.osb` |
+| 新 OSB 路径 | `\\192.168.1.80\upload\VRED\MMR_Stuff.osb` |
 | 右手控制器节点 | `MRcontrollerRight` |
 | 左手控制器节点 | `MRcontrollerLeft` |
 | UI 切换节点 | `CtrllrR_UI`（switch 节点，子节点顺序即 choice 索引） |
@@ -94,7 +94,7 @@
 
 **新增以下内容（替换上述删除部分）：**
 ```python
-_MMR_OSB_PATH = r"\\192.168.7.80\upload\VRED\MMR_Stuff.osb"
+_MMR_OSB_PATH = r"\\192.168.1.80\upload\VRED\MMR_Stuff.osb"
 
 _mmrLoaded = False
 try:
