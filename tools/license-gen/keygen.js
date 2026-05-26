@@ -17,11 +17,14 @@ const { privateKey, publicKey } = crypto.generateKeyPairSync('rsa', {
 });
 
 const dir = __dirname;
+const serverPubKeyPath = path.join(dir, '..', '..', 'server', 'src', 'license', 'public-key.pem');
+
 fs.writeFileSync(path.join(dir, 'private.pem'), privateKey, { mode: 0o600 });
 fs.writeFileSync(path.join(dir, 'public.pem'), publicKey);
+fs.writeFileSync(serverPubKeyPath, publicKey);
 
 console.log('✅ 密钥对生成成功');
 console.log(`   私钥: ${path.join(dir, 'private.pem')}  ← 妥善保管，绝不外发`);
-console.log(`   公钥: ${path.join(dir, 'public.pem')}   ← 复制到 server/src/license/public-key.pem`);
-console.log('\n将公钥复制到软件中:');
-console.log(`  cp ${path.join(dir, 'public.pem')} ../../server/src/license/public-key.pem`);
+console.log(`   公钥: ${path.join(dir, 'public.pem')}`);
+console.log(`   公钥: ${serverPubKeyPath}  ← 已自动同步`);
+console.log('\n⚠️  所有旧许可证已失效，请用新私钥重新签发。');

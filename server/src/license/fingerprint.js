@@ -41,14 +41,9 @@ function getMachineId() {
   const hostname = os.hostname();
   const cpuModel = (os.cpus()[0] && os.cpus()[0].model) || 'unknown';
 
-  console.log('Detected stable ID:', stableId || '(none, using fallback)');
-  console.log('Detected hostname:', hostname);
-  console.log('Detected CPU model:', cpuModel);
-
   const raw = stableId
     ? `${stableId}|${hostname}|${cpuModel}`
     : `${hostname}|${cpuModel}`;
-  console.log('Raw fingerprint string:', raw);
 
   return crypto.createHash('sha256').update(raw).digest('hex');
 }
