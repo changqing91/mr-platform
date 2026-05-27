@@ -118,8 +118,8 @@ const StreamingView = ({
     const [streamParams, setStreamParams] = useState({
         hmdIp: '',
         hmdPort: '8888',
-        trackingInterval: '2.0',
-        fovMultiplier: '3.0',
+        trackingInterval: '2000',
+        fovMultiplier: '30',
         isTracking: false,
         schemeIp: '',
         schemePort: '8888',
@@ -136,14 +136,14 @@ const StreamingView = ({
 
     const validateStreamParam = (key) => setStreamParams(prev => {
         if (key === 'trackingInterval') {
-            const numericValue = Number.parseFloat(prev[key]);
-            const safeValue = Number.isFinite(numericValue) && numericValue >= 2 ? numericValue : 2;
-            return { ...prev, [key]: safeValue.toFixed(1) };
+            const numericValue = Math.round(Number.parseFloat(prev[key]));
+            const safeValue = Number.isFinite(numericValue) && numericValue >= 2000 ? numericValue : 2000;
+            return { ...prev, [key]: String(safeValue) };
         }
         if (key === 'fovMultiplier') {
-            const numericValue = Number.parseFloat(prev[key]);
-            const safeValue = Number.isFinite(numericValue) && numericValue >= 0.5 && numericValue <= 10 ? numericValue : 3;
-            return { ...prev, [key]: safeValue.toFixed(1) };
+            const numericValue = Math.round(Number.parseFloat(prev[key]));
+            const safeValue = Number.isFinite(numericValue) && numericValue >= 5 && numericValue <= 100 ? numericValue : 30;
+            return { ...prev, [key]: String(safeValue) };
         }
         return prev;
     });
@@ -210,7 +210,7 @@ const StreamingView = ({
             const viewpoint = await vredApi.vrCameraService.createViewpoint(viewpointName, cameraTrack);
 
             // 设置过渡时间（单位：秒）
-            const transitionDuration = Math.max(0.5, Number.parseFloat(streamParams.trackingInterval) * 0.8);
+            const transitionDuration = Math.max(0.5, Number.parseFloat(streamParams.trackingInterval) / 1000 * 0.8);
             await viewpoint.setViewpointTransition(true);
             await viewpoint.setViewpointTransitionDuration(transitionDuration);
 
@@ -222,7 +222,7 @@ const StreamingView = ({
             await viewpoint.activate(false, true);
 
             // 设置 FOV（应用倍数以扩大大屏视野）
-            const fovMultiplier = Number.parseFloat(streamParams.fovMultiplier) || 3;
+            const fovMultiplier = (Number.parseFloat(streamParams.fovMultiplier) || 30) / 10;
             await targetCamera.setFov(fov * fovMultiplier);
 
             // 激活后删除 viewpoint，避免累积
@@ -250,7 +250,7 @@ const StreamingView = ({
         }
 
         // 启动追踪：定期读取 HMD 数据并更新摄像机
-        const intervalMs = Math.max(2, Number.parseFloat(streamParams.trackingInterval)) * 1000;
+        const intervalMs = Math.max(2000, Number.parseFloat(streamParams.trackingInterval));
 
         // 立即执行一次同步
         syncCameraOnce();
@@ -460,7 +460,7 @@ vrOSGWidget.enableSceneplates(False)
     const [gamepadConnected, setGamepadConnected] = useState(false);
     const [gamepadEnabled, setGamepadEnabled] = useState(false);
     const [gamepadMoveSpeed, setGamepadMoveSpeed] = useState('100');
-    const [gamepadRotSpeed, setGamepadRotSpeed] = useState('1.0');
+    const [gamepadRotSpeed, setGamepadRotSpeed] = useState('10');
     const [cameraHeight, setCameraHeight] = useState('175'); // cm
     const gamepadRafRef = useRef(null);
     const gamepadSendingRef = useRef(false);   // request in-flight
@@ -468,13 +468,13 @@ vrOSGWidget.enableSceneplates(False)
     const gamepadEnabledRef = useRef(false);
     const machineRef = useRef(null);
     const gamepadMoveSpeedRef = useRef(300);
-    const gamepadRotSpeedRef = useRef(2.0);
+    const gamepadRotSpeedRef = useRef(1);
 
     // Keep refs in sync with state/props for use inside rAF callback
     useEffect(() => { machineRef.current = machine; });
     useEffect(() => { gamepadEnabledRef.current = gamepadEnabled; }, [gamepadEnabled]);
     useEffect(() => { gamepadMoveSpeedRef.current = parseFloat(gamepadMoveSpeed) || 300; }, [gamepadMoveSpeed]);
-    useEffect(() => { gamepadRotSpeedRef.current = parseFloat(gamepadRotSpeed) || 2.0; }, [gamepadRotSpeed]);
+    useEffect(() => { gamepadRotSpeedRef.current = (parseFloat(gamepadRotSpeed) || 10) / 10; }, [gamepadRotSpeed]);
 
     const handleSetCameraHeight = () => {
         if (!machine) return;
@@ -971,12 +971,12 @@ except Exception as e:
                                         </div>
                                     </div>
                                     <div>
-                                        <label className="block text-[10px] text-gray-500 mb-1">追踪间隔 (s)</label>
-                                        <input type="text" placeholder="2.0" value={streamParams.trackingInterval} onChange={(e) => updateStreamParam('trackingInterval', e.target.value)} onBlur={() => validateStreamParam('trackingInterval')} className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-xs text-white focus:border-[#39C5BB] outline-none" />
+                                        <label className="block text-[10px] text-gray-500 mb-1">追踪间隔 (ms)</label>
+                                        <input type="number" min="2000" step="100" placeholder="2000" value={streamParams.trackingInterval} onChange={(e) => updateStreamParam('trackingInterval', e.target.value)} onBlur={() => validateStreamParam('trackingInterval')} className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-xs text-white focus:border-[#39C5BB] outline-none" />
                                     </div>
                                     <div>
-                                        <label className="block text-[10px] text-gray-500 mb-1">FOV 倍数 (0.5-10.0)</label>
-                                        <input type="text" placeholder="3.0" value={streamParams.fovMultiplier} onChange={(e) => updateStreamParam('fovMultiplier', e.target.value)} onBlur={() => validateStreamParam('fovMultiplier')} className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-xs text-white focus:border-[#39C5BB] outline-none" />
+                                        <label className="block text-[10px] text-gray-500 mb-1">FOV 倍数 (×0.1, 5-100)</label>
+                                        <input type="number" min="5" max="100" step="1" placeholder="30" value={streamParams.fovMultiplier} onChange={(e) => updateStreamParam('fovMultiplier', e.target.value)} onBlur={() => validateStreamParam('fovMultiplier')} className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-xs text-white focus:border-[#39C5BB] outline-none" />
                                     </div>
                                     <div className="flex rounded-lg overflow-hidden border border-gray-700 w-full">
                                         <button onClick={() => handleAutoTracking(true)} className={`flex-1 py-2 text-xs font-bold transition-colors ${streamParams.isTracking ? 'bg-[#39C5BB] text-white' : 'bg-gray-800 text-gray-500 hover:bg-gray-700'}`}>开启追踪</button>
@@ -1121,7 +1121,7 @@ except Exception as e:
 
             {/* Gamepad floating panel */}
             {gamepadPanelOpen && gamepadConnected && (
-                <div className="absolute bottom-16 right-[340px] z-40 w-72 bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-200">
+                <div className="absolute bottom-16 right-[340px] z-40 w-72 bg-gray-900/75 backdrop-blur-md border border-gray-700/60 rounded-2xl shadow-2xl overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-200">
                     {/* Panel header */}
                     <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800">
                         <div className="flex items-center gap-2">
@@ -1146,8 +1146,8 @@ except Exception as e:
                                         className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-xs text-white focus:border-[#39C5BB] outline-none" />
                                 </div>
                                 <div>
-                                    <label className="block text-[10px] text-gray-500 mb-1">旋转 (°/步)</label>
-                                    <input type="number" min="0.1" max="10" step="0.1" value={gamepadRotSpeed} onChange={(e) => setGamepadRotSpeed(e.target.value)}
+                                    <label className="block text-[10px] text-gray-500 mb-1">旋转 (×0.1°/步)</label>
+                                    <input type="number" min="1" max="100" step="1" value={gamepadRotSpeed} onChange={(e) => setGamepadRotSpeed(e.target.value)}
                                         className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-xs text-white focus:border-[#39C5BB] outline-none" />
                                 </div>
                             </div>

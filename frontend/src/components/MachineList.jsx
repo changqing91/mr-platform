@@ -78,12 +78,12 @@ const MachineList = ({
                     <button
                         ref={scriptBtnRef}
                         onClick={() => setShowScriptPanel(v => !v)}
-                        className={`relative p-2 rounded-lg transition-colors ${showScriptPanel || hasScriptConfig ? 'bg-violet-100 text-violet-600' : 'text-gray-400 hover:bg-gray-100 hover:text-violet-500'}`}
+                        className={`relative p-2 rounded-lg transition-colors ${showScriptPanel || hasScriptConfig ? 'bg-gray-100 text-gray-600' : 'text-gray-400 hover:bg-gray-100 hover:text-gray-600'}`}
                         title="全局启动脚本配置"
                     >
                         <Sliders size={18} />
                         {hasScriptConfig && (
-                            <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-violet-500"></span>
+                            <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-gray-500"></span>
                         )}
                     </button>
                 </div>
@@ -96,13 +96,13 @@ const MachineList = ({
                         {/* Panel */}
                         <div
                             ref={scriptPanelRef}
-                            className="absolute right-4 top-[4.5rem] z-50 w-72 bg-white rounded-2xl border border-violet-200 shadow-2xl shadow-violet-100/50 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-150"
+                            className="absolute right-4 top-[4.5rem] z-50 w-72 bg-white rounded-2xl border border-gray-200 shadow-2xl shadow-gray-100/50 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-150"
                         >
                             {/* Panel Header */}
-                            <div className="flex items-center justify-between px-4 py-3 bg-violet-50 border-b border-violet-100">
+                            <div className="flex items-center justify-between px-4 py-3 bg-gray-50 border-b border-gray-100">
                                 <div className="flex items-center gap-2">
-                                    <Sliders size={14} className="text-violet-500" />
-                                    <span className="text-xs font-bold text-violet-600 uppercase tracking-wider">启动脚本配置</span>
+                                    <Sliders size={14} className="text-gray-500" />
+                                    <span className="text-xs font-bold text-gray-600 uppercase tracking-wider">启动脚本配置</span>
                                 </div>
                                 <button
                                     onClick={() => setShowScriptPanel(false)}
@@ -117,7 +117,7 @@ const MachineList = ({
                                     <select
                                         value={globalScriptConfig?.dlssQuality ?? 0}
                                         onChange={e => updateGlobalConfig({ dlssQuality: Number(e.target.value) })}
-                                        className="w-full text-xs border border-gray-200 rounded-lg px-3 py-2 bg-gray-50 focus:outline-none focus:border-violet-400 focus:bg-white transition-colors"
+                                        className="w-full text-xs border border-gray-200 rounded-lg px-3 py-2 bg-gray-50 focus:outline-none focus:border-gray-400 focus:bg-white transition-colors"
                                     >
                                         <option value={0}>关闭 (VR_DLSS_OFF)</option>
                                         <option value={2}>性能 (VR_DLSS_PERFORMANCE)</option>
@@ -133,7 +133,7 @@ const MachineList = ({
                                     <select
                                         value={globalScriptConfig?.realtimeAA ?? 0}
                                         onChange={e => updateGlobalConfig({ realtimeAA: Number(e.target.value) })}
-                                        className="w-full text-xs border border-gray-200 rounded-lg px-3 py-2 bg-gray-50 focus:outline-none focus:border-violet-400 focus:bg-white transition-colors"
+                                        className="w-full text-xs border border-gray-200 rounded-lg px-3 py-2 bg-gray-50 focus:outline-none focus:border-gray-400 focus:bg-white transition-colors"
                                     >
                                         <option value={0}>禁用</option>
                                         <option value={1}>低</option>
@@ -155,8 +155,8 @@ const MachineList = ({
                                                     onClick={() => updateGlobalConfig({ realtimeShadows: opt.value })}
                                                     className={`py-2 px-3 rounded-lg text-xs font-medium border transition-all ${
                                                         isActive
-                                                            ? 'bg-violet-500 border-violet-500 text-white shadow-sm'
-                                                            : 'bg-gray-50 border-gray-200 text-gray-600 hover:border-violet-300 hover:text-violet-600'
+                                                            ? 'bg-gray-700 border-gray-700 text-white shadow-sm'
+                                                            : 'bg-gray-50 border-gray-200 text-gray-600 hover:border-gray-400 hover:text-gray-700'
                                                     }`}
                                                 >
                                                     {opt.label}
@@ -173,7 +173,7 @@ const MachineList = ({
                                         value={globalScriptConfig?.customScript || ''}
                                         onChange={e => updateGlobalConfig({ customScript: e.target.value })}
                                         placeholder="# 项目加载后执行..."
-                                        className="w-full text-xs font-mono border border-gray-200 rounded-lg p-2.5 resize-none focus:outline-none focus:border-violet-400 focus:bg-white bg-gray-50 placeholder-gray-300 transition-colors"
+                                        className="w-full text-xs font-mono border border-gray-200 rounded-lg p-2.5 resize-none focus:outline-none focus:border-gray-400 focus:bg-white bg-gray-50 placeholder-gray-300 transition-colors"
                                         rows={4}
                                     />
                                 </div>
