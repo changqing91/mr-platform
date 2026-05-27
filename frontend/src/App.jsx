@@ -470,7 +470,7 @@ const MainApp = () => {
     const confirmDeleteNode = async () => {
         if (nodeToDelete) {
             try {
-                await api.machines.delete(nodeToDelete.id);
+                await api.machines.delete(nodeToDelete.documentId);
                 setMachines(machines.filter(m => m.id !== nodeToDelete.id));
                 // Also cleanup states
                 if (activeMachineId === nodeToDelete.id) setActiveMachineId(null);
@@ -486,7 +486,7 @@ const MainApp = () => {
     const confirmClearAllNodes = async () => {
         // Warning: This is a heavy operation, doing it client-side one by one
         try {
-            await Promise.all(machines.map(m => api.machines.delete(m.id)));
+            await Promise.all(machines.map(m => api.machines.delete(m.documentId)));
             setMachines([]);
             setActiveMachineId(null);
             setStreamingMachineId(null);
