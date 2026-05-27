@@ -34,10 +34,33 @@ export default function LicenseGuard({ children }) {
   const [copied, setCopied] = useState(false);
 
   const copyMachineId = () => {
-    navigator.clipboard.writeText(status.current_machine_id).then(() => {
+    const text = status.current_machine_id;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      }).catch(() => fallbackCopy(text));
+    } else {
+      fallbackCopy(text);
+    }
+  };
+
+  const fallbackCopy = (text) => {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    try {
+      document.execCommand('copy');
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    });
+    } catch (e) {
+      console.error('复制失败', e);
+    }
+    document.body.removeChild(ta);
   };
 
   const checkLicense = useCallback(async () => {
