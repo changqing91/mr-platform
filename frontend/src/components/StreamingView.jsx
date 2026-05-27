@@ -510,7 +510,7 @@ cam.setWorldTransform(QMatrix4x4(*m))`;
     const gamepadTick = useRef(null);
     gamepadTick.current = () => {
         const pads = navigator.getGamepads ? navigator.getGamepads() : [];
-        const pad = pads[0];
+        const pad = Array.from(pads).find(p => p !== null) ?? null;
         if (pad && gamepadEnabledRef.current && machineRef.current) {
             const DEAD = 0.12;
             const lx = Math.abs(pad.axes[0] || 0) > DEAD ? (pad.axes[0] || 0) : 0;
