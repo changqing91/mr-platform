@@ -460,7 +460,7 @@ vrOSGWidget.enableSceneplates(False)
     const [gamepadConnected, setGamepadConnected] = useState(false);
     const [gamepadEnabled, setGamepadEnabled] = useState(false);
     const [gamepadMoveSpeed, setGamepadMoveSpeed] = useState('300');
-    const [gamepadRotSpeed, setGamepadRotSpeed] = useState('2.0');
+    const [gamepadRotSpeed, setGamepadRotSpeed] = useState('1.0');
     const [cameraHeight, setCameraHeight] = useState('175'); // cm
     const gamepadRafRef = useRef(null);
     const gamepadSendingRef = useRef(false);   // request in-flight
