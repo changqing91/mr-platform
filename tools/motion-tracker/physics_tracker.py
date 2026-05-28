@@ -379,19 +379,27 @@ else:
             except Exception:
                 self._cola_scale = None
 
+            # 始终自动计算偏移：Cola 当前 scene 位置 − tracker 当前 scene 位置
+            # 使 Cola 从原位置开始相对随动，不跳变到 tracker 的原始坐标（防止"消失"）
             self._kinematic_offset = None
-            if self._maintain_offset:
-                try:
-                    tracker_node = self._tracker.getNode()
-                    t_tracker = getTransformNodeTranslation(tracker_node, True)
-                    t_cola = getTransformNodeTranslation(self._cola_node, True)
-                    self._kinematic_offset = Vec3f(
-                        t_cola.x() - t_tracker.x(),
-                        t_cola.y() - t_tracker.y(),
-                        t_cola.z() - t_tracker.z())
-                    print("[ColaTracker] Kinematic maintain_offset enabled (position offset)")
-                except Exception as e:
-                    print("[ColaTracker] WARNING: failed to compute maintain_offset: " + str(e))
+            try:
+                mat = self._tracker.getTrackingMatrix()
+                col = mat.column(3)
+                tracker_sx = -col.x()
+                tracker_sy = -col.z()
+                tracker_sz =  col.y()
+
+                t_cola = getTransformNodeTranslation(self._cola_node, True)
+                self._kinematic_offset = QVector3D(
+                    t_cola.x() - tracker_sx,
+                    t_cola.y() - tracker_sy,
+                    t_cola.z() - tracker_sz)
+                print("[ColaTracker] Kinematic offset: ({:.3f}, {:.3f}, {:.3f})".format(
+                    self._kinematic_offset.x(),
+                    self._kinematic_offset.y(),
+                    self._kinematic_offset.z()))
+            except Exception as e:
+                print("[ColaTracker] WARNING: failed to compute kinematic offset: " + str(e))
 
             if not self._kinematic_timer_connected:
                 self._kinematic_timer.connect(self._kinematic_update)
