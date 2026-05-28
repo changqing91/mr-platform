@@ -3,13 +3,16 @@
 #
 # tracker-1 → TransformTracker: ParentConstraint 驱动任意 Transform3D 节点
 # tracker-2 → ColaTracker: 作为可乐瓶 (Cola) 的物理运动学对象
-#             ├── ParentConstraint 驱动 Cola 节点位置/旋转
-#             ├── 确保 Cola 注册为 kinematic physics 对象（与中控台静态角色碰撞）
+#             ├── kinematic: timer 同步位姿并锁定缩放（避免瓶子变大）
+#             ├── dynamic: 施加力进行跟随（Moving Dynamic Actors）
+#             ├── 自动确保 Cola 注册为对应 physics 对象类型
 #             └── 碰撞回调：打印碰撞开始/结束事件及接触点信息
 #
 # 用法（VRED Python 控制台）：
 #   setup_transform("tracker-1", "SeatNode")  # 配置 tracker-1 → Transform3D 绑定
-#   setup_cola("tracker-2", "Cola")           # 配置 tracker-2 → Cola 物理绑定
+#   setup_cola("tracker-2", "Cola", False, "kinematic")  # kinematic 模式
+#   setup_cola("tracker-2", "Cola", False, "dynamic")    # dynamic 模式
+#   set_cola_dynamic_tuning(18.0, 0.06)         # 可选：设置 dynamic 跟随参数
 #   start_transform()                          # 启动 tracker-1 追踪
 #   start_cola()                               # 启动 tracker-2 物理追踪
 #   stop_cola()                                # 停止，解除约束
@@ -121,9 +124,9 @@ else:
     class ColaTracker:
         """
         将 tracker-2 绑定到 Cola 节点：
-        1. 确保 Cola 节点已在 vrPhysicsService 中注册为 kinematic 对象
-           （与中控台静态角色交互产生碰撞事件）
-        2. 通过 ParentConstraint 用 tracker 驱动 Cola 位置/旋转
+          1. 根据模式确保 Cola 已在 vrPhysicsService 中注册为 dynamic/kinematic
+          2. kinematic: timer 同步位置+旋转并锁定 scale
+              dynamic: 每帧施加跟随力，保留物理惯性
         3. 监听 collisionStarted / collisionStopped / collisionContinues 信号，
            打印碰撞事件及接触点坐标
 
@@ -148,6 +151,7 @@ else:
             self._kinematic_timer = vrTimer()
             self._kinematic_timer_connected = False
             self._cola_scale = None
+            self._kinematic_offset = None
             self._dynamic_gain = 18.0
             self._dynamic_max_step = 0.06
             # 碰撞信号连接句柄
@@ -178,8 +182,8 @@ else:
             """
             激活物理追踪：
             1. 确保 Physics 服务激活
-            2. 确保 Cola 为 kinematic 注册（如未注册则注册）
-            3. 创建 tracker → Cola 的 ParentConstraint
+            2. 确保 Cola 为当前模式注册（kinematic / dynamic）
+            3. 按模式创建跟随（timer pose-sync / force-follow）
             4. 连接碰撞信号
             """
             if self._active:
@@ -338,6 +342,21 @@ else:
             except Exception:
                 self._cola_scale = None
 
+            self._kinematic_offset = None
+            if self._maintain_offset:
+                try:
+                    tracker_node = self._tracker.getNode()
+                    t_tracker = getTransformNodeTranslation(tracker_node, True)
+                    t_cola = getTransformNodeTranslation(self._cola_node, True)
+                    off = getTransformNodeTranslation(self._cola_node, True)
+                    off.setX(t_cola.x() - t_tracker.x())
+                    off.setY(t_cola.y() - t_tracker.y())
+                    off.setZ(t_cola.z() - t_tracker.z())
+                    self._kinematic_offset = off
+                    print("[ColaTracker] Kinematic maintain_offset enabled (position offset)")
+                except Exception as e:
+                    print("[ColaTracker] WARNING: failed to compute maintain_offset: " + str(e))
+
             if not self._kinematic_timer_connected:
                 self._kinematic_timer.connect(self._kinematic_update)
                 self._kinematic_timer_connected = True
@@ -351,6 +370,7 @@ else:
                 self._kinematic_timer.setActive(0)
             except Exception:
                 pass
+            self._kinematic_offset = None
 
         def _kinematic_update(self):
             if not self._active or self._follow_mode != "kinematic":
@@ -363,7 +383,15 @@ else:
                 t = getTransformNodeTranslation(tracker_node, True)
                 r = getTransformNodeRotation(tracker_node)
 
-                setTransformNodeTranslation(self._cola_node, t.x(), t.y(), t.z(), True)
+                tx = t.x()
+                ty = t.y()
+                tz = t.z()
+                if self._kinematic_offset is not None:
+                    tx += self._kinematic_offset.x()
+                    ty += self._kinematic_offset.y()
+                    tz += self._kinematic_offset.z()
+
+                setTransformNodeTranslation(self._cola_node, tx, ty, tz, True)
                 setTransformNodeRotation(self._cola_node, r.x(), r.y(), r.z())
 
                 # 每帧恢复 Cola 原始缩放，防止 tracker 缩放链条污染
@@ -389,6 +417,11 @@ else:
                 return False
 
             try:
+                # 如果可用，优先速度变化模式提升跟随性。
+                try:
+                    self._cola_physics_obj.setForceMode(vrPhysicsTypes.ForceMode.VelocityChange)
+                except Exception:
+                    pass
                 self._cola_physics_obj.setForceWorldFrame(True)
                 self._cola_physics_obj.setForceEnabled(True)
             except Exception as e:
@@ -588,6 +621,36 @@ def setup_cola(tracker_name="tracker-2", cola_node_name="Cola", maintain_offset=
     """
     global _cola_tracker
     _cola_tracker.setup(tracker_name, cola_node_name, maintain_offset, follow_mode)
+
+def set_cola_follow_mode(follow_mode):
+    """设置 Cola 跟随模式。可选: "kinematic" / "dynamic"。"""
+    global _cola_tracker
+    _cola_tracker.setup(_cola_tracker._tracker_name or "tracker-2",
+                        _cola_tracker._cola_node_name or "Cola",
+                        _cola_tracker._maintain_offset,
+                        follow_mode)
+
+def set_cola_dynamic_tuning(gain=None, max_step=None):
+    """
+    设置 dynamic 模式跟随参数。
+
+    Args:
+        gain (float): 误差增益，越大跟随越快（也更易抖动）
+        max_step (float): 每帧误差限幅，越大响应越快
+    """
+    global _cola_tracker
+    if gain is not None:
+        try:
+            _cola_tracker._dynamic_gain = float(gain)
+        except Exception:
+            print("[ColaTracker] WARNING: invalid gain={}".format(gain))
+    if max_step is not None:
+        try:
+            _cola_tracker._dynamic_max_step = float(max_step)
+        except Exception:
+            print("[ColaTracker] WARNING: invalid max_step={}".format(max_step))
+    print("[ColaTracker] Dynamic tuning: gain={}, max_step={}".format(
+        _cola_tracker._dynamic_gain, _cola_tracker._dynamic_max_step))
 
 def start_transform():
     """激活 tracker-1 → Transform3D 追踪。"""
