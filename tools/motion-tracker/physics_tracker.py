@@ -1,8 +1,9 @@
 # ======================================================================
-# VRED Physics Tracker (Refactored for VRED 2027 API)
+# VRED Physics Hand Grab (VRED 2027 API)
 #
 # Goal:
-#   tracker-2 (VR tracker) controls Cola (dynamic physics object)
+#   Hand-visible controller (default: right-controller) grabs Cola
+#   Cola is a dynamic physics object
 #   Cola collides with Console1 (static physics object)
 #
 # Assumption:
@@ -17,12 +18,13 @@ except ImportError:
 
 class DynamicColaTracker:
     """
-    Drive a dynamic physics object (Cola) toward tracker-2 using force control.
-    Collision with Console1 is reported via physics callbacks.
+    Drive a dynamic physics object (Cola) using controller grab input.
+    No transform write is used during follow; only physics force is applied.
     """
 
     def __init__(self):
-        self._tracker_name = "tracker-2"
+        # Compatibility: keep old parameter name `tracker_name`, but default to controller device.
+        self._tracker_name = "right-controller"
         self._cola_node_name = "Cola"
         self._console_node_name = "Console1"
 
@@ -36,16 +38,18 @@ class DynamicColaTracker:
         self._timer = vrTimer()
         self._timer_connected = False
 
-        # Force follower tuning
+        # Physics grab tuning
         self._gain = 22.0
         self._damping = 5.0
         self._max_force = 1.6
         self._max_error = 0.12
         self._reanchor_distance = 0.35
         self._deadzone = 0.004
+        self._grab_threshold = 0.5
 
-        # Grab model: keep an offset between tracker and cola center while grabbing.
+        # Grab state
         self._grab_active = False
+        self._grip_held = False
         self._grab_offset = None
         self._prev_cola_pos = None
         self._velocity_dt = 1.0 / 90.0
@@ -57,7 +61,7 @@ class DynamicColaTracker:
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
-    def setup(self, tracker_name="tracker-2", cola_node_name="Cola", console_node_name="Console1"):
+    def setup(self, tracker_name="right-controller", cola_node_name="Cola", console_node_name="Console1"):
         if self._active:
             self.stop()
 
@@ -65,11 +69,11 @@ class DynamicColaTracker:
         self._cola_node_name = cola_node_name
         self._console_node_name = console_node_name
 
-        print("[DynamicColaTracker] Configured: {} -> '{}' (target static: '{}')".format(
+        print("[DynamicColaTracker] Configured input '{}' -> '{}' (target static: '{}')".format(
             self._tracker_name, self._cola_node_name, self._console_node_name))
 
     def set_tuning(self, gain=None, damping=None, max_force=None, max_error=None,
-                   reanchor_distance=None, deadzone=None):
+                   reanchor_distance=None, deadzone=None, grab_threshold=None):
         if gain is not None:
             try:
                 self._gain = float(gain)
@@ -100,9 +104,15 @@ class DynamicColaTracker:
                 self._deadzone = float(deadzone)
             except Exception:
                 print("[DynamicColaTracker] WARNING: invalid deadzone={}".format(deadzone))
+        if grab_threshold is not None:
+            try:
+                self._grab_threshold = float(grab_threshold)
+            except Exception:
+                print("[DynamicColaTracker] WARNING: invalid grab_threshold={}".format(grab_threshold))
 
-        print("[DynamicColaTracker] Tuning: gain={}, damping={}, max_force={}, max_error={}, reanchor_distance={}, deadzone={}".format(
-            self._gain, self._damping, self._max_force, self._max_error, self._reanchor_distance, self._deadzone))
+        print("[DynamicColaTracker] Tuning: gain={}, damping={}, max_force={}, max_error={}, reanchor_distance={}, deadzone={}, grab_threshold={}".format(
+            self._gain, self._damping, self._max_force, self._max_error,
+            self._reanchor_distance, self._deadzone, self._grab_threshold))
 
     def start(self):
         if self._active:
@@ -139,21 +149,15 @@ class DynamicColaTracker:
             return
 
         try:
-            # Keep purely physical behavior: apply bounded force/impulse without setting transforms.
             self._cola_physics.setForceMode(vrPhysicsTypes.ForceMode.VelocityChange)
             self._cola_physics.setForceWorldFrame(True)
             self._cola_physics.setForceEnabled(False)
-            # Keep gravity on so release naturally drops like Shift+Alt drag test.
             self._cola_physics.setGravityEnabled(True)
-            # Moderate damping makes handheld motion stable but still physical.
             self._cola_physics.setLinearDamping(1.2)
             self._cola_physics.setAngularDamping(0.8)
             self._cola_physics.setForce(QVector3D(0.0, 0.0, 0.0))
         except Exception as e:
             print("[DynamicColaTracker] WARNING: force setup failed: " + str(e))
-
-        # Default behavior: enter grab mode immediately after start.
-        self.begin_grab()
 
         if not self._timer_connected:
             self._timer.connect(self._update)
@@ -163,7 +167,7 @@ class DynamicColaTracker:
         self._connect_collision_signals()
 
         self._active = True
-        print("[DynamicColaTracker] Started: tracker '{}' drives dynamic '{}'".format(
+        print("[DynamicColaTracker] Started: hold Grip/Squeeze on '{}' to grab '{}'".format(
             self._tracker_name, self._cola_node_name))
 
     def stop(self):
@@ -179,7 +183,6 @@ class DynamicColaTracker:
             if self._cola_physics:
                 self._cola_physics.setForce(QVector3D(0.0, 0.0, 0.0))
                 self._cola_physics.setForceEnabled(False)
-                # Restore gravity for normal simulation after stopping follow.
                 try:
                     self._cola_physics.setGravityEnabled(True)
                 except Exception:
@@ -195,68 +198,14 @@ class DynamicColaTracker:
         self._console_node = None
         self._cola_physics = None
         self._grab_active = False
+        self._grip_held = False
         self._grab_offset = None
         self._prev_cola_pos = None
 
         print("[DynamicColaTracker] Stopped")
 
-    def _configure_vr_hand_teleport_only(self):
-        """
-        VR mode preference:
-          - hide controller models
-          - keep hand rendering
-          - keep Teleport/default interactions available
-        """
-        try:
-            # Keep built-in interactions alive (Teleport depends on this in most setups).
-            vrImmersiveInteractionService.setDefaultInteractionsActive(1)
-        except Exception:
-            pass
-
-        try:
-            teleport = vrDeviceService.getInteraction("Teleport")
-            if teleport:
-                try:
-                    teleport.setActive(1)
-                except Exception:
-                    pass
-        except Exception:
-            pass
-
-        # Keep hand visual mode (if API provides a specific hand-only mode, use it).
-        hand_mode = None
-        for mode_name in ("Visualization_Hand", "Visualization_HandOnly", "Visualization_OnlyHand"):
-            if mode_name in globals():
-                hand_mode = globals()[mode_name]
-                break
-
-        for dev_name in ("left-controller", "right-controller"):
-            try:
-                dev = vrDeviceService.getVRDevice(dev_name)
-                if not dev:
-                    continue
-                if hand_mode is not None:
-                    try:
-                        dev.setVisualizationMode(hand_mode)
-                    except Exception:
-                        pass
-            except Exception:
-                pass
-
-        # Hide controller meshes explicitly; hand meshes stay available.
-        for node_name in ("MRcontrollerLeft", "MRcontrollerRight"):
-            try:
-                node = findNode(node_name)
-                if node:
-                    node.setActive(0)
-            except Exception:
-                pass
-
-        print("[DynamicColaTracker] VR mode set: hand + teleport (controllers hidden)")
-
     def begin_grab(self):
         if not self._active or not self._tracker or not self._cola_node or not self._cola_physics:
-            print("[DynamicColaTracker] begin_grab ignored (not active)")
             return
 
         try:
@@ -292,9 +241,10 @@ class DynamicColaTracker:
             self.start()
 
     def status(self):
-        print("[DynamicColaTracker] state={} grab={} tracker='{}' cola='{}' console='{}' tuning(gain={}, damping={}, max_force={}, max_error={})".format(
+        print("[DynamicColaTracker] state={} grab={} gripHeld={} input='{}' cola='{}' console='{}' tuning(gain={}, damping={}, max_force={}, max_error={})".format(
             "ACTIVE" if self._active else "stopped",
             self._grab_active,
+            self._grip_held,
             self._tracker_name,
             self._cola_node_name,
             self._console_node_name,
@@ -307,14 +257,65 @@ class DynamicColaTracker:
     # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------
+    def _configure_vr_hand_teleport_only(self):
+        """
+        VR mode preference:
+          - hide controller models
+          - keep hand rendering
+          - keep Teleport/default interactions available
+        """
+        try:
+            vrImmersiveInteractionService.setDefaultInteractionsActive(1)
+        except Exception:
+            pass
+
+        try:
+            teleport = vrDeviceService.getInteraction("Teleport")
+            if teleport:
+                try:
+                    teleport.setActive(1)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        hand_mode = None
+        for mode_name in ("Visualization_Hand", "Visualization_HandOnly", "Visualization_OnlyHand"):
+            if mode_name in globals():
+                hand_mode = globals()[mode_name]
+                break
+
+        for dev_name in ("left-controller", "right-controller"):
+            try:
+                dev = vrDeviceService.getVRDevice(dev_name)
+                if not dev:
+                    continue
+                if hand_mode is not None:
+                    try:
+                        dev.setVisualizationMode(hand_mode)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+        for node_name in ("MRcontrollerLeft", "MRcontrollerRight"):
+            try:
+                node = findNode(node_name)
+                if node:
+                    node.setActive(0)
+            except Exception:
+                pass
+
+        print("[DynamicColaTracker] VR mode set: hand + teleport (controllers hidden)")
+
     def _resolve_scene_objects(self):
         try:
             self._tracker = vrDeviceService.getVRDevice(self._tracker_name)
             if not self._tracker:
-                print("[DynamicColaTracker] ERROR: tracker not found: " + self._tracker_name)
+                print("[DynamicColaTracker] ERROR: input device not found: " + self._tracker_name)
                 return False
         except Exception as e:
-            print("[DynamicColaTracker] ERROR getting tracker: " + str(e))
+            print("[DynamicColaTracker] ERROR getting input device: " + str(e))
             return False
 
         try:
@@ -365,9 +366,29 @@ class DynamicColaTracker:
 
         return True
 
+    def _is_grab_pressed(self):
+        if not self._tracker:
+            return False
+
+        for button in ("grip", "squeeze"):
+            try:
+                state = self._tracker.getButtonState(button)
+                if not state:
+                    continue
+                if state.isPressed():
+                    return True
+                try:
+                    if state.getPosition().x() >= self._grab_threshold:
+                        return True
+                except Exception:
+                    pass
+            except Exception:
+                continue
+        return False
+
     def _tracker_scene_position(self):
         """
-        Convert tracker tracking-space position (Y-up) to scene-space (Z-up):
+        Convert tracking-space position (Y-up) to scene-space (Z-up):
           scene_x = -track_x
           scene_y = -track_z
           scene_z =  track_y
@@ -380,6 +401,15 @@ class DynamicColaTracker:
             return
         if not self._tracker or not self._cola_node or not self._cola_physics:
             return
+
+        pressed = self._is_grab_pressed()
+        if pressed and not self._grip_held:
+            self._grip_held = True
+            self.begin_grab()
+        elif not pressed and self._grip_held:
+            self._grip_held = False
+            self.release_grab()
+
         if not self._grab_active or self._grab_offset is None:
             return
 
@@ -387,7 +417,7 @@ class DynamicColaTracker:
             tx, ty, tz = self._tracker_scene_position()
             cur = getTransformNodeTranslation(self._cola_node, True)
 
-            # If tracker origin suddenly jumps, rebind grab offset to current pose.
+            # If tracking origin suddenly jumps, rebind grab offset to current pose.
             err_now_x = (tx + self._grab_offset.x()) - cur.x()
             err_now_y = (ty + self._grab_offset.y()) - cur.y()
             err_now_z = (tz + self._grab_offset.z()) - cur.z()
@@ -397,7 +427,6 @@ class DynamicColaTracker:
                 self._cola_physics.setForce(QVector3D(0.0, 0.0, 0.0))
                 return
 
-            # Grab target keeps the initial tracker->cola offset.
             tx = tx + self._grab_offset.x()
             ty = ty + self._grab_offset.y()
             tz = tz + self._grab_offset.z()
@@ -406,7 +435,6 @@ class DynamicColaTracker:
             dy = ty - cur.y()
             dz = tz - cur.z()
 
-            # Deadzone removes tiny hand jitter.
             if abs(dx) < self._deadzone:
                 dx = 0.0
             if abs(dy) < self._deadzone:
@@ -414,12 +442,10 @@ class DynamicColaTracker:
             if abs(dz) < self._deadzone:
                 dz = 0.0
 
-            # Limit per-axis error to avoid unstable force spikes.
             dx = max(min(dx, self._max_error), -self._max_error)
             dy = max(min(dy, self._max_error), -self._max_error)
             dz = max(min(dz, self._max_error), -self._max_error)
 
-            # Estimate velocity from position delta for damping (no transform writes).
             vx = 0.0
             vy = 0.0
             vz = 0.0
@@ -432,7 +458,6 @@ class DynamicColaTracker:
             fy = dy * self._gain - vy * self._damping
             fz = dz * self._gain - vz * self._damping
 
-            # Cap per-axis force for numerical stability.
             fx = max(min(fx, self._max_force), -self._max_force)
             fy = max(min(fy, self._max_force), -self._max_force)
             fz = max(min(fz, self._max_force), -self._max_force)
@@ -519,7 +544,7 @@ if _prev_cola_tracker is not None:
 _cola_tracker = DynamicColaTracker()
 
 
-def setup_cola(tracker_name="tracker-2", cola_node_name="Cola", maintain_offset=False,
+def setup_cola(tracker_name="right-controller", cola_node_name="Cola", maintain_offset=False,
                follow_mode="dynamic", console_node_name="Console1"):
     """
     Configure dynamic cola tracking.
@@ -545,7 +570,8 @@ def set_cola_follow_mode(follow_mode):
 
 
 def set_cola_dynamic_tuning(gain=None, damping=None, max_step=None, max_force=None,
-                            max_error=None, reanchor_distance=None, deadzone=None):
+                            max_error=None, reanchor_distance=None, deadzone=None,
+                            grab_threshold=None):
     """
     Set follower tuning.
 
@@ -554,9 +580,15 @@ def set_cola_dynamic_tuning(gain=None, damping=None, max_step=None, max_force=No
     """
     if max_error is None and max_step is not None:
         max_error = max_step
-        _cola_tracker.set_tuning(gain=gain, damping=damping, max_force=max_force,
-                                                         max_error=max_error, reanchor_distance=reanchor_distance,
-                                                         deadzone=deadzone)
+    _cola_tracker.set_tuning(gain=gain, damping=damping, max_force=max_force,
+                             max_error=max_error, reanchor_distance=reanchor_distance,
+                             deadzone=deadzone, grab_threshold=grab_threshold)
+
+
+def set_grab_input_device(device_name="right-controller"):
+    """Set grab input device, e.g. right-controller or left-controller."""
+    _cola_tracker._tracker_name = str(device_name)
+    print("[DynamicColaTracker] Grab input device set to '{}'".format(_cola_tracker._tracker_name))
 
 
 def start_cola():
@@ -572,12 +604,12 @@ def toggle_cola():
 
 
 def grab_cola():
-    """Start physics grab (like holding object with Shift+Alt drag)."""
+    """Start physics grab manually."""
     _cola_tracker.begin_grab()
 
 
 def release_cola():
-    """Release physics grab and let object fall naturally."""
+    """Release physics grab manually."""
     _cola_tracker.release_grab()
 
 
@@ -608,14 +640,15 @@ def toggle_transform():
 
 
 print("[DynamicColaTracker] Initialized.")
-print("[DynamicColaTracker] Use setup_cola('tracker-2', 'Cola', False, 'dynamic', 'Console1') then start_cola().")
+print("[DynamicColaTracker] Use setup_cola('right-controller', 'Cola', False, 'dynamic', 'Console1') then start_cola().")
 
 # Auto-run on script load.
 try:
-    setup_cola("tracker-2", "Cola", False, "dynamic", "Console1")
+    setup_cola("right-controller", "Cola", False, "dynamic", "Console1")
     set_cola_dynamic_tuning(gain=22.0, damping=5.0, max_force=1.6,
-                            max_error=0.12, reanchor_distance=0.35, deadzone=0.004)
+                            max_error=0.12, reanchor_distance=0.35,
+                            deadzone=0.004, grab_threshold=0.5)
     start_cola()
-    print("[DynamicColaTracker] Auto setup+start executed.")
+    print("[DynamicColaTracker] Auto setup+start executed (hold Grip/Squeeze to grab Cola).")
 except Exception as e:
     print("[DynamicColaTracker] Auto start failed: " + str(e))
