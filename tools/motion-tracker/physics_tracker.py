@@ -575,29 +575,29 @@ else:
     _cola_tracker = ColaTracker()
 
     # ======================================================================
-    # 控制器按键绑定
+    # 控制器按键绑定（直连设备信号，不创建 Interaction，不影响内置 Teleport）
     # ======================================================================
     # 左手 Y 键 → toggle TransformTracker
     # 右手 B 键 → toggle ColaTracker
-    # （仅在 Locomotion 交互组生效）
     try:
-        _old_pt = vrDeviceService.getInteraction("PhysicsTrackerInteraction")
-        if _old_pt and _old_pt.isValid():
-            vrDeviceService.removeInteraction(_old_pt)
-    except Exception:
-        pass
+        # 先清除旧的残余 interaction（如果存在）
+        try:
+            _old_pt = vrDeviceService.getInteraction("PhysicsTrackerInteraction")
+            if _old_pt and _old_pt.isValid():
+                vrDeviceService.removeInteraction(_old_pt)
+        except Exception:
+            pass
 
-    try:
-        _pt_interaction = vrDeviceService.createInteraction("PhysicsTrackerInteraction")
-        _pt_interaction.setSupportedInteractionGroups(["Manipulation"])
+        left_ctrl  = vrDeviceService.getDevice("LeftController")
+        right_ctrl = vrDeviceService.getDevice("RightController")
 
-        _pt_y_action = _pt_interaction.createControllerAction("left-y-pressed")
-        _pt_y_action.signal().triggered.connect(lambda: _transform_tracker.toggle())
+        left_y  = left_ctrl.getButton("ButtonY")
+        right_b = right_ctrl.getButton("ButtonB")
 
-        _pt_b_action = _pt_interaction.createControllerAction("right-b-pressed")
-        _pt_b_action.signal().triggered.connect(lambda: _cola_tracker.toggle())
+        left_y.signal().pressed.connect(lambda: _transform_tracker.toggle())
+        right_b.signal().pressed.connect(lambda: _cola_tracker.toggle())
 
-        print("[PhysicsTracker] Buttons bound: left-Y=TransformTracker, right-B=ColaTracker (Locomotion)")
+        print("[PhysicsTracker] Buttons bound: left-Y=TransformTracker, right-B=ColaTracker (direct signal)")
     except Exception as e:
         print("[PhysicsTracker] WARNING binding buttons: " + str(e))
 
