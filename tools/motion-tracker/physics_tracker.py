@@ -22,6 +22,8 @@
 # 右手 B 键（右手控制器）：切换 tracker-2 Cola 追踪开/关
 # ======================================================================
 
+from PySide6.QtGui import QVector3D
+
 global _physics_tracker_initialized
 if '_physics_tracker_initialized' in globals() and _physics_tracker_initialized:
     print("[PhysicsTracker] Already initialized, skipping re-init")
@@ -442,7 +444,7 @@ else:
             try:
                 if self._cola_physics_obj:
                     self._cola_physics_obj.setForceEnabled(False)
-                    self._cola_physics_obj.setForce(Vec3f(0.0, 0.0, 0.0))
+                    self._cola_physics_obj.setForce(QVector3D(0.0, 0.0, 0.0))
             except Exception:
                 pass
 
@@ -472,7 +474,7 @@ else:
                 dy = max(min(dy, self._dynamic_max_step), -self._dynamic_max_step)
                 dz = max(min(dz, self._dynamic_max_step), -self._dynamic_max_step)
 
-                self._cola_physics_obj.setForce(Vec3f(
+                self._cola_physics_obj.setForce(QVector3D(
                     dx * self._dynamic_gain,
                     dy * self._dynamic_gain,
                     dz * self._dynamic_gain))
@@ -570,7 +572,7 @@ else:
 
     try:
         _pt_interaction = vrDeviceService.createInteraction("PhysicsTrackerInteraction")
-        _pt_interaction.setSupportedInteractionGroups(["Locomotion"])
+        _pt_interaction.setSupportedInteractionGroups(["Manipulation"])
 
         _pt_y_action = _pt_interaction.createControllerAction("left-y-pressed")
         _pt_y_action.signal().triggered.connect(lambda: _transform_tracker.toggle())
