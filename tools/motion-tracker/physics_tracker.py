@@ -145,6 +145,9 @@ else:
             self._cola_physics_obj = None
             self._dynamic_timer = vrTimer()
             self._dynamic_timer_connected = False
+            self._kinematic_timer = vrTimer()
+            self._kinematic_timer_connected = False
+            self._cola_scale = None
             self._dynamic_gain = 18.0
             self._dynamic_max_step = 0.06
             # 碰撞信号连接句柄
@@ -223,14 +226,10 @@ else:
             self._cola_node = colaNode
 
             if self._follow_mode == "kinematic":
-                # 创建 ParentConstraint: tracker → Cola
-                try:
-                    self._constraint = vrConstraintService.createParentConstraint(
-                        [tracker.getNode()], colaNode, self._maintain_offset)
-                    print("[ColaTracker] Constraint created: {} -> '{}'".format(
-                        self._tracker_name, self._cola_node_name))
-                except Exception as e:
-                    print("[ColaTracker] ERROR creating constraint: " + str(e))
+                # kinematic 模式改为 timer 同步位姿，避免 ParentConstraint 继承 tracker 缩放
+                if self._maintain_offset:
+                    print("[ColaTracker] WARNING: maintain_offset is ignored in kinematic timer follow mode")
+                if not self._start_kinematic_follow():
                     return
             else:
                 # dynamic 模式通过每帧施加速度变化跟随 tracker
@@ -257,6 +256,7 @@ else:
             except Exception as e:
                 print("[ColaTracker] WARNING deleting constraint: " + str(e))
 
+            self._stop_kinematic_follow()
             self._stop_dynamic_follow()
 
             # 断开碰撞信号
@@ -266,6 +266,7 @@ else:
             self._tracker = None
             self._cola_node = None
             self._cola_physics_obj = None
+            self._cola_scale = None
             print("[ColaTracker] Stopped: {} -> '{}'".format(
                 self._tracker_name, self._cola_node_name))
 
@@ -327,6 +328,52 @@ else:
                         print("[ColaTracker] WARNING: failed to register Cola")
             except Exception as e:
                 print("[ColaTracker] WARNING during physics registration: " + str(e))
+
+        # ------------------------------------------------------------------
+        # 内部：kinematic 模式（无缩放传递）
+        # ------------------------------------------------------------------
+        def _start_kinematic_follow(self):
+            try:
+                self._cola_scale = getTransformNodeScale(self._cola_node)
+            except Exception:
+                self._cola_scale = None
+
+            if not self._kinematic_timer_connected:
+                self._kinematic_timer.connect(self._kinematic_update)
+                self._kinematic_timer_connected = True
+
+            self._kinematic_timer.setActive(1)
+            print("[ColaTracker] Kinematic timer follow active (scale locked)")
+            return True
+
+        def _stop_kinematic_follow(self):
+            try:
+                self._kinematic_timer.setActive(0)
+            except Exception:
+                pass
+
+        def _kinematic_update(self):
+            if not self._active or self._follow_mode != "kinematic":
+                return
+            if not self._tracker or not self._cola_node:
+                return
+
+            try:
+                tracker_node = self._tracker.getNode()
+                t = getTransformNodeTranslation(tracker_node, True)
+                r = getTransformNodeRotation(tracker_node)
+
+                setTransformNodeTranslation(self._cola_node, t.x(), t.y(), t.z(), True)
+                setTransformNodeRotation(self._cola_node, r.x(), r.y(), r.z())
+
+                # 每帧恢复 Cola 原始缩放，防止 tracker 缩放链条污染
+                if self._cola_scale is not None:
+                    setTransformNodeScale(self._cola_node,
+                                          self._cola_scale.x(),
+                                          self._cola_scale.y(),
+                                          self._cola_scale.z())
+            except Exception as e:
+                print("[ColaTracker] WARNING kinematic update failed: " + str(e))
 
         # ------------------------------------------------------------------
         # 内部：dynamic 模式（Moving Dynamic Actors）
