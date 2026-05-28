@@ -109,6 +109,8 @@ class DynamicColaTracker:
             print("[DynamicColaTracker] Already active")
             return
 
+        self._configure_vr_hand_teleport_only()
+
         if not self._resolve_scene_objects():
             return
 
@@ -197,6 +199,60 @@ class DynamicColaTracker:
         self._prev_cola_pos = None
 
         print("[DynamicColaTracker] Stopped")
+
+    def _configure_vr_hand_teleport_only(self):
+        """
+        VR mode preference:
+          - hide controller models
+          - keep hand rendering
+          - keep Teleport/default interactions available
+        """
+        try:
+            # Keep built-in interactions alive (Teleport depends on this in most setups).
+            vrImmersiveInteractionService.setDefaultInteractionsActive(1)
+        except Exception:
+            pass
+
+        try:
+            teleport = vrDeviceService.getInteraction("Teleport")
+            if teleport:
+                try:
+                    teleport.setActive(1)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        # Keep hand visual mode (if API provides a specific hand-only mode, use it).
+        hand_mode = None
+        for mode_name in ("Visualization_Hand", "Visualization_HandOnly", "Visualization_OnlyHand"):
+            if mode_name in globals():
+                hand_mode = globals()[mode_name]
+                break
+
+        for dev_name in ("left-controller", "right-controller"):
+            try:
+                dev = vrDeviceService.getVRDevice(dev_name)
+                if not dev:
+                    continue
+                if hand_mode is not None:
+                    try:
+                        dev.setVisualizationMode(hand_mode)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+        # Hide controller meshes explicitly; hand meshes stay available.
+        for node_name in ("MRcontrollerLeft", "MRcontrollerRight"):
+            try:
+                node = findNode(node_name)
+                if node:
+                    node.setActive(0)
+            except Exception:
+                pass
+
+        print("[DynamicColaTracker] VR mode set: hand + teleport (controllers hidden)")
 
     def begin_grab(self):
         if not self._active or not self._tracker or not self._cola_node or not self._cola_physics:
@@ -527,6 +583,11 @@ def release_cola():
 
 def physics_status():
     _cola_tracker.status()
+
+
+def vr_hand_teleport_only():
+    """Apply VR visualization policy: hide controllers, keep hand + teleport."""
+    _cola_tracker._configure_vr_hand_teleport_only()
 
 
 # Compatibility stubs for previous API surface.
