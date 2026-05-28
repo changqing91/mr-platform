@@ -348,11 +348,10 @@ else:
                     tracker_node = self._tracker.getNode()
                     t_tracker = getTransformNodeTranslation(tracker_node, True)
                     t_cola = getTransformNodeTranslation(self._cola_node, True)
-                    off = getTransformNodeTranslation(self._cola_node, True)
-                    off.setX(t_cola.x() - t_tracker.x())
-                    off.setY(t_cola.y() - t_tracker.y())
-                    off.setZ(t_cola.z() - t_tracker.z())
-                    self._kinematic_offset = off
+                    self._kinematic_offset = Vec3f(
+                        t_cola.x() - t_tracker.x(),
+                        t_cola.y() - t_tracker.y(),
+                        t_cola.z() - t_tracker.z())
                     print("[ColaTracker] Kinematic maintain_offset enabled (position offset)")
                 except Exception as e:
                     print("[ColaTracker] WARNING: failed to compute maintain_offset: " + str(e))
@@ -443,11 +442,7 @@ else:
             try:
                 if self._cola_physics_obj:
                     self._cola_physics_obj.setForceEnabled(False)
-                    zero_vec = getTransformNodeTranslation(self._cola_node, True)
-                    zero_vec.setX(0.0)
-                    zero_vec.setY(0.0)
-                    zero_vec.setZ(0.0)
-                    self._cola_physics_obj.setForce(zero_vec)
+                    self._cola_physics_obj.setForce(Vec3f(0.0, 0.0, 0.0))
             except Exception:
                 pass
 
@@ -477,11 +472,10 @@ else:
                 dy = max(min(dy, self._dynamic_max_step), -self._dynamic_max_step)
                 dz = max(min(dz, self._dynamic_max_step), -self._dynamic_max_step)
 
-                force = getTransformNodeTranslation(self._cola_node, True)
-                force.setX(dx * self._dynamic_gain)
-                force.setY(dy * self._dynamic_gain)
-                force.setZ(dz * self._dynamic_gain)
-                self._cola_physics_obj.setForce(force)
+                self._cola_physics_obj.setForce(Vec3f(
+                    dx * self._dynamic_gain,
+                    dy * self._dynamic_gain,
+                    dz * self._dynamic_gain))
             except Exception as e:
                 print("[ColaTracker] WARNING dynamic update failed: " + str(e))
 
