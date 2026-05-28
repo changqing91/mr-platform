@@ -13,6 +13,7 @@
 #   setup_cola("tracker-2", "Cola", False, "kinematic")  # kinematic 模式
 #   setup_cola("tracker-2", "Cola", False, "dynamic")    # dynamic 模式
 #   set_cola_dynamic_tuning(18.0, 0.06)         # 可选：设置 dynamic 跟随参数
+#   set_cola_dynamic_tuning(gain=200.0, max_step=0.5)  # 先用大参数测试
 #   start_transform()                          # 启动 tracker-1 追踪
 #   start_cola()                               # 启动 tracker-2 物理追踪
 #   stop_cola()                                # 停止，解除约束
@@ -22,7 +23,23 @@
 # 右手 B 键（右手控制器）：切换 tracker-2 Cola 追踪开/关
 # ======================================================================
 
-from PySide6.QtGui import QVector3D
+try:
+    from PySide6.QtGui import QVector3D
+except ImportError:
+    from PySide2.QtGui import QVector3D
+
+# 每次重新加载时强制重新初始化，确保代码更新生效
+if '_cola_tracker' in globals() and _cola_tracker is not None:
+    try:
+        _cola_tracker.stop()
+    except Exception:
+        pass
+if '_transform_tracker' in globals() and _transform_tracker is not None:
+    try:
+        _transform_tracker.stop()
+    except Exception:
+        pass
+_physics_tracker_initialized = False
 
 global _physics_tracker_initialized
 if '_physics_tracker_initialized' in globals() and _physics_tracker_initialized:
