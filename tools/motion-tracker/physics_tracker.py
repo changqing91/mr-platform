@@ -39,9 +39,9 @@ if '_transform_tracker' in globals() and _transform_tracker is not None:
         _transform_tracker.stop()
     except Exception:
         pass
+global _physics_tracker_initialized
 _physics_tracker_initialized = False
 
-global _physics_tracker_initialized
 if '_physics_tracker_initialized' in globals() and _physics_tracker_initialized:
     print("[PhysicsTracker] Already initialized, skipping re-init")
 else:
