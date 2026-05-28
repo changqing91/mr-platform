@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { ArrowLeft, Activity, Glasses, SplitSquareHorizontal, ImageIcon, Headset, FolderOpen, Monitor, RotateCcw, Power, Zap, Save, CheckCircle, XCircle, Mic, MicOff, Gamepad2 } from 'lucide-react';
+import { ArrowLeft, Activity, Glasses, SplitSquareHorizontal, ImageIcon, Headset, FolderOpen, Monitor, RotateCcw, Power, Zap, Save, CheckCircle, XCircle, Mic, MicOff, Gamepad2, Sliders } from 'lucide-react';
 import ProjectThumbnail from './ProjectThumbnail';
 import { api } from '../services/api';
 import { api as vredApi } from '../services/vredPython';
@@ -266,6 +266,39 @@ const StreamingView = ({
         } catch (e) {
             console.error('Python Exec Error:', e);
         }
+    };
+
+    // --- Real-time render config ---
+    const [streamScriptConfig, setStreamScriptConfig] = useState({ dlssQuality: 0, realtimeAA: 0, realtimeShadows: false });
+
+    const buildRenderConfigScript = (config) => {
+        const lines = [];
+        if (config.dlssQuality !== undefined) {
+            lines.push(`vrOSGWidget.setDLSSQuality(${config.dlssQuality})`);
+        }
+        if (config.realtimeAA !== undefined) {
+            const aaMode = config.realtimeAA;
+            if (aaMode === 0) {
+                lines.push(`vrOSGWidget.setSuperSampling(False)`);
+            } else {
+                const qualityMap = { 1: 'VR_SS_QUALITY_LOW', 2: 'VR_SS_QUALITY_MEDIUM', 3: 'VR_SS_QUALITY_HIGH', 4: 'VR_SS_QUALITY_ULTRA_HIGH' };
+                lines.push(`vrOSGWidget.setSuperSampling(True)\nvrOSGWidget.setSuperSamplingQuality(${qualityMap[aaMode]})`);
+            }
+        }
+        if (config.realtimeShadows !== undefined) {
+            const rs = config.realtimeShadows;
+            lines.push(
+                `renderSettings = vrRenderSettingsService.getSettings()\nrenderSettings.setUseRealtimeEnvironmentShadows(${rs ? 'True' : 'False'})` +
+                (rs ? `\nrenderSettings.setRealtimeEnvironmentShadowsMode(vrRenderSettingsTypes.RaytracedEnvironmentShadows)` : '')
+            );
+        }
+        return lines.join('\n');
+    };
+
+    const applyRenderSetting = (updates) => {
+        const next = { ...streamScriptConfig, ...updates };
+        setStreamScriptConfig(next);
+        sendPython(buildRenderConfigScript(updates));
     };
 
     const handleStandardDisplay = async () => {
@@ -567,6 +600,7 @@ cam.setWorldTransform(QMatrix4x4(*m))`;
     // --- Tab & MR Tools state ---
     const [activeTab, setActiveTab] = useState(0); // 0: 控制面板, 1: MR 工具
     const [gamepadPanelOpen, setGamepadPanelOpen] = useState(false);
+    const [renderConfigPanelOpen, setRenderConfigPanelOpen] = useState(false);
     const [activeTool, setActiveTool] = useState(null);
     const [isToolsInjected, setIsToolsInjected] = useState(false);
 
@@ -955,7 +989,8 @@ except Exception as e:
 
                     {/* Tab 1: 控制面板 */}
                     {activeTab === 0 && (
-                        <div className="flex-1 flex flex-col p-4 overflow-y-auto custom-scrollbar">
+                        <div className="flex-1 flex flex-col overflow-hidden">
+                            <div className="flex-1 p-4 overflow-y-auto custom-scrollbar">
                             {/* 1. HMD View Tracking */}
                             <div className="mb-6 p-4 bg-gray-800/50 rounded-xl border border-gray-700">
                                 <h3 className="text-sm font-bold text-gray-300 mb-3 flex items-center gap-2"><Glasses size={16} className="text-[#39C5BB]" />HMD 视角追踪</h3>
@@ -1021,9 +1056,10 @@ except Exception as e:
                                 </div>
                             </div>
 
-                            <div className="mt-auto pt-4 border-t border-gray-800 space-y-3">
-                                <h3 className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">显示模式</h3>
-                                <div className="grid grid-cols-3 gap-2">
+                            </div>
+
+                            <div className="shrink-0 px-4 pb-4 pt-3 border-t border-gray-800 space-y-3">
+                                <h3 className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">显示模式</h3>                                <div className="grid grid-cols-3 gap-2">
                                     <button onClick={handleStandardDisplay} className={`py-3 rounded-lg font-bold text-sm flex items-center justify-center gap-2 transition-all ${streamParams.displayMode === 'standard' ? 'text-white shadow-lg' : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white'}`} style={{ backgroundColor: streamParams.displayMode === 'standard' ? THEME_COLOR : '' }}>
                                         <Monitor size={18} /> 标准
                                     </button>
@@ -1103,12 +1139,27 @@ except Exception as e:
                 </div>
             </div>
 
+            {/* Render config floating button — always visible */}
+            <button
+                onClick={() => { setRenderConfigPanelOpen(v => !v); setGamepadPanelOpen(false); }}
+                className={`absolute bottom-6 z-40 flex items-center gap-2 px-3 py-2 rounded-xl shadow-lg border transition-all ${
+                    gamepadConnected ? 'right-[404px]' : 'right-[340px]'
+                } ${
+                    renderConfigPanelOpen
+                        ? 'bg-[#39C5BB] border-[#39C5BB] text-white shadow-[#39C5BB]/30'
+                        : 'bg-gray-800/90 border-gray-700 text-gray-300 hover:border-[#39C5BB]/50 hover:text-[#39C5BB]'
+                }`}
+                title="渲染配置"
+            >
+                <Sliders size={16} />
+            </button>
+
             {/* Gamepad floating button — only when connected */}
             {gamepadConnected && (
                 <button
-                    onClick={() => setGamepadPanelOpen(v => !v)}
+                    onClick={() => { setGamepadPanelOpen(v => !v); setRenderConfigPanelOpen(false); }}
                     className={`absolute bottom-6 right-[340px] z-40 flex items-center gap-2 px-3 py-2 rounded-xl shadow-lg border transition-all ${
-                        gamepadEnabled
+                        gamepadEnabled || gamepadPanelOpen
                             ? 'bg-[#39C5BB] border-[#39C5BB] text-white shadow-[#39C5BB]/30'
                             : 'bg-gray-800/90 border-gray-700 text-gray-300 hover:border-[#39C5BB]/50 hover:text-[#39C5BB]'
                     }`}
@@ -1198,6 +1249,74 @@ except Exception as e:
                                     className={`flex-1 py-2.5 text-xs font-bold transition-colors ${!gamepadEnabled ? 'bg-gray-700 text-white' : 'bg-gray-800 text-gray-500 hover:bg-gray-700'}`}
                                 >
                                     停用
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Render config floating panel */}
+            {renderConfigPanelOpen && (
+                <div className={`absolute bottom-16 z-40 w-72 bg-gray-900/75 backdrop-blur-md border border-gray-700/60 rounded-2xl shadow-2xl overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-200 ${gamepadConnected ? 'right-[404px]' : 'right-[340px]'}`}>
+                    {/* Panel header */}
+                    <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800">
+                        <div className="flex items-center gap-2">
+                            <Sliders size={14} className="text-[#39C5BB]" />
+                            <span className="text-xs font-bold text-gray-200">实时渲染配置</span>
+                        </div>
+                        <button onClick={() => setRenderConfigPanelOpen(false)} className="text-gray-500 hover:text-gray-200 transition-colors text-xs">✕</button>
+                    </div>
+
+                    <div className="p-4 space-y-4">
+                        {/* DLSS */}
+                        <div className="space-y-2">
+                            <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">DLSS 超分辨率</p>
+                            <select
+                                value={streamScriptConfig.dlssQuality}
+                                onChange={e => applyRenderSetting({ dlssQuality: Number(e.target.value) })}
+                                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-xs text-white focus:border-[#39C5BB] outline-none"
+                            >
+                                <option value={0}>关闭</option>
+                                <option value={2}>性能 (Performance)</option>
+                                <option value={3}>均衡 (Balanced)</option>
+                                <option value={4}>质量 (Quality)</option>
+                                <option value={5}>超高性能 (Ultra Performance)</option>
+                            </select>
+                        </div>
+
+                        {/* Realtime AA */}
+                        <div className="space-y-2">
+                            <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">实时抗锯齿</p>
+                            <select
+                                value={streamScriptConfig.realtimeAA}
+                                onChange={e => applyRenderSetting({ realtimeAA: Number(e.target.value) })}
+                                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-xs text-white focus:border-[#39C5BB] outline-none"
+                            >
+                                <option value={0}>禁用</option>
+                                <option value={1}>低</option>
+                                <option value={2}>中等</option>
+                                <option value={3}>高</option>
+                                <option value={4}>超高</option>
+                            </select>
+                        </div>
+
+                        {/* Shadow mode */}
+                        <div className="space-y-2">
+                            <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">光栅化阴影</p>
+                            <div className="flex rounded-lg overflow-hidden border border-gray-700 w-full">
+                                <button
+                                    onClick={() => applyRenderSetting({ realtimeShadows: false })}
+                                    className={`flex-1 py-2.5 text-xs font-bold transition-colors ${!streamScriptConfig.realtimeShadows ? 'bg-gray-700 text-white' : 'bg-gray-800 text-gray-500 hover:bg-gray-700'}`}
+                                >
+                                    烘焙阴影
+                                </button>
+                                <div className="w-[1px] bg-gray-700"></div>
+                                <button
+                                    onClick={() => applyRenderSetting({ realtimeShadows: true })}
+                                    className={`flex-1 py-2.5 text-xs font-bold transition-colors ${streamScriptConfig.realtimeShadows ? 'bg-[#39C5BB] text-white' : 'bg-gray-800 text-gray-500 hover:bg-gray-700'}`}
+                                >
+                                    实时阴影
                                 </button>
                             </div>
                         </div>

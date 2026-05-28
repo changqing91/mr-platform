@@ -167,7 +167,7 @@ const MachineList = ({
                                 </div>
 
                                 {/* Custom Script */}
-                                <div className="space-y-1.5">
+                                {/* <div className="space-y-1.5">
                                     <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">自定义 Python 脚本</label>
                                     <textarea
                                         value={globalScriptConfig?.customScript || ''}
@@ -176,7 +176,7 @@ const MachineList = ({
                                         className="w-full text-xs font-mono border border-gray-200 rounded-lg p-2.5 resize-none focus:outline-none focus:border-gray-400 focus:bg-white bg-gray-50 placeholder-gray-300 transition-colors"
                                         rows={4}
                                     />
-                                </div>
+                                </div> */}
 
                                 {/* Footer */}
                                 <div className="flex items-center justify-between pt-1 border-t border-gray-100">
