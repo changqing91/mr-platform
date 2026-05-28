@@ -244,8 +244,32 @@ else:
             except Exception as e:
                 print("[ColaTracker] WARNING: failed to activate physics service: " + str(e))
 
+            # 注册物理对象前保存 Cola 的世界变换，
+            # 防止 addKinematicObject/addDynamicObject 将节点重置到原点导致瓶子消失
+            _saved_t = _saved_r = _saved_s = None
+            try:
+                _saved_t = getTransformNodeTranslation(colaNode, True)
+                _saved_r = getTransformNodeRotation(colaNode)
+                _saved_s = getTransformNodeScale(colaNode)
+            except Exception:
+                pass
+
             # 确保 Cola 为 kinematic 物理对象
             self._ensure_physics_mode(colaNode)
+
+            # 恢复 Cola 原始世界变换
+            try:
+                if _saved_t is not None:
+                    setTransformNodeTranslation(colaNode,
+                        _saved_t.x(), _saved_t.y(), _saved_t.z(), True)
+                if _saved_r is not None:
+                    setTransformNodeRotation(colaNode,
+                        _saved_r.x(), _saved_r.y(), _saved_r.z())
+                if _saved_s is not None:
+                    setTransformNodeScale(colaNode,
+                        _saved_s.x(), _saved_s.y(), _saved_s.z())
+            except Exception as e:
+                print("[ColaTracker] WARNING: failed to restore Cola transform: " + str(e))
 
             self._tracker = tracker
             self._cola_node = colaNode
