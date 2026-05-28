@@ -28,6 +28,8 @@ try:
 except ImportError:
     from PySide2.QtGui import QVector3D
 
+global _transform_tracker, _cola_tracker
+
 # 每次重新加载时强制重新初始化，确保代码更新生效
 if '_cola_tracker' in globals() and _cola_tracker is not None:
     try:
@@ -569,8 +571,6 @@ else:
     # ======================================================================
     # 实例化管理器
     # ======================================================================
-    global _transform_tracker
-    global _cola_tracker
     _transform_tracker = TransformTracker()
     _cola_tracker = ColaTracker()
 
