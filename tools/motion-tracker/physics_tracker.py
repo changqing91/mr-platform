@@ -37,9 +37,14 @@ class DynamicColaTracker:
         self._timer_connected = False
 
         # Force follower tuning
-        self._gain = 80.0
-        self._max_force = 6.0
-        self._max_error = 0.20
+        self._gain = 30.0
+        self._max_force = 1.8
+        self._max_error = 0.08
+        self._reanchor_distance = 0.35
+
+        # Relative-follow anchors sampled at start().
+        self._tracker_anchor = None
+        self._cola_anchor = None
 
         self._sig_start = None
         self._sig_stop = None
@@ -59,7 +64,7 @@ class DynamicColaTracker:
         print("[DynamicColaTracker] Configured: {} -> '{}' (target static: '{}')".format(
             self._tracker_name, self._cola_node_name, self._console_node_name))
 
-    def set_tuning(self, gain=None, max_force=None, max_error=None):
+    def set_tuning(self, gain=None, max_force=None, max_error=None, reanchor_distance=None):
         if gain is not None:
             try:
                 self._gain = float(gain)
@@ -75,9 +80,14 @@ class DynamicColaTracker:
                 self._max_error = float(max_error)
             except Exception:
                 print("[DynamicColaTracker] WARNING: invalid max_error={}".format(max_error))
+        if reanchor_distance is not None:
+            try:
+                self._reanchor_distance = float(reanchor_distance)
+            except Exception:
+                print("[DynamicColaTracker] WARNING: invalid reanchor_distance={}".format(reanchor_distance))
 
-        print("[DynamicColaTracker] Tuning: gain={}, max_force={}, max_error={}".format(
-            self._gain, self._max_force, self._max_error))
+        print("[DynamicColaTracker] Tuning: gain={}, max_force={}, max_error={}, reanchor_distance={}".format(
+            self._gain, self._max_force, self._max_error, self._reanchor_distance))
 
     def start(self):
         if self._active:
@@ -116,9 +126,28 @@ class DynamicColaTracker:
             self._cola_physics.setForceMode(vrPhysicsTypes.ForceMode.VelocityChange)
             self._cola_physics.setForceWorldFrame(True)
             self._cola_physics.setForceEnabled(True)
+            # In VR demo follow mode we disable gravity to avoid falling/drifting out of view.
+            self._cola_physics.setGravityEnabled(False)
+            # Add damping for a stable, controllable feel.
+            self._cola_physics.setLinearDamping(5.0)
+            self._cola_physics.setAngularDamping(5.0)
             self._cola_physics.setForce(QVector3D(0.0, 0.0, 0.0))
         except Exception as e:
             print("[DynamicColaTracker] WARNING: force setup failed: " + str(e))
+
+        # Anchor tracker and cola at start to avoid huge absolute-space jumps.
+        try:
+            tx, ty, tz = self._tracker_scene_position()
+            cur = getTransformNodeTranslation(self._cola_node, True)
+            self._tracker_anchor = QVector3D(tx, ty, tz)
+            self._cola_anchor = QVector3D(cur.x(), cur.y(), cur.z())
+            print("[DynamicColaTracker] Anchored at start: tracker=({:.3f}, {:.3f}, {:.3f}), cola=({:.3f}, {:.3f}, {:.3f})".format(
+                self._tracker_anchor.x(), self._tracker_anchor.y(), self._tracker_anchor.z(),
+                self._cola_anchor.x(), self._cola_anchor.y(), self._cola_anchor.z()))
+        except Exception as e:
+            self._tracker_anchor = None
+            self._cola_anchor = None
+            print("[DynamicColaTracker] WARNING: failed to build anchors: " + str(e))
 
         if not self._timer_connected:
             self._timer.connect(self._update)
@@ -144,6 +173,11 @@ class DynamicColaTracker:
             if self._cola_physics:
                 self._cola_physics.setForce(QVector3D(0.0, 0.0, 0.0))
                 self._cola_physics.setForceEnabled(False)
+                # Restore gravity for normal simulation after stopping follow.
+                try:
+                    self._cola_physics.setGravityEnabled(True)
+                except Exception:
+                    pass
         except Exception:
             pass
 
@@ -154,6 +188,8 @@ class DynamicColaTracker:
         self._cola_node = None
         self._console_node = None
         self._cola_physics = None
+        self._tracker_anchor = None
+        self._cola_anchor = None
 
         print("[DynamicColaTracker] Stopped")
 
@@ -253,6 +289,27 @@ class DynamicColaTracker:
 
         try:
             tx, ty, tz = self._tracker_scene_position()
+
+            # If tracking origin changed suddenly (common when entering VR),
+            # reset anchors to avoid one-frame huge force impulses.
+            if self._tracker_anchor is not None and self._cola_anchor is not None:
+                jx = tx - self._tracker_anchor.x()
+                jy = ty - self._tracker_anchor.y()
+                jz = tz - self._tracker_anchor.z()
+                if abs(jx) > self._reanchor_distance or abs(jy) > self._reanchor_distance or abs(jz) > self._reanchor_distance:
+                    cur = getTransformNodeTranslation(self._cola_node, True)
+                    self._tracker_anchor = QVector3D(tx, ty, tz)
+                    self._cola_anchor = QVector3D(cur.x(), cur.y(), cur.z())
+                    self._cola_physics.setForce(QVector3D(0.0, 0.0, 0.0))
+                    print("[DynamicColaTracker] Re-anchored after tracker jump: ({:.3f}, {:.3f}, {:.3f})".format(jx, jy, jz))
+                    return
+
+            # Relative follow: target = cola_anchor + (tracker_now - tracker_anchor)
+            if self._tracker_anchor is not None and self._cola_anchor is not None:
+                tx = self._cola_anchor.x() + (tx - self._tracker_anchor.x())
+                ty = self._cola_anchor.y() + (ty - self._tracker_anchor.y())
+                tz = self._cola_anchor.z() + (tz - self._tracker_anchor.z())
+
             cur = getTransformNodeTranslation(self._cola_node, True)
 
             dx = tx - cur.x()
@@ -344,9 +401,10 @@ class DynamicColaTracker:
 # ======================================================================
 # Singleton & module API
 # ======================================================================
-if globals().get('_cola_tracker') is not None:
+_prev_cola_tracker = globals().get('_cola_tracker')
+if _prev_cola_tracker is not None:
     try:
-        _cola_tracker.stop()
+        _prev_cola_tracker.stop()
     except Exception:
         pass
 
@@ -378,7 +436,7 @@ def set_cola_follow_mode(follow_mode):
         print("[DynamicColaTracker] mode=dynamic")
 
 
-def set_cola_dynamic_tuning(gain=None, max_step=None, max_force=None, max_error=None):
+def set_cola_dynamic_tuning(gain=None, max_step=None, max_force=None, max_error=None, reanchor_distance=None):
     """
     Set follower tuning.
 
@@ -387,7 +445,8 @@ def set_cola_dynamic_tuning(gain=None, max_step=None, max_force=None, max_error=
     """
     if max_error is None and max_step is not None:
         max_error = max_step
-    _cola_tracker.set_tuning(gain=gain, max_force=max_force, max_error=max_error)
+    _cola_tracker.set_tuning(gain=gain, max_force=max_force, max_error=max_error,
+                             reanchor_distance=reanchor_distance)
 
 
 def start_cola():
@@ -425,3 +484,12 @@ def toggle_transform():
 
 print("[DynamicColaTracker] Initialized.")
 print("[DynamicColaTracker] Use setup_cola('tracker-2', 'Cola', False, 'dynamic', 'Console1') then start_cola().")
+
+# Auto-run on script load.
+try:
+    setup_cola("tracker-2", "Cola", False, "dynamic", "Console1")
+    set_cola_dynamic_tuning(gain=30.0, max_force=1.8, max_error=0.08, reanchor_distance=0.35)
+    start_cola()
+    print("[DynamicColaTracker] Auto setup+start executed.")
+except Exception as e:
+    print("[DynamicColaTracker] Auto start failed: " + str(e))
