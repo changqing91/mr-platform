@@ -139,7 +139,7 @@ else:
           1. 确保 Cola 在 vrPhysicsService 中注册为 kinematic 对象
           2. timer 同步位置+旋转并锁定 scale，避免瓶子变形
           3. 监听 collisionStarted / collisionStopped / collisionContinues 信号，
-             打印碰撞事件及接触点坐标，碰撞时 Cola 放大高亮
+             打印碰撞事件及接触点坐标；通过 vrdPhysicsObjectNode.setHighlightEnabled() 启用 VRED 内置碰撞高亮
         """
 
         def __init__(self):
@@ -155,31 +155,20 @@ else:
             self._kinematic_timer_connected = False
             self._cola_scale = None
             self._kinematic_offset = None
-            # 碰撞高亮（距离检测）
-            self._highlight_active = False
-            self._highlight_scale_factor = 1.15
-            self._highlight_distance = 150.0   # 场景单位（mm），可通过 set_cola_highlight_distance 调整
-            self._console_node = None
-            self._console_node_name = ""
-            # 碰撞信号连接句柄（辅助用）
+            # 碰撞信号连接句柄
             self._sig_start = None
             self._sig_stop = None
             self._sig_cont = None
 
-        def setup(self, tracker_name="tracker-2", cola_node_name="Cola", maintain_offset=False,
-                  console_node_name=""):
-            """配置 tracker → Cola kinematic 物理绑定。
-
-            console_node_name: 用于高亮检测的目标节点名（如 "Console1"）。留空则不检测。
-            """
+        def setup(self, tracker_name="tracker-2", cola_node_name="Cola", maintain_offset=False):
+            """配置 tracker → Cola kinematic 物理绑定。"""
             if self._active:
                 self.stop()
             self._tracker_name = tracker_name
             self._cola_node_name = cola_node_name
             self._maintain_offset = maintain_offset
-            self._console_node_name = console_node_name
-            print("[ColaTracker] Configured: {} -> '{}' (maintain_offset={}, console_highlight='{}')".format(
-                tracker_name, cola_node_name, maintain_offset, console_node_name))
+            print("[ColaTracker] Configured: {} -> '{}' (maintain_offset={})".format(
+                tracker_name, cola_node_name, maintain_offset))
 
         def start(self):
             """
@@ -229,6 +218,17 @@ else:
             # 确保 Cola 为 kinematic 物理对象
             self._ensure_physics_mode(colaNode)
 
+            # 开启 VRED 原生碰撞高亮（vrdPhysicsObjectNode.setHighlightEnabled）
+            try:
+                cola_phys_node = vrPhysicsService.getPhysicsObject(colaNode, True)
+                if cola_phys_node:
+                    cola_phys_node.setHighlightEnabled(True)
+                    print("[ColaTracker] Collision highlighting enabled on Cola physics object")
+                else:
+                    print("[ColaTracker] WARNING: could not get Cola physics object for highlight")
+            except Exception as e:
+                print("[ColaTracker] WARNING: setHighlightEnabled failed: " + str(e))
+
             self._tracker = tracker
             self._cola_node = colaNode
 
@@ -257,14 +257,21 @@ else:
 
             self._stop_kinematic_follow()
 
+            # 关闭高亮
+            try:
+                if self._cola_node:
+                    cola_phys_node = vrPhysicsService.getPhysicsObject(self._cola_node, True)
+                    if cola_phys_node:
+                        cola_phys_node.setHighlightEnabled(False)
+            except Exception:
+                pass
+
             # 断开碰撞信号
             self._disconnect_collision_signals()
 
             self._active = False
-            self._highlight_active = False
             self._tracker = None
             self._cola_node = None
-            self._console_node = None
             self._cola_scale = None
             print("[ColaTracker] Stopped: {} -> '{}'".format(
                 self._tracker_name, self._cola_node_name))
@@ -323,20 +330,6 @@ else:
             except Exception:
                 self._cola_scale = None
 
-            # 解析高亮目标节点
-            self._console_node = None
-            if self._console_node_name:
-                try:
-                    self._console_node = findNode(self._console_node_name)
-                    if self._console_node:
-                        print("[ColaTracker] Highlight target: '{}' (distance threshold={})".format(
-                            self._console_node_name, self._highlight_distance))
-                    else:
-                        print("[ColaTracker] WARNING: highlight target node not found: '{}'".format(
-                            self._console_node_name))
-                except Exception as e:
-                    print("[ColaTracker] WARNING: error finding highlight target: " + str(e))
-
             self._kinematic_offset = None
             if self._maintain_offset:
                 try:
@@ -388,25 +381,12 @@ else:
                 setTransformNodeTranslation(self._cola_node, tx, ty, tz, True)
                 setTransformNodeRotation(self._cola_node, r.x(), r.y(), r.z())
 
-                # 距离检测高亮（不依赖碰撞信号，kinematic/static 对均有效）
-                if self._console_node is not None:
-                    try:
-                        c = getTransformNodeTranslation(self._console_node, True)
-                        dist = max(abs(tx - c.x()), abs(ty - c.y()), abs(tz - c.z()))
-                        prev = self._highlight_active
-                        self._highlight_active = dist < self._highlight_distance
-                        if self._highlight_active != prev:
-                            print("[ColaTracker] Highlight {} (dist={:.1f})".format(
-                                "ON" if self._highlight_active else "OFF", dist))
-                    except Exception:
-                        pass
-
-                # 每帧应用 scale（正常锁定 or 高亮放大）
-                sx = self._cola_scale.x() if self._cola_scale is not None else 1.0
-                sy = self._cola_scale.y() if self._cola_scale is not None else 1.0
-                sz = self._cola_scale.z() if self._cola_scale is not None else 1.0
-                f = self._highlight_scale_factor if self._highlight_active else 1.0
-                setTransformNodeScale(self._cola_node, sx * f, sy * f, sz * f)
+                # 每帧恢复 Cola 原始缩放，防止 tracker 缩放链条污染
+                if self._cola_scale is not None:
+                    setTransformNodeScale(self._cola_node,
+                                          self._cola_scale.x(),
+                                          self._cola_scale.y(),
+                                          self._cola_scale.z())
             except Exception as e:
                 print("[ColaTracker] WARNING kinematic update failed: " + str(e))
 
@@ -425,13 +405,12 @@ else:
                 if cola_name not in (n1, n2):
                     return
                 other = n2 if n1 == cola_name else n1
-                self._highlight_active = True
                 pts = info.getContactPoints()
                 pt_str = ""
                 if pts:
                     p = pts[0]
                     pt_str = " | 接触点: ({:.2f}, {:.2f}, {:.2f})".format(p.x(), p.y(), p.z())
-                print("[ColaTracker] 碰撞开始: Cola <-> '{}'{} ({} 接触点) [HIGHLIGHT ON]".format(
+                print("[ColaTracker] 碰撞开始: Cola <-> '{}'{} ({} 接触点)".format(
                     other, pt_str, len(pts)))
 
             def on_collision_stopped(info):
@@ -440,15 +419,13 @@ else:
                 if cola_name not in (n1, n2):
                     return
                 other = n2 if n1 == cola_name else n1
-                self._highlight_active = False
-                print("[ColaTracker] 碰撞结束: Cola <-> '{}' [HIGHLIGHT OFF]".format(other))
+                print("[ColaTracker] 碰撞结束: Cola <-> '{}'".format(other))
 
             def on_collision_continues(info):
                 n1 = info.getCollidingRootNode1().getName()
                 n2 = info.getCollidingRootNode2().getName()
                 if cola_name not in (n1, n2):
                     return
-                self._highlight_active = True
                 other = n2 if n1 == cola_name else n1
                 pts = info.getContactPoints()
                 if pts:
@@ -534,8 +511,7 @@ def setup_transform(tracker_name, node_name, maintain_offset=False):
     global _transform_tracker
     _transform_tracker.setup(tracker_name, node_name, maintain_offset)
 
-def setup_cola(tracker_name="tracker-2", cola_node_name="Cola", maintain_offset=False,
-               console_node_name=""):
+def setup_cola(tracker_name="tracker-2", cola_node_name="Cola", maintain_offset=False):
     """
     配置 tracker-2 → Cola kinematic 物理绑定。
 
@@ -543,31 +519,9 @@ def setup_cola(tracker_name="tracker-2", cola_node_name="Cola", maintain_offset=
         tracker_name (str): tracker 设备名，默认 "tracker-2"
         cola_node_name (str): Cola 节点名，默认 "Cola"
         maintain_offset (bool): True=保留初始偏移，False=直接吸附
-        console_node_name (str): 高亮检测目标节点名（如 "Console1"），留空则不检测
     """
     global _cola_tracker
-    _cola_tracker.setup(tracker_name, cola_node_name, maintain_offset, console_node_name)
-
-def set_cola_highlight_distance(distance):
-    """设置高亮距离阈值（场景单位，默认 150）。Cola 与目标节点中心距离小于此值时触发高亮。"""
-    global _cola_tracker
-    try:
-        _cola_tracker._highlight_distance = float(distance)
-        print("[ColaTracker] Highlight distance threshold set to {}".format(distance))
-    except Exception:
-        print("[ColaTracker] WARNING: invalid distance={}".format(distance))
-
-def set_cola_highlight_scale(factor):
-    """
-    设置碰撞高亮时 Cola 的缩放倍数，默认 1.15（放大 15%）。
-    factor=1.0 等效于关闭高亮缩放。
-    """
-    global _cola_tracker
-    try:
-        _cola_tracker._highlight_scale_factor = float(factor)
-        print("[ColaTracker] Highlight scale factor set to {}".format(factor))
-    except Exception:
-        print("[ColaTracker] WARNING: invalid factor={}".format(factor))
+    _cola_tracker.setup(tracker_name, cola_node_name, maintain_offset)
 
 def start_transform():
     """激活 tracker-1 → Transform3D 追踪。"""
@@ -604,14 +558,3 @@ def physics_status():
     global _transform_tracker, _cola_tracker
     _transform_tracker.status()
     _cola_tracker.status()
-
-# ======================================================================
-# 脚本加载时自动执行步骤 2、3、4
-# ======================================================================
-try:
-    setup_cola("tracker-2", "Cola", maintain_offset=False, console_node_name="Console1")
-    set_cola_highlight_distance(150)
-    start_cola()
-    print("[physics_tracker] Auto setup+start complete.")
-except Exception as _e:
-    print("[physics_tracker] Auto start failed: " + str(_e))
