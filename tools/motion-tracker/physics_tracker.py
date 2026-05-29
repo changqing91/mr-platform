@@ -604,3 +604,14 @@ def physics_status():
     global _transform_tracker, _cola_tracker
     _transform_tracker.status()
     _cola_tracker.status()
+
+# ======================================================================
+# 脚本加载时自动执行步骤 2、3、4
+# ======================================================================
+try:
+    setup_cola("tracker-2", "Cola", maintain_offset=False, console_node_name="Console1")
+    set_cola_highlight_distance(150)
+    start_cola()
+    print("[physics_tracker] Auto setup+start complete.")
+except Exception as _e:
+    print("[physics_tracker] Auto start failed: " + str(_e))
