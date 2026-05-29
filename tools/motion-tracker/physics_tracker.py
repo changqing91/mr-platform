@@ -175,6 +175,9 @@ else:
             self._kinematic_offset = None
             self._dynamic_gain = 18.0
             self._dynamic_max_step = 0.06
+            # 碰撞高亮
+            self._highlight_active = False
+            self._highlight_scale_factor = 1.15
             # 碰撞信号连接句柄
             self._sig_start = None
             self._sig_stop = None
@@ -288,6 +291,7 @@ else:
             self._disconnect_collision_signals()
 
             self._active = False
+            self._highlight_active = False
             self._tracker = None
             self._cola_node = None
             self._cola_physics_obj = None
@@ -414,12 +418,13 @@ else:
                 setTransformNodeTranslation(self._cola_node, tx, ty, tz, True)
                 setTransformNodeRotation(self._cola_node, r.x(), r.y(), r.z())
 
-                # 每帧恢复 Cola 原始缩放，防止 tracker 缩放链条污染
+                # 每帧恢复 Cola 原始缩放；碰撞时放大高亮
                 if self._cola_scale is not None:
+                    f = self._highlight_scale_factor if self._highlight_active else 1.0
                     setTransformNodeScale(self._cola_node,
-                                          self._cola_scale.x(),
-                                          self._cola_scale.y(),
-                                          self._cola_scale.z())
+                                          self._cola_scale.x() * f,
+                                          self._cola_scale.y() * f,
+                                          self._cola_scale.z() * f)
             except Exception as e:
                 print("[ColaTracker] WARNING kinematic update failed: " + str(e))
 
@@ -515,12 +520,13 @@ else:
                 if cola_name not in (n1, n2):
                     return
                 other = n2 if n1 == cola_name else n1
+                self._highlight_active = True
                 pts = info.getContactPoints()
                 pt_str = ""
                 if pts:
                     p = pts[0]
                     pt_str = " | 接触点: ({:.2f}, {:.2f}, {:.2f})".format(p.x(), p.y(), p.z())
-                print("[ColaTracker] 碰撞开始: Cola <-> '{}'{} ({} 接触点)".format(
+                print("[ColaTracker] 碰撞开始: Cola <-> '{}'{} ({} 接触点) [HIGHLIGHT ON]".format(
                     other, pt_str, len(pts)))
 
             def on_collision_stopped(info):
@@ -529,13 +535,15 @@ else:
                 if cola_name not in (n1, n2):
                     return
                 other = n2 if n1 == cola_name else n1
-                print("[ColaTracker] 碰撞结束: Cola <-> '{}'".format(other))
+                self._highlight_active = False
+                print("[ColaTracker] 碰撞结束: Cola <-> '{}' [HIGHLIGHT OFF]".format(other))
 
             def on_collision_continues(info):
                 n1 = info.getCollidingRootNode1().getName()
                 n2 = info.getCollidingRootNode2().getName()
                 if cola_name not in (n1, n2):
                     return
+                self._highlight_active = True
                 other = n2 if n1 == cola_name else n1
                 pts = info.getContactPoints()
                 if pts:
@@ -664,6 +672,18 @@ def set_cola_dynamic_tuning(gain=None, max_step=None):
             print("[ColaTracker] WARNING: invalid max_step={}".format(max_step))
     print("[ColaTracker] Dynamic tuning: gain={}, max_step={}".format(
         _cola_tracker._dynamic_gain, _cola_tracker._dynamic_max_step))
+
+def set_cola_highlight_scale(factor):
+    """
+    设置碰撞高亮时 Cola 的缩放倍数，默认 1.15（放大 15%）。
+    factor=1.0 等效于关闭高亮缩放。
+    """
+    global _cola_tracker
+    try:
+        _cola_tracker._highlight_scale_factor = float(factor)
+        print("[ColaTracker] Highlight scale factor set to {}".format(factor))
+    except Exception:
+        print("[ColaTracker] WARNING: invalid factor={}".format(factor))
 
 def start_transform():
     """激活 tracker-1 → Transform3D 追踪。"""
