@@ -45,16 +45,22 @@ else:
     # ======================================================================
     class TransformTracker:
         """
-        通过 ParentConstraint 将指定 tracker 设备绑定到任意 Transform3D 场景节点。
-        与 motion_tracker.py 中的单条绑定逻辑等价，专用于此脚本。
+        通过 vrTimer 将指定 tracker 设备的位姿（位置+旋转）同步到任意 Transform3D 场景节点。
+        每帧同步并锁定目标节点 scale，防止 tracker scale 链条污染。
+        与 ColaTracker 保持一致的 kinematic timer 驱动方式。
         """
 
         def __init__(self):
             self._tracker_name = None
             self._node_name = None
-            self._constraint = None
             self._active = False
             self._maintain_offset = False
+            self._tracker = None
+            self._node = None
+            self._node_scale = None
+            self._node_offset = None
+            self._timer = vrTimer()
+            self._timer_connected = False
 
         def setup(self, tracker_name, node_name, maintain_offset=False):
             """配置 tracker → 节点绑定。如已激活先停止再更新。"""
@@ -67,7 +73,7 @@ else:
                 tracker_name, node_name, maintain_offset))
 
         def start(self):
-            """激活约束，开始位置/旋转追踪。"""
+            """激活 timer 追踪，开始位置/旋转同步。"""
             if self._active:
                 print("[TransformTracker] Already active.")
                 return
@@ -75,46 +81,67 @@ else:
                 print("[TransformTracker] Not configured. Call setup(tracker_name, node_name) first.")
                 return
 
-            tracker = None
             try:
-                tracker = vrDeviceService.getVRDevice(self._tracker_name)
-                if not tracker:
+                self._tracker = vrDeviceService.getVRDevice(self._tracker_name)
+                if not self._tracker:
                     print("[TransformTracker] WARNING: tracker not found: " + self._tracker_name)
                     return
             except Exception as e:
                 print("[TransformTracker] ERROR getting tracker: " + str(e))
                 return
 
-            node = None
             try:
-                node = findNode(self._node_name)
-                if not node:
+                self._node = findNode(self._node_name)
+                if not self._node:
                     print("[TransformTracker] WARNING: node not found: " + self._node_name)
                     return
             except Exception as e:
                 print("[TransformTracker] ERROR finding node: " + str(e))
                 return
 
+            # 记录节点原始 scale，每帧恢复
             try:
-                self._constraint = vrConstraintService.createParentConstraint(
-                    [tracker.getNode()], node, self._maintain_offset)
-                self._active = True
-                print("[TransformTracker] Started: {} -> '{}'".format(
-                    self._tracker_name, self._node_name))
-            except Exception as e:
-                print("[TransformTracker] ERROR creating constraint: " + str(e))
+                self._node_scale = getTransformNodeScale(self._node)
+            except Exception:
+                self._node_scale = None
+
+            # maintain_offset：记录 tracker→节点 的初始位置偏移
+            self._node_offset = None
+            if self._maintain_offset:
+                try:
+                    tracker_node = self._tracker.getNode()
+                    t_tracker = getTransformNodeTranslation(tracker_node, True)
+                    t_node = getTransformNodeTranslation(self._node, True)
+                    self._node_offset = Vec3f(
+                        t_node.x() - t_tracker.x(),
+                        t_node.y() - t_tracker.y(),
+                        t_node.z() - t_tracker.z())
+                    print("[TransformTracker] maintain_offset enabled")
+                except Exception as e:
+                    print("[TransformTracker] WARNING: failed to compute offset: " + str(e))
+
+            if not self._timer_connected:
+                self._timer.connect(self._update)
+                self._timer_connected = True
+
+            self._timer.setActive(1)
+            self._active = True
+            print("[TransformTracker] Started: {} -> '{}' (timer, scale locked)".format(
+                self._tracker_name, self._node_name))
 
         def stop(self):
-            """解除约束，节点保持最后位置。"""
+            """停止 timer，节点保持最后位置。"""
             if not self._active:
                 return
             try:
-                if self._constraint is not None:
-                    vrConstraintService.deleteConstraint(self._constraint)
-                    self._constraint = None
-            except Exception as e:
-                print("[TransformTracker] WARNING deleting constraint: " + str(e))
+                self._timer.setActive(0)
+            except Exception:
+                pass
             self._active = False
+            self._tracker = None
+            self._node = None
+            self._node_scale = None
+            self._node_offset = None
             print("[TransformTracker] Stopped: {} -> '{}'".format(
                 self._tracker_name, self._node_name))
 
@@ -129,6 +156,36 @@ else:
             cfg = "{} -> '{}'".format(self._tracker_name, self._node_name) \
                 if self._tracker_name else "(not configured)"
             print("[TransformTracker] {} [{}]".format(cfg, state))
+
+        def _update(self):
+            if not self._active:
+                return
+            if not self._tracker or not self._node:
+                return
+            try:
+                tracker_node = self._tracker.getNode()
+                t = getTransformNodeTranslation(tracker_node, True)
+                r = getTransformNodeRotation(tracker_node)
+
+                tx = t.x()
+                ty = t.y()
+                tz = t.z()
+                if self._node_offset is not None:
+                    tx += self._node_offset.x()
+                    ty += self._node_offset.y()
+                    tz += self._node_offset.z()
+
+                setTransformNodeTranslation(self._node, tx, ty, tz, True)
+                setTransformNodeRotation(self._node, r.x(), r.y(), r.z())
+
+                # 每帧恢复原始 scale，防止 tracker scale 链条污染
+                if self._node_scale is not None:
+                    setTransformNodeScale(self._node,
+                                         self._node_scale.x(),
+                                         self._node_scale.y(),
+                                         self._node_scale.z())
+            except Exception as e:
+                print("[TransformTracker] WARNING update failed: " + str(e))
 
     # ======================================================================
     # ColaTracker — tracker-2 → Cola 物理运动学对象 + 碰撞检测
