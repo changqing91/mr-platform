@@ -1,44 +1,54 @@
 # ======================================================================
-# VRED Kinematic Tracker (VRED 2027 API)
+# VRED Physics Tracker (Refactored for VRED 2027 API)
 #
 # Goal:
-#   tracker-2 (locator) kinematically drives Cola
-#   Cola collides with Console1 with visual highlight feedback
+#   tracker-2 (VR tracker) controls Cola (dynamic physics object)
+#   Cola collides with Console1 (static physics object)
 #
 # Assumption:
 #   Cola and Console1 are already configured in VRED Physics Editor.
 # ======================================================================
 
+try:
+    from PySide6.QtGui import QVector3D
+except ImportError:
+    from PySide2.QtGui import QVector3D
 
-class KinematicColaTracker:
+
+class DynamicColaTracker:
     """
-    Kinematically move Cola to follow tracker-2.
-    No controller input is used.
+    Drive a dynamic physics object (Cola) toward tracker-2 using force control.
+    Collision with Console1 is reported via physics callbacks.
     """
 
     def __init__(self):
         self._tracker_name = "tracker-2"
         self._cola_node_name = "Cola"
         self._console_node_name = "Console1"
-        self._maintain_offset = True  # preserve initial offset between tracker and Cola
 
         self._tracker = None
         self._cola_node = None
         self._console_node = None
+        self._cola_physics = None
 
         self._active = False
 
-        # ParentConstraint that drives Cola → tracker
-        self._constraint = None
+        self._timer = vrTimer()
+        self._timer_connected = False
 
-        # Kept for API compatibility (not used for tracking)
-        self._max_step = 40.0
+        # Force follower tuning
+        self._gain = 22.0
+        self._damping = 5.0
+        self._max_force = 1.6
+        self._max_error = 0.12
+        self._reanchor_distance = 0.35
+        self._deadzone = 0.004
 
-        # Collision highlight state
-        self._highlight_active = False
-        self._cola_scale_origin = None
-        self._console_scale_origin = None
-        self._highlight_scale_factor = 1.08
+        # Grab model: keep an offset between tracker and cola center while grabbing.
+        self._grab_active = False
+        self._grab_offset = None
+        self._prev_cola_pos = None
+        self._velocity_dt = 1.0 / 90.0
 
         self._sig_start = None
         self._sig_stop = None
@@ -47,99 +57,233 @@ class KinematicColaTracker:
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
-    def setup(self, tracker_name="tracker-2", cola_node_name="Cola",
-              maintain_offset=False, console_node_name="Console1"):
+    def setup(self, tracker_name="tracker-2", cola_node_name="Cola", console_node_name="Console1"):
         if self._active:
             self.stop()
 
         self._tracker_name = tracker_name
         self._cola_node_name = cola_node_name
         self._console_node_name = console_node_name
-        self._maintain_offset = bool(maintain_offset)
 
-        print("[KinematicColaTracker] Configured: {} -> '{}' (console='{}', maintain_offset={})".format(
-            self._tracker_name, self._cola_node_name, self._console_node_name, self._maintain_offset))
+        print("[DynamicColaTracker] Configured: {} -> '{}' (target static: '{}')".format(
+            self._tracker_name, self._cola_node_name, self._console_node_name))
 
-    def set_tuning(self, max_step=None, highlight_scale_factor=None):
-        if max_step is not None:
+    def set_tuning(self, gain=None, damping=None, max_force=None, max_error=None,
+                   reanchor_distance=None, deadzone=None):
+        if gain is not None:
             try:
-                self._max_step = float(max_step)
+                self._gain = float(gain)
             except Exception:
-                print("[KinematicColaTracker] WARNING: invalid max_step={}".format(max_step))
-
-        if highlight_scale_factor is not None:
+                print("[DynamicColaTracker] WARNING: invalid gain={}".format(gain))
+        if damping is not None:
             try:
-                self._highlight_scale_factor = float(highlight_scale_factor)
+                self._damping = float(damping)
             except Exception:
-                print("[KinematicColaTracker] WARNING: invalid highlight_scale_factor={}".format(highlight_scale_factor))
+                print("[DynamicColaTracker] WARNING: invalid damping={}".format(damping))
+        if max_force is not None:
+            try:
+                self._max_force = float(max_force)
+            except Exception:
+                print("[DynamicColaTracker] WARNING: invalid max_force={}".format(max_force))
+        if max_error is not None:
+            try:
+                self._max_error = float(max_error)
+            except Exception:
+                print("[DynamicColaTracker] WARNING: invalid max_error={}".format(max_error))
+        if reanchor_distance is not None:
+            try:
+                self._reanchor_distance = float(reanchor_distance)
+            except Exception:
+                print("[DynamicColaTracker] WARNING: invalid reanchor_distance={}".format(reanchor_distance))
+        if deadzone is not None:
+            try:
+                self._deadzone = float(deadzone)
+            except Exception:
+                print("[DynamicColaTracker] WARNING: invalid deadzone={}".format(deadzone))
 
-        print("[KinematicColaTracker] Tuning: max_step={}, highlight_scale_factor={}".format(
-            self._max_step, self._highlight_scale_factor))
+        print("[DynamicColaTracker] Tuning: gain={}, damping={}, max_force={}, max_error={}, reanchor_distance={}, deadzone={}".format(
+            self._gain, self._damping, self._max_force, self._max_error, self._reanchor_distance, self._deadzone))
 
     def start(self):
         if self._active:
-            print("[KinematicColaTracker] Already active")
+            print("[DynamicColaTracker] Already active")
             return
+
+        self._configure_vr_hand_teleport_only()
 
         if not self._resolve_scene_objects():
             return
 
-        # Activate physics service for collision detection.
         try:
             if not vrPhysicsService.isActive():
                 vrPhysicsService.setActive(True)
-                print("[KinematicColaTracker] Physics service activated")
+                print("[DynamicColaTracker] Physics service activated")
             try:
                 vrPhysicsService.setPaused(False)
             except Exception:
                 pass
         except Exception as e:
-            print("[KinematicColaTracker] WARNING: physics service issue: " + str(e))
-            # Continue even if physics fails — constraint tracking still works.
-
-        # Create a ParentConstraint: Cola follows tracker node.
-        # maintain_offset=True preserves the initial position difference so Cola
-        # does not snap to the tracker's exact origin.
-        try:
-            tracker_node = self._tracker.getNode()
-            self._constraint = vrConstraintService.createParentConstraint(
-                [tracker_node], self._cola_node, self._maintain_offset)
-            if not self._constraint:
-                print("[KinematicColaTracker] ERROR: createParentConstraint returned None")
-                return
-            print("[KinematicColaTracker] ParentConstraint created (maintain_offset={})".format(
-                self._maintain_offset))
-        except Exception as e:
-            print("[KinematicColaTracker] ERROR creating ParentConstraint: " + str(e))
+            print("[DynamicColaTracker] ERROR activating physics service: " + str(e))
             return
+
+        if not self._validate_physics_editor_roles():
+            return
+
+        try:
+            self._cola_physics = vrPhysicsService.getPhysicsObject(self._cola_node, True)
+            if not self._cola_physics:
+                print("[DynamicColaTracker] ERROR: failed to get Cola physics object")
+                return
+        except Exception as e:
+            print("[DynamicColaTracker] ERROR: getPhysicsObject failed: " + str(e))
+            return
+
+        try:
+            # Keep purely physical behavior: apply bounded force/impulse without setting transforms.
+            self._cola_physics.setForceMode(vrPhysicsTypes.ForceMode.VelocityChange)
+            self._cola_physics.setForceWorldFrame(True)
+            self._cola_physics.setForceEnabled(False)
+            # Keep gravity on so release naturally drops like Shift+Alt drag test.
+            self._cola_physics.setGravityEnabled(True)
+            # Moderate damping makes handheld motion stable but still physical.
+            self._cola_physics.setLinearDamping(1.2)
+            self._cola_physics.setAngularDamping(0.8)
+            self._cola_physics.setForce(QVector3D(0.0, 0.0, 0.0))
+        except Exception as e:
+            print("[DynamicColaTracker] WARNING: force setup failed: " + str(e))
+
+        # Default behavior: enter grab mode immediately after start.
+        self.begin_grab()
+
+        if not self._timer_connected:
+            self._timer.connect(self._update)
+            self._timer_connected = True
+        self._timer.setActive(1)
 
         self._connect_collision_signals()
 
         self._active = True
-        print("[KinematicColaTracker] Started: '{}' follows '{}' via ParentConstraint".format(
-            self._cola_node_name, self._tracker_name))
+        print("[DynamicColaTracker] Started: tracker '{}' drives dynamic '{}'".format(
+            self._tracker_name, self._cola_node_name))
 
     def stop(self):
         if not self._active:
             return
 
-        # Remove the ParentConstraint.
-        if self._constraint is not None:
-            try:
-                vrConstraintService.removeConstraint(self._constraint)
-            except Exception:
-                pass
-            self._constraint = None
+        try:
+            self._timer.setActive(0)
+        except Exception:
+            pass
 
-        self._set_collision_highlight(False)
+        try:
+            if self._cola_physics:
+                self._cola_physics.setForce(QVector3D(0.0, 0.0, 0.0))
+                self._cola_physics.setForceEnabled(False)
+                # Restore gravity for normal simulation after stopping follow.
+                try:
+                    self._cola_physics.setGravityEnabled(True)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
         self._disconnect_collision_signals()
 
         self._active = False
         self._tracker = None
         self._cola_node = None
         self._console_node = None
+        self._cola_physics = None
+        self._grab_active = False
+        self._grab_offset = None
+        self._prev_cola_pos = None
 
-        print("[KinematicColaTracker] Stopped")
+        print("[DynamicColaTracker] Stopped")
+
+    def _configure_vr_hand_teleport_only(self):
+        """
+        VR mode preference:
+          - hide controller models
+          - keep hand rendering
+          - keep Teleport/default interactions available
+        """
+        try:
+            # Keep built-in interactions alive (Teleport depends on this in most setups).
+            vrImmersiveInteractionService.setDefaultInteractionsActive(1)
+        except Exception:
+            pass
+
+        try:
+            teleport = vrDeviceService.getInteraction("Teleport")
+            if teleport:
+                try:
+                    teleport.setActive(1)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        # Keep hand visual mode (if API provides a specific hand-only mode, use it).
+        hand_mode = None
+        for mode_name in ("Visualization_Hand", "Visualization_HandOnly", "Visualization_OnlyHand"):
+            if mode_name in globals():
+                hand_mode = globals()[mode_name]
+                break
+
+        for dev_name in ("left-controller", "right-controller"):
+            try:
+                dev = vrDeviceService.getVRDevice(dev_name)
+                if not dev:
+                    continue
+                if hand_mode is not None:
+                    try:
+                        dev.setVisualizationMode(hand_mode)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+        # Hide controller meshes explicitly; hand meshes stay available.
+        for node_name in ("MRcontrollerLeft", "MRcontrollerRight"):
+            try:
+                node = findNode(node_name)
+                if node:
+                    node.setActive(0)
+            except Exception:
+                pass
+
+        print("[DynamicColaTracker] VR mode set: hand + teleport (controllers hidden)")
+
+    def begin_grab(self):
+        if not self._active or not self._tracker or not self._cola_node or not self._cola_physics:
+            print("[DynamicColaTracker] begin_grab ignored (not active)")
+            return
+
+        try:
+            tx, ty, tz = self._tracker_scene_position()
+            cur = getTransformNodeTranslation(self._cola_node, True)
+            self._grab_offset = QVector3D(cur.x() - tx, cur.y() - ty, cur.z() - tz)
+            self._prev_cola_pos = QVector3D(cur.x(), cur.y(), cur.z())
+            self._grab_active = True
+            self._cola_physics.setForceEnabled(True)
+            self._cola_physics.setForce(QVector3D(0.0, 0.0, 0.0))
+            print("[DynamicColaTracker] Grab started")
+        except Exception as e:
+            print("[DynamicColaTracker] WARNING: begin_grab failed: " + str(e))
+
+    def release_grab(self):
+        if not self._active or not self._cola_physics:
+            return
+
+        try:
+            self._grab_active = False
+            self._grab_offset = None
+            self._prev_cola_pos = None
+            self._cola_physics.setForce(QVector3D(0.0, 0.0, 0.0))
+            self._cola_physics.setForceEnabled(False)
+            print("[DynamicColaTracker] Grab released (Cola falls naturally)")
+        except Exception as e:
+            print("[DynamicColaTracker] WARNING: release_grab failed: " + str(e))
 
     def toggle(self):
         if self._active:
@@ -148,13 +292,16 @@ class KinematicColaTracker:
             self.start()
 
     def status(self):
-        print("[KinematicColaTracker] state={} tracker='{}' cola='{}' console='{}' tuning(max_step={}, highlight_scale_factor={})".format(
+        print("[DynamicColaTracker] state={} grab={} tracker='{}' cola='{}' console='{}' tuning(gain={}, damping={}, max_force={}, max_error={})".format(
             "ACTIVE" if self._active else "stopped",
+            self._grab_active,
             self._tracker_name,
             self._cola_node_name,
             self._console_node_name,
-            self._max_step,
-            self._highlight_scale_factor,
+            self._gain,
+            self._damping,
+            self._max_force,
+            self._max_error,
         ))
 
     # ------------------------------------------------------------------
@@ -164,88 +311,136 @@ class KinematicColaTracker:
         try:
             self._tracker = vrDeviceService.getVRDevice(self._tracker_name)
             if not self._tracker:
-                print("[KinematicColaTracker] ERROR: tracker not found: " + self._tracker_name)
+                print("[DynamicColaTracker] ERROR: tracker not found: " + self._tracker_name)
                 return False
         except Exception as e:
-            print("[KinematicColaTracker] ERROR getting tracker: " + str(e))
+            print("[DynamicColaTracker] ERROR getting tracker: " + str(e))
             return False
 
         try:
             self._cola_node = findNode(self._cola_node_name)
             if not self._cola_node:
-                print("[KinematicColaTracker] ERROR: Cola node not found: " + self._cola_node_name)
+                print("[DynamicColaTracker] ERROR: Cola node not found: " + self._cola_node_name)
                 return False
         except Exception as e:
-            print("[KinematicColaTracker] ERROR finding Cola node: " + str(e))
+            print("[DynamicColaTracker] ERROR finding Cola node: " + str(e))
             return False
 
         try:
             self._console_node = findNode(self._console_node_name)
             if not self._console_node:
-                print("[KinematicColaTracker] ERROR: Console node not found: " + self._console_node_name)
+                print("[DynamicColaTracker] ERROR: Console node not found: " + self._console_node_name)
                 return False
         except Exception as e:
-            print("[KinematicColaTracker] ERROR finding Console node: " + str(e))
+            print("[DynamicColaTracker] ERROR finding Console node: " + str(e))
             return False
 
         return True
 
-    def _try_get_scale_xyz(self, node):
+    def _validate_physics_editor_roles(self):
+        """
+        Require physics roles to be configured in Physics Editor:
+          - Cola must be Dynamic
+          - Console1 must be Static
+        """
         try:
-            s = node.getScale()
-            return (s.x(), s.y(), s.z())
-        except Exception:
-            return None
-
-    def _try_set_scale_xyz(self, node, sx, sy, sz):
-        try:
-            node.setScale(sx, sy, sz)
-            return True
-        except Exception:
+            dyn_names = {n.getName() for n in vrPhysicsService.getDynamicObjects()}
+            static_names = {n.getName() for n in vrPhysicsService.getStaticObjects()}
+        except Exception as e:
+            print("[DynamicColaTracker] ERROR reading physics objects: " + str(e))
             return False
 
-    def _set_collision_highlight(self, enable):
-        if not self._cola_node or not self._console_node:
+        cola_name = self._cola_node.getName()
+        console_name = self._console_node.getName()
+
+        if cola_name not in dyn_names:
+            print("[DynamicColaTracker] ERROR: '{}' is not Dynamic in Physics Editor".format(cola_name))
+            print("[DynamicColaTracker] Hint: set '{}' collider type to Dynamic in Physics Editor".format(cola_name))
+            return False
+
+        if console_name not in static_names:
+            print("[DynamicColaTracker] ERROR: '{}' is not Static in Physics Editor".format(console_name))
+            print("[DynamicColaTracker] Hint: set '{}' collider type to Static in Physics Editor".format(console_name))
+            return False
+
+        return True
+
+    def _tracker_scene_position(self):
+        """
+        Convert tracker tracking-space position (Y-up) to scene-space (Z-up):
+          scene_x = -track_x
+          scene_y = -track_z
+          scene_z =  track_y
+        """
+        col = self._tracker.getTrackingMatrix().column(3)
+        return -col.x(), -col.z(), col.y()
+
+    def _update(self):
+        if not self._active:
+            return
+        if not self._tracker or not self._cola_node or not self._cola_physics:
+            return
+        if not self._grab_active or self._grab_offset is None:
             return
 
-        if enable and self._highlight_active:
-            return
-        if (not enable) and (not self._highlight_active):
-            return
+        try:
+            tx, ty, tz = self._tracker_scene_position()
+            cur = getTransformNodeTranslation(self._cola_node, True)
 
-        if enable:
-            if self._cola_scale_origin is None:
-                self._cola_scale_origin = self._try_get_scale_xyz(self._cola_node)
-            if self._console_scale_origin is None:
-                self._console_scale_origin = self._try_get_scale_xyz(self._console_node)
+            # If tracker origin suddenly jumps, rebind grab offset to current pose.
+            err_now_x = (tx + self._grab_offset.x()) - cur.x()
+            err_now_y = (ty + self._grab_offset.y()) - cur.y()
+            err_now_z = (tz + self._grab_offset.z()) - cur.z()
+            if abs(err_now_x) > self._reanchor_distance or abs(err_now_y) > self._reanchor_distance or abs(err_now_z) > self._reanchor_distance:
+                self._grab_offset = QVector3D(cur.x() - tx, cur.y() - ty, cur.z() - tz)
+                self._prev_cola_pos = QVector3D(cur.x(), cur.y(), cur.z())
+                self._cola_physics.setForce(QVector3D(0.0, 0.0, 0.0))
+                return
 
-            if self._cola_scale_origin is not None:
-                self._try_set_scale_xyz(self._cola_node,
-                                        self._cola_scale_origin[0] * self._highlight_scale_factor,
-                                        self._cola_scale_origin[1] * self._highlight_scale_factor,
-                                        self._cola_scale_origin[2] * self._highlight_scale_factor)
-            if self._console_scale_origin is not None:
-                self._try_set_scale_xyz(self._console_node,
-                                        self._console_scale_origin[0] * self._highlight_scale_factor,
-                                        self._console_scale_origin[1] * self._highlight_scale_factor,
-                                        self._console_scale_origin[2] * self._highlight_scale_factor)
+            # Grab target keeps the initial tracker->cola offset.
+            tx = tx + self._grab_offset.x()
+            ty = ty + self._grab_offset.y()
+            tz = tz + self._grab_offset.z()
 
-            self._highlight_active = True
-            print("[KinematicColaTracker] Collision highlighting ON")
-        else:
-            if self._cola_scale_origin is not None:
-                self._try_set_scale_xyz(self._cola_node,
-                                        self._cola_scale_origin[0],
-                                        self._cola_scale_origin[1],
-                                        self._cola_scale_origin[2])
-            if self._console_scale_origin is not None:
-                self._try_set_scale_xyz(self._console_node,
-                                        self._console_scale_origin[0],
-                                        self._console_scale_origin[1],
-                                        self._console_scale_origin[2])
+            dx = tx - cur.x()
+            dy = ty - cur.y()
+            dz = tz - cur.z()
 
-            self._highlight_active = False
-            print("[KinematicColaTracker] Collision highlighting OFF")
+            # Deadzone removes tiny hand jitter.
+            if abs(dx) < self._deadzone:
+                dx = 0.0
+            if abs(dy) < self._deadzone:
+                dy = 0.0
+            if abs(dz) < self._deadzone:
+                dz = 0.0
+
+            # Limit per-axis error to avoid unstable force spikes.
+            dx = max(min(dx, self._max_error), -self._max_error)
+            dy = max(min(dy, self._max_error), -self._max_error)
+            dz = max(min(dz, self._max_error), -self._max_error)
+
+            # Estimate velocity from position delta for damping (no transform writes).
+            vx = 0.0
+            vy = 0.0
+            vz = 0.0
+            if self._prev_cola_pos is not None and self._velocity_dt > 0.0:
+                vx = (cur.x() - self._prev_cola_pos.x()) / self._velocity_dt
+                vy = (cur.y() - self._prev_cola_pos.y()) / self._velocity_dt
+                vz = (cur.z() - self._prev_cola_pos.z()) / self._velocity_dt
+
+            fx = dx * self._gain - vx * self._damping
+            fy = dy * self._gain - vy * self._damping
+            fz = dz * self._gain - vz * self._damping
+
+            # Cap per-axis force for numerical stability.
+            fx = max(min(fx, self._max_force), -self._max_force)
+            fy = max(min(fy, self._max_force), -self._max_force)
+            fz = max(min(fz, self._max_force), -self._max_force)
+
+            self._cola_physics.setForce(QVector3D(fx, fy, fz))
+            self._prev_cola_pos = QVector3D(cur.x(), cur.y(), cur.z())
+        except Exception as e:
+            print("[DynamicColaTracker] WARNING update failed: " + str(e))
 
     def _connect_collision_signals(self):
         self._disconnect_collision_signals()
@@ -264,33 +459,35 @@ class KinematicColaTracker:
         def on_collision_started(info):
             if not _is_target_pair(info):
                 return
-            self._set_collision_highlight(True)
             pts = info.getContactPoints()
             if pts:
                 p = pts[0]
-                print("[KinematicColaTracker] COLLISION START Cola<->Console1 at ({:.3f}, {:.3f}, {:.3f}), contacts={}".format(
+                print("[DynamicColaTracker] COLLISION START Cola<->Console1 at ({:.3f}, {:.3f}, {:.3f}), contacts={}".format(
                     p.x(), p.y(), p.z(), len(pts)))
             else:
-                print("[KinematicColaTracker] COLLISION START Cola<->Console1")
+                print("[DynamicColaTracker] COLLISION START Cola<->Console1")
 
         def on_collision_continues(info):
             if not _is_target_pair(info):
                 return
-            self._set_collision_highlight(True)
+            pts = info.getContactPoints()
+            if pts:
+                p = pts[0]
+                print("[DynamicColaTracker] COLLISION CONTINUE Cola<->Console1 at ({:.3f}, {:.3f}, {:.3f})".format(
+                    p.x(), p.y(), p.z()))
 
         def on_collision_stopped(info):
             if not _is_target_pair(info):
                 return
-            self._set_collision_highlight(False)
-            print("[KinematicColaTracker] COLLISION STOP Cola<->Console1")
+            print("[DynamicColaTracker] COLLISION STOP Cola<->Console1")
 
         try:
             self._sig_start = vrPhysicsService.collisionStarted.connect(on_collision_started)
             self._sig_cont = vrPhysicsService.collisionContinues.connect(on_collision_continues)
             self._sig_stop = vrPhysicsService.collisionStopped.connect(on_collision_stopped)
-            print("[KinematicColaTracker] Collision callbacks connected")
+            print("[DynamicColaTracker] Collision callbacks connected")
         except Exception as e:
-            print("[KinematicColaTracker] WARNING connecting collision callbacks: " + str(e))
+            print("[DynamicColaTracker] WARNING connecting collision callbacks: " + str(e))
 
     def _disconnect_collision_signals(self):
         try:
@@ -319,41 +516,47 @@ if _prev_cola_tracker is not None:
     except Exception:
         pass
 
-_cola_tracker = KinematicColaTracker()
+_cola_tracker = DynamicColaTracker()
 
 
 def setup_cola(tracker_name="tracker-2", cola_node_name="Cola", maintain_offset=False,
-               follow_mode="kinematic", console_node_name="Console1"):
+               follow_mode="dynamic", console_node_name="Console1"):
     """
-    Configure kinematic cola tracking.
+    Configure dynamic cola tracking.
 
     Compatibility notes:
-      - follow_mode is forced to kinematic.
+      - maintain_offset is ignored in dynamic force mode.
+      - follow_mode must be "dynamic" for physical collision response.
     """
-    if str(follow_mode).strip().lower() != "kinematic":
-        print("[KinematicColaTracker] WARNING: follow_mode='{}' requested, forced to 'kinematic'".format(follow_mode))
+    if maintain_offset:
+        print("[DynamicColaTracker] WARNING: maintain_offset is ignored in dynamic mode")
+    if str(follow_mode).strip().lower() != "dynamic":
+        print("[DynamicColaTracker] WARNING: follow_mode='{}' requested, forced to 'dynamic'".format(follow_mode))
 
-    _cola_tracker.setup(tracker_name, cola_node_name, maintain_offset, console_node_name)
+    _cola_tracker.setup(tracker_name, cola_node_name, console_node_name)
 
 
 def set_cola_follow_mode(follow_mode):
-    """Kept for compatibility. Kinematic mode is mandatory in this script."""
-    if str(follow_mode).strip().lower() != "kinematic":
-        print("[KinematicColaTracker] WARNING: only kinematic mode is supported in this script")
+    """Kept for compatibility. Dynamic mode is mandatory for physical collision response."""
+    if str(follow_mode).strip().lower() != "dynamic":
+        print("[DynamicColaTracker] WARNING: only dynamic mode is supported in this refactored script")
     else:
-        print("[KinematicColaTracker] mode=kinematic")
-
-
-def set_cola_kinematic_tuning(max_step=None, highlight_scale_factor=None):
-    _cola_tracker.set_tuning(max_step=max_step, highlight_scale_factor=highlight_scale_factor)
+        print("[DynamicColaTracker] mode=dynamic")
 
 
 def set_cola_dynamic_tuning(gain=None, damping=None, max_step=None, max_force=None,
-                            max_error=None, reanchor_distance=None, deadzone=None,
-                            grab_threshold=None):
-    """Compatibility shim: map old max_step onto kinematic tuning."""
-    _ = (gain, damping, max_force, max_error, reanchor_distance, deadzone, grab_threshold)
-    _cola_tracker.set_tuning(max_step=max_step)
+                            max_error=None, reanchor_distance=None, deadzone=None):
+    """
+    Set follower tuning.
+
+    Compatibility:
+      - old max_step maps to max_error.
+    """
+    if max_error is None and max_step is not None:
+        max_error = max_step
+        _cola_tracker.set_tuning(gain=gain, damping=damping, max_force=max_force,
+                                                         max_error=max_error, reanchor_distance=reanchor_distance,
+                                                         deadzone=deadzone)
 
 
 def start_cola():
@@ -368,52 +571,51 @@ def toggle_cola():
     _cola_tracker.toggle()
 
 
+def grab_cola():
+    """Start physics grab (like holding object with Shift+Alt drag)."""
+    _cola_tracker.begin_grab()
+
+
+def release_cola():
+    """Release physics grab and let object fall naturally."""
+    _cola_tracker.release_grab()
+
+
 def physics_status():
     _cola_tracker.status()
 
 
-# Compatibility stubs for removed API surface.
-def set_grab_input_device(*args, **kwargs):
-    _ = (args, kwargs)
-    print("[KinematicColaTracker] set_grab_input_device removed (no controller input)")
-
-
-def grab_cola():
-    print("[KinematicColaTracker] grab_cola removed (no controller input)")
-
-
-def release_cola():
-    print("[KinematicColaTracker] release_cola removed (no controller input)")
-
-
 def vr_hand_teleport_only():
-    print("[KinematicColaTracker] vr_hand_teleport_only removed (no controller flow)")
+    """Apply VR visualization policy: hide controllers, keep hand + teleport."""
+    _cola_tracker._configure_vr_hand_teleport_only()
 
 
+# Compatibility stubs for previous API surface.
 def setup_transform(*args, **kwargs):
-    print("[KinematicColaTracker] setup_transform removed in this script")
+    print("[DynamicColaTracker] setup_transform removed in refactored script")
 
 
 def start_transform():
-    print("[KinematicColaTracker] start_transform removed in this script")
+    print("[DynamicColaTracker] start_transform removed in refactored script")
 
 
 def stop_transform():
-    print("[KinematicColaTracker] stop_transform removed in this script")
+    print("[DynamicColaTracker] stop_transform removed in refactored script")
 
 
 def toggle_transform():
-    print("[KinematicColaTracker] toggle_transform removed in this script")
+    print("[DynamicColaTracker] toggle_transform removed in refactored script")
 
 
-print("[KinematicColaTracker] Initialized.")
-print("[KinematicColaTracker] Use setup_cola('tracker-2', 'Cola', True, 'kinematic', 'Console1') then start_cola().")
+print("[DynamicColaTracker] Initialized.")
+print("[DynamicColaTracker] Use setup_cola('tracker-2', 'Cola', False, 'dynamic', 'Console1') then start_cola().")
 
 # Auto-run on script load.
 try:
-    setup_cola("tracker-2", "Cola", True, "kinematic", "Console1")
-    set_cola_kinematic_tuning(highlight_scale_factor=1.08)
+    setup_cola("tracker-2", "Cola", False, "dynamic", "Console1")
+    set_cola_dynamic_tuning(gain=22.0, damping=5.0, max_force=1.6,
+                            max_error=0.12, reanchor_distance=0.35, deadzone=0.004)
     start_cola()
-    print("[KinematicColaTracker] Auto setup+start executed.")
+    print("[DynamicColaTracker] Auto setup+start executed.")
 except Exception as e:
-    print("[KinematicColaTracker] Auto start failed: " + str(e))
+    print("[DynamicColaTracker] Auto start failed: " + str(e))
