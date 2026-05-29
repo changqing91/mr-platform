@@ -55,6 +55,7 @@ else:
             self._node_name = None
             self._active = False
             self._maintain_offset = False
+            self._position_scale = 1.0
             self._tracker = None
             self._node = None
             self._node_scale = None
@@ -62,15 +63,21 @@ else:
             self._timer = vrTimer()
             self._timer_connected = False
 
-        def setup(self, tracker_name, node_name, maintain_offset=False):
-            """配置 tracker → 节点绑定。如已激活先停止再更新。"""
+        def setup(self, tracker_name, node_name, maintain_offset=False, position_scale=1.0):
+            """配置 tracker → 节点绑定。如已激活先停止再更新。
+
+            position_scale: tracker 坐标乘以此系数后写入场景。
+              追踪器单位=米，场景单位=毫米时设为 1000；
+              追踪器单位=米，场景单位=厘米时设为 100（默认 1.0）。
+            """
             if self._active:
                 self.stop()
             self._tracker_name = tracker_name
             self._node_name = node_name
             self._maintain_offset = maintain_offset
-            print("[TransformTracker] Configured: {} -> '{}' (maintain_offset={})".format(
-                tracker_name, node_name, maintain_offset))
+            self._position_scale = float(position_scale)
+            print("[TransformTracker] Configured: {} -> '{}' (maintain_offset={}, position_scale={})".format(
+                tracker_name, node_name, maintain_offset, self._position_scale))
 
         def start(self):
             """激活 timer 追踪，开始位置/旋转同步。"""
@@ -105,7 +112,7 @@ else:
             except Exception:
                 self._node_scale = None
 
-            # maintain_offset：记录 tracker→节点 的初始位置偏移
+            # maintain_offset：记录 tracker→节点 的初始位置偏移（已应用 position_scale）
             self._node_offset = None
             if self._maintain_offset:
                 try:
@@ -113,9 +120,9 @@ else:
                     t_tracker = getTransformNodeTranslation(tracker_node, True)
                     t_node = getTransformNodeTranslation(self._node, True)
                     self._node_offset = Vec3f(
-                        t_node.x() - t_tracker.x(),
-                        t_node.y() - t_tracker.y(),
-                        t_node.z() - t_tracker.z())
+                        t_node.x() - t_tracker.x() * self._position_scale,
+                        t_node.y() - t_tracker.y() * self._position_scale,
+                        t_node.z() - t_tracker.z() * self._position_scale)
                     print("[TransformTracker] maintain_offset enabled")
                 except Exception as e:
                     print("[TransformTracker] WARNING: failed to compute offset: " + str(e))
@@ -167,9 +174,9 @@ else:
                 t = getTransformNodeTranslation(tracker_node, True)
                 r = getTransformNodeRotation(tracker_node)
 
-                tx = t.x()
-                ty = t.y()
-                tz = t.z()
+                tx = t.x() * self._position_scale
+                ty = t.y() * self._position_scale
+                tz = t.z() * self._position_scale
                 if self._node_offset is not None:
                     tx += self._node_offset.x()
                     ty += self._node_offset.y()
@@ -212,20 +219,27 @@ else:
             self._kinematic_timer_connected = False
             self._cola_scale = None
             self._kinematic_offset = None
+            self._position_scale = 1.0
             # 碰撞信号连接句柄
             self._sig_start = None
             self._sig_stop = None
             self._sig_cont = None
 
-        def setup(self, tracker_name="tracker-2", cola_node_name="Cola", maintain_offset=False):
-            """配置 tracker → Cola kinematic 物理绑定。"""
+        def setup(self, tracker_name="tracker-2", cola_node_name="Cola", maintain_offset=False, position_scale=1.0):
+            """配置 tracker → Cola kinematic 物理绑定。
+
+            position_scale: tracker 坐标乘以此系数后写入场景。
+              追踪器单位=米，场景单位=毫米时设为 1000；
+              追踪器单位=米，场景单位=厘米时设为 100（默认 1.0）。
+            """
             if self._active:
                 self.stop()
             self._tracker_name = tracker_name
             self._cola_node_name = cola_node_name
             self._maintain_offset = maintain_offset
-            print("[ColaTracker] Configured: {} -> '{}' (maintain_offset={})".format(
-                tracker_name, cola_node_name, maintain_offset))
+            self._position_scale = float(position_scale)
+            print("[ColaTracker] Configured: {} -> '{}' (maintain_offset={}, position_scale={})".format(
+                tracker_name, cola_node_name, maintain_offset, self._position_scale))
 
         def start(self):
             """
@@ -394,9 +408,9 @@ else:
                     t_tracker = getTransformNodeTranslation(tracker_node, True)
                     t_cola = getTransformNodeTranslation(self._cola_node, True)
                     self._kinematic_offset = Vec3f(
-                        t_cola.x() - t_tracker.x(),
-                        t_cola.y() - t_tracker.y(),
-                        t_cola.z() - t_tracker.z())
+                        t_cola.x() - t_tracker.x() * self._position_scale,
+                        t_cola.y() - t_tracker.y() * self._position_scale,
+                        t_cola.z() - t_tracker.z() * self._position_scale)
                     print("[ColaTracker] Kinematic maintain_offset enabled (position offset)")
                 except Exception as e:
                     print("[ColaTracker] WARNING: failed to compute maintain_offset: " + str(e))
@@ -427,9 +441,9 @@ else:
                 t = getTransformNodeTranslation(tracker_node, True)
                 r = getTransformNodeRotation(tracker_node)
 
-                tx = t.x()
-                ty = t.y()
-                tz = t.z()
+                tx = t.x() * self._position_scale
+                ty = t.y() * self._position_scale
+                tz = t.z() * self._position_scale
                 if self._kinematic_offset is not None:
                     tx += self._kinematic_offset.x()
                     ty += self._kinematic_offset.y()
@@ -556,7 +570,7 @@ else:
 # 模块级公开 API
 # ======================================================================
 
-def setup_transform(tracker_name, node_name, maintain_offset=False):
+def setup_transform(tracker_name, node_name, maintain_offset=False, position_scale=1.0):
     """
     配置 tracker-1 → Transform3D 节点绑定。
 
@@ -564,11 +578,12 @@ def setup_transform(tracker_name, node_name, maintain_offset=False):
         tracker_name (str): tracker 设备名，如 "tracker-1"
         node_name (str): VRED 场景节点名，如 "Seat"
         maintain_offset (bool): True=保留初始偏移，False=直接吸附
+        position_scale (float): tracker 坐标乘以此系数后写入场景（米→毫米 = 1000，米→厘米 = 100）
     """
     global _transform_tracker
-    _transform_tracker.setup(tracker_name, node_name, maintain_offset)
+    _transform_tracker.setup(tracker_name, node_name, maintain_offset, position_scale)
 
-def setup_cola(tracker_name="tracker-2", cola_node_name="Cola", maintain_offset=False):
+def setup_cola(tracker_name="tracker-2", cola_node_name="Cola", maintain_offset=False, position_scale=1.0):
     """
     配置 tracker-2 → Cola kinematic 物理绑定。
 
@@ -576,9 +591,10 @@ def setup_cola(tracker_name="tracker-2", cola_node_name="Cola", maintain_offset=
         tracker_name (str): tracker 设备名，默认 "tracker-2"
         cola_node_name (str): Cola 节点名，默认 "Cola"
         maintain_offset (bool): True=保留初始偏移，False=直接吸附
+        position_scale (float): tracker 坐标乘以此系数后写入场景（米→毫米 = 1000，米→厘米 = 100）
     """
     global _cola_tracker
-    _cola_tracker.setup(tracker_name, cola_node_name, maintain_offset)
+    _cola_tracker.setup(tracker_name, cola_node_name, maintain_offset, position_scale)
 
 def start_transform():
     """激活 tracker-1 → Transform3D 追踪。"""
