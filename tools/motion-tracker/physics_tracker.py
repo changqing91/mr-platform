@@ -4,16 +4,12 @@
 # tracker-1 → TransformTracker: ParentConstraint 驱动任意 Transform3D 节点
 # tracker-2 → ColaTracker: 作为可乐瓶 (Cola) 的物理运动学对象
 #             ├── kinematic: timer 同步位姿并锁定缩放（避免瓶子变大）
-#             ├── dynamic: 施加力进行跟随（Moving Dynamic Actors）
-#             ├── 自动确保 Cola 注册为对应 physics 对象类型
+#             ├── 自动确保 Cola 注册为 kinematic physics 对象
 #             └── 碰撞回调：打印碰撞开始/结束事件及接触点信息
 #
 # 用法（VRED Python 控制台）：
 #   setup_transform("tracker-1", "SeatNode")  # 配置 tracker-1 → Transform3D 绑定
-#   setup_cola("tracker-2", "Cola", False, "kinematic")  # kinematic 模式
-#   setup_cola("tracker-2", "Cola", False, "dynamic")    # dynamic 模式
-#   set_cola_dynamic_tuning(18.0, 0.06)         # 可选：设置 dynamic 跟随参数
-#   set_cola_dynamic_tuning(gain=200.0, max_step=0.5)  # 先用大参数测试
+#   setup_cola("tracker-2", "Cola")           # 配置 tracker-2 → Cola kinematic 追踪
 #   start_transform()                          # 启动 tracker-1 追踪
 #   start_cola()                               # 启动 tracker-2 物理追踪
 #   stop_cola()                                # 停止，解除约束
@@ -22,11 +18,6 @@
 # 右手 Y 键（左手控制器）：切换 tracker-1 追踪开/关
 # 右手 B 键（右手控制器）：切换 tracker-2 Cola 追踪开/关
 # ======================================================================
-
-try:
-    from PySide6.QtGui import QVector3D
-except ImportError:
-    from PySide2.QtGui import QVector3D
 
 global _transform_tracker, _cola_tracker
 
@@ -144,37 +135,26 @@ else:
     # ======================================================================
     class ColaTracker:
         """
-        将 tracker-2 绑定到 Cola 节点：
-          1. 根据模式确保 Cola 已在 vrPhysicsService 中注册为 dynamic/kinematic
-          2. kinematic: timer 同步位置+旋转并锁定 scale
-              dynamic: 每帧施加跟随力，保留物理惯性
-        3. 监听 collisionStarted / collisionStopped / collisionContinues 信号，
-           打印碰撞事件及接触点坐标
-
-        注意：如果 VRED 物理编辑器已经将 Cola 注册为 kinematic，脚本不会重复添加。
-        若编辑器中注册的是 dynamic（力驱动），则 Cola 无法被 tracker 手动驱动，
-        此时脚本会警告并尝试用 removeObject + addKinematicObject 重新注册。
+        将 tracker-2 绑定到 Cola 节点（kinematic 模式）：
+          1. 确保 Cola 在 vrPhysicsService 中注册为 kinematic 对象
+          2. timer 同步位置+旋转并锁定 scale，避免瓶子变形
+          3. 监听 collisionStarted / collisionStopped / collisionContinues 信号，
+             打印碰撞事件及接触点坐标，碰撞时 Cola 放大高亮
         """
 
         def __init__(self):
             self._tracker_name = None
             self._cola_node_name = None
-            self._follow_mode = "kinematic"
             self._constraint = None
             self._active = False
             self._maintain_offset = False
             self._physics_registered = False
             self._tracker = None
             self._cola_node = None
-            self._cola_physics_obj = None
-            self._dynamic_timer = vrTimer()
-            self._dynamic_timer_connected = False
             self._kinematic_timer = vrTimer()
             self._kinematic_timer_connected = False
             self._cola_scale = None
             self._kinematic_offset = None
-            self._dynamic_gain = 18.0
-            self._dynamic_max_step = 0.06
             # 碰撞高亮
             self._highlight_active = False
             self._highlight_scale_factor = 1.15
@@ -183,31 +163,22 @@ else:
             self._sig_stop = None
             self._sig_cont = None
 
-        def setup(self, tracker_name="tracker-2", cola_node_name="Cola", maintain_offset=False,
-                  follow_mode="kinematic"):
-            """配置 tracker → Cola 物理绑定。"""
+        def setup(self, tracker_name="tracker-2", cola_node_name="Cola", maintain_offset=False):
+            """配置 tracker → Cola kinematic 物理绑定。"""
             if self._active:
                 self.stop()
-
-            mode = str(follow_mode).strip().lower()
-            if mode not in ("kinematic", "dynamic"):
-                print("[ColaTracker] WARNING: unsupported follow_mode='{}', fallback to 'kinematic'".format(
-                    follow_mode))
-                mode = "kinematic"
-
             self._tracker_name = tracker_name
             self._cola_node_name = cola_node_name
             self._maintain_offset = maintain_offset
-            self._follow_mode = mode
-            print("[ColaTracker] Configured: {} -> '{}' (maintain_offset={}, mode={})".format(
-                tracker_name, cola_node_name, maintain_offset, mode))
+            print("[ColaTracker] Configured: {} -> '{}' (maintain_offset={})".format(
+                tracker_name, cola_node_name, maintain_offset))
 
         def start(self):
             """
             激活物理追踪：
             1. 确保 Physics 服务激活
-            2. 确保 Cola 为当前模式注册（kinematic / dynamic）
-            3. 按模式创建跟随（timer pose-sync / force-follow）
+            2. 确保 Cola 注册为 kinematic
+            3. 启动 timer pose-sync
             4. 连接碰撞信号
             """
             if self._active:
@@ -253,23 +224,15 @@ else:
             self._tracker = tracker
             self._cola_node = colaNode
 
-            if self._follow_mode == "kinematic":
-                # kinematic 模式改为 timer 同步位姿，避免 ParentConstraint 继承 tracker 缩放
-                if self._maintain_offset:
-                    print("[ColaTracker] WARNING: maintain_offset is ignored in kinematic timer follow mode")
-                if not self._start_kinematic_follow():
-                    return
-            else:
-                # dynamic 模式通过每帧施加速度变化跟随 tracker
-                if not self._start_dynamic_follow():
-                    return
+            if not self._start_kinematic_follow():
+                return
 
             # 连接碰撞信号（先断开再连，防止重复注册）
             self._connect_collision_signals(colaNode)
 
             self._active = True
-            print("[ColaTracker] Started. Cola tracked by {}, mode={}, physics collisions active.".format(
-                self._tracker_name, self._follow_mode))
+            print("[ColaTracker] Started. Cola kinematic follow by {}, collisions active.".format(
+                self._tracker_name))
 
         def stop(self):
             """解除约束并断开碰撞信号，Cola 保持最后位置。"""
@@ -285,7 +248,6 @@ else:
                 print("[ColaTracker] WARNING deleting constraint: " + str(e))
 
             self._stop_kinematic_follow()
-            self._stop_dynamic_follow()
 
             # 断开碰撞信号
             self._disconnect_collision_signals()
@@ -294,7 +256,6 @@ else:
             self._highlight_active = False
             self._tracker = None
             self._cola_node = None
-            self._cola_physics_obj = None
             self._cola_scale = None
             print("[ColaTracker] Stopped: {} -> '{}'".format(
                 self._tracker_name, self._cola_node_name))
@@ -310,51 +271,37 @@ else:
             cfg = "{} -> '{}'".format(self._tracker_name, self._cola_node_name) \
                 if self._tracker_name else "(not configured)"
             phys = "kinematic registered" if self._physics_registered else "physics not registered"
-            print("[ColaTracker] {} [{}] ({}, mode={})".format(cfg, state, phys, self._follow_mode))
+            print("[ColaTracker] {} [{}] ({})".format(cfg, state, phys))
 
         # ------------------------------------------------------------------
         # 内部：物理注册
         # ------------------------------------------------------------------
         def _ensure_physics_mode(self, colaNode):
             try:
-                want_dynamic = self._follow_mode == "dynamic"
-                dynamic_nodes = vrPhysicsService.getDynamicObjects()
-                kinematic_nodes = vrPhysicsService.getKinematicObjects()
-                is_dynamic = any(n.getName() == colaNode.getName() for n in dynamic_nodes)
-                is_kinematic = any(n.getName() == colaNode.getName() for n in kinematic_nodes)
-
                 if vrPhysicsService.hasPhysicsObject(colaNode):
-                    if want_dynamic and is_dynamic:
-                        self._physics_registered = True
-                        print("[ColaTracker] Cola already registered as dynamic (Physics Editor)")
-                    elif (not want_dynamic) and is_kinematic:
+                    kinematic_nodes = vrPhysicsService.getKinematicObjects()
+                    is_kinematic = any(n.getName() == colaNode.getName() for n in kinematic_nodes)
+                    if is_kinematic:
                         self._physics_registered = True
                         print("[ColaTracker] Cola already registered as kinematic (Physics Editor)")
                     else:
-                        # 角色类型不符合当前模式，重新注册
-                        print("[ColaTracker] WARNING: Cola collider type does not match mode={}, "
-                              "attempting re-register...".format(self._follow_mode))
+                        print("[ColaTracker] WARNING: Cola exists in physics but not as kinematic, re-registering...")
                         vrPhysicsService.removeObject(colaNode)
                         hullConf = vrdPhysicsHullConfig()
-                        ok = vrPhysicsService.addDynamicObject(colaNode, hullConf) if want_dynamic \
-                            else vrPhysicsService.addKinematicObject(colaNode, hullConf)
+                        ok = vrPhysicsService.addKinematicObject(colaNode, hullConf)
                         self._physics_registered = ok
                         if ok:
-                            print("[ColaTracker] Cola re-registered as {}".format(
-                                "dynamic" if want_dynamic else "kinematic"))
+                            print("[ColaTracker] Cola re-registered as kinematic")
                         else:
-                            print("[ColaTracker] WARNING: failed to re-register Cola")
+                            print("[ColaTracker] WARNING: failed to re-register Cola as kinematic")
                 else:
-                    # 未注册，按当前模式注册
                     hullConf = vrdPhysicsHullConfig()
-                    ok = vrPhysicsService.addDynamicObject(colaNode, hullConf) if want_dynamic \
-                        else vrPhysicsService.addKinematicObject(colaNode, hullConf)
+                    ok = vrPhysicsService.addKinematicObject(colaNode, hullConf)
                     self._physics_registered = ok
                     if ok:
-                        print("[ColaTracker] Cola registered as {} object".format(
-                            "dynamic" if want_dynamic else "kinematic"))
+                        print("[ColaTracker] Cola registered as kinematic object")
                     else:
-                        print("[ColaTracker] WARNING: failed to register Cola")
+                        print("[ColaTracker] WARNING: failed to register Cola as kinematic")
             except Exception as e:
                 print("[ColaTracker] WARNING during physics registration: " + str(e))
 
@@ -397,7 +344,7 @@ else:
             self._kinematic_offset = None
 
         def _kinematic_update(self):
-            if not self._active or self._follow_mode != "kinematic":
+            if not self._active:
                 return
             if not self._tracker or not self._cola_node:
                 return
@@ -427,83 +374,6 @@ else:
                                           self._cola_scale.z() * f)
             except Exception as e:
                 print("[ColaTracker] WARNING kinematic update failed: " + str(e))
-
-        # ------------------------------------------------------------------
-        # 内部：dynamic 模式（Moving Dynamic Actors）
-        # ------------------------------------------------------------------
-        def _start_dynamic_follow(self):
-            try:
-                self._cola_physics_obj = vrPhysicsService.getPhysicsObject(self._cola_node, True)
-                if not self._cola_physics_obj:
-                    print("[ColaTracker] ERROR: failed to get Cola physics object in dynamic mode")
-                    return False
-            except Exception as e:
-                print("[ColaTracker] ERROR: getPhysicsObject failed: " + str(e))
-                return False
-
-            try:
-                # 如果可用，优先速度变化模式提升跟随性。
-                try:
-                    self._cola_physics_obj.setForceMode(vrPhysicsTypes.ForceMode.VelocityChange)
-                except Exception:
-                    pass
-                self._cola_physics_obj.setForceWorldFrame(True)
-                self._cola_physics_obj.setForceEnabled(True)
-            except Exception as e:
-                print("[ColaTracker] WARNING: dynamic force setup failed: " + str(e))
-
-            if not self._dynamic_timer_connected:
-                self._dynamic_timer.connect(self._dynamic_update)
-                self._dynamic_timer_connected = True
-            self._dynamic_timer.setActive(1)
-            print("[ColaTracker] Dynamic follow loop active")
-            return True
-
-        def _stop_dynamic_follow(self):
-            try:
-                self._dynamic_timer.setActive(0)
-            except Exception:
-                pass
-
-            try:
-                if self._cola_physics_obj:
-                    self._cola_physics_obj.setForceEnabled(False)
-                    self._cola_physics_obj.setForce(QVector3D(0.0, 0.0, 0.0))
-            except Exception:
-                pass
-
-        def _dynamic_update(self):
-            if not self._active or self._follow_mode != "dynamic":
-                return
-            if not self._tracker or not self._cola_node or not self._cola_physics_obj:
-                return
-
-            try:
-                col = self._tracker.getTrackingMatrix().column(3)
-                # tracking(Y-up) -> scene(Z-up)
-                tx = col.x()
-                ty = col.y()
-                tz = col.z()
-                target_x = -tx
-                target_y = -tz
-                target_z = ty
-
-                cur = getTransformNodeTranslation(self._cola_node, True)
-                dx = target_x - cur.x()
-                dy = target_y - cur.y()
-                dz = target_z - cur.z()
-
-                # 限幅，防止一次校正过猛导致抖动
-                dx = max(min(dx, self._dynamic_max_step), -self._dynamic_max_step)
-                dy = max(min(dy, self._dynamic_max_step), -self._dynamic_max_step)
-                dz = max(min(dz, self._dynamic_max_step), -self._dynamic_max_step)
-
-                self._cola_physics_obj.setForce(QVector3D(
-                    dx * self._dynamic_gain,
-                    dy * self._dynamic_gain,
-                    dz * self._dynamic_gain))
-            except Exception as e:
-                print("[ColaTracker] WARNING dynamic update failed: " + str(e))
 
         # ------------------------------------------------------------------
         # 内部：碰撞信号管理
@@ -629,49 +499,17 @@ def setup_transform(tracker_name, node_name, maintain_offset=False):
     global _transform_tracker
     _transform_tracker.setup(tracker_name, node_name, maintain_offset)
 
-def setup_cola(tracker_name="tracker-2", cola_node_name="Cola", maintain_offset=False,
-               follow_mode="kinematic"):
+def setup_cola(tracker_name="tracker-2", cola_node_name="Cola", maintain_offset=False):
     """
-    配置 tracker-2 → Cola 物理绑定。
+    配置 tracker-2 → Cola kinematic 物理绑定。
 
     Args:
         tracker_name (str): tracker 设备名，默认 "tracker-2"
         cola_node_name (str): Cola 节点名，默认 "Cola"
         maintain_offset (bool): True=保留初始偏移，False=直接吸附
-        follow_mode (str): "kinematic"(默认) 或 "dynamic"
     """
     global _cola_tracker
-    _cola_tracker.setup(tracker_name, cola_node_name, maintain_offset, follow_mode)
-
-def set_cola_follow_mode(follow_mode):
-    """设置 Cola 跟随模式。可选: "kinematic" / "dynamic"。"""
-    global _cola_tracker
-    _cola_tracker.setup(_cola_tracker._tracker_name or "tracker-2",
-                        _cola_tracker._cola_node_name or "Cola",
-                        _cola_tracker._maintain_offset,
-                        follow_mode)
-
-def set_cola_dynamic_tuning(gain=None, max_step=None):
-    """
-    设置 dynamic 模式跟随参数。
-
-    Args:
-        gain (float): 误差增益，越大跟随越快（也更易抖动）
-        max_step (float): 每帧误差限幅，越大响应越快
-    """
-    global _cola_tracker
-    if gain is not None:
-        try:
-            _cola_tracker._dynamic_gain = float(gain)
-        except Exception:
-            print("[ColaTracker] WARNING: invalid gain={}".format(gain))
-    if max_step is not None:
-        try:
-            _cola_tracker._dynamic_max_step = float(max_step)
-        except Exception:
-            print("[ColaTracker] WARNING: invalid max_step={}".format(max_step))
-    print("[ColaTracker] Dynamic tuning: gain={}, max_step={}".format(
-        _cola_tracker._dynamic_gain, _cola_tracker._dynamic_max_step))
+    _cola_tracker.setup(tracker_name, cola_node_name, maintain_offset)
 
 def set_cola_highlight_scale(factor):
     """
