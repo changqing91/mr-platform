@@ -244,32 +244,8 @@ else:
             except Exception as e:
                 print("[ColaTracker] WARNING: failed to activate physics service: " + str(e))
 
-            # 注册物理对象前保存 Cola 的世界变换，
-            # 防止 addKinematicObject/addDynamicObject 将节点重置到原点导致瓶子消失
-            _saved_t = _saved_r = _saved_s = None
-            try:
-                _saved_t = getTransformNodeTranslation(colaNode, True)
-                _saved_r = getTransformNodeRotation(colaNode)
-                _saved_s = getTransformNodeScale(colaNode)
-            except Exception:
-                pass
-
             # 确保 Cola 为 kinematic 物理对象
             self._ensure_physics_mode(colaNode)
-
-            # 恢复 Cola 原始世界变换
-            try:
-                if _saved_t is not None:
-                    setTransformNodeTranslation(colaNode,
-                        _saved_t.x(), _saved_t.y(), _saved_t.z(), True)
-                if _saved_r is not None:
-                    setTransformNodeRotation(colaNode,
-                        _saved_r.x(), _saved_r.y(), _saved_r.z())
-                if _saved_s is not None:
-                    setTransformNodeScale(colaNode,
-                        _saved_s.x(), _saved_s.y(), _saved_s.z())
-            except Exception as e:
-                print("[ColaTracker] WARNING: failed to restore Cola transform: " + str(e))
 
             self._tracker = tracker
             self._cola_node = colaNode
@@ -336,37 +312,45 @@ else:
         # 内部：物理注册
         # ------------------------------------------------------------------
         def _ensure_physics_mode(self, colaNode):
-            # 注意：vrPhysicsService 仅支持 kinematic 和 static 对象（实验性功能，仅用于碰撞检测）。
-            # 不存在 addDynamicObject / getDynamicObjects / getPhysicsObject 方法。
-            # 因此此处始终注册为 kinematic 对象。
             try:
+                want_dynamic = self._follow_mode == "dynamic"
+                dynamic_nodes = vrPhysicsService.getDynamicObjects()
                 kinematic_nodes = vrPhysicsService.getKinematicObjects()
+                is_dynamic = any(n.getName() == colaNode.getName() for n in dynamic_nodes)
                 is_kinematic = any(n.getName() == colaNode.getName() for n in kinematic_nodes)
 
                 if vrPhysicsService.hasPhysicsObject(colaNode):
-                    if is_kinematic:
+                    if want_dynamic and is_dynamic:
                         self._physics_registered = True
-                        print("[ColaTracker] Cola already registered as kinematic")
+                        print("[ColaTracker] Cola already registered as dynamic (Physics Editor)")
+                    elif (not want_dynamic) and is_kinematic:
+                        self._physics_registered = True
+                        print("[ColaTracker] Cola already registered as kinematic (Physics Editor)")
                     else:
-                        # 已注册但不是 kinematic（可能是 static），重新注册
-                        print("[ColaTracker] WARNING: Cola registered as non-kinematic, re-registering...")
+                        # 角色类型不符合当前模式，重新注册
+                        print("[ColaTracker] WARNING: Cola collider type does not match mode={}, "
+                              "attempting re-register...".format(self._follow_mode))
                         vrPhysicsService.removeObject(colaNode)
                         hullConf = vrdPhysicsHullConfig()
-                        ok = vrPhysicsService.addKinematicObject(colaNode, hullConf)
+                        ok = vrPhysicsService.addDynamicObject(colaNode, hullConf) if want_dynamic \
+                            else vrPhysicsService.addKinematicObject(colaNode, hullConf)
                         self._physics_registered = ok
                         if ok:
-                            print("[ColaTracker] Cola re-registered as kinematic")
+                            print("[ColaTracker] Cola re-registered as {}".format(
+                                "dynamic" if want_dynamic else "kinematic"))
                         else:
-                            print("[ColaTracker] WARNING: failed to re-register Cola as kinematic")
+                            print("[ColaTracker] WARNING: failed to re-register Cola")
                 else:
-                    # 未注册，注册为 kinematic
+                    # 未注册，按当前模式注册
                     hullConf = vrdPhysicsHullConfig()
-                    ok = vrPhysicsService.addKinematicObject(colaNode, hullConf)
+                    ok = vrPhysicsService.addDynamicObject(colaNode, hullConf) if want_dynamic \
+                        else vrPhysicsService.addKinematicObject(colaNode, hullConf)
                     self._physics_registered = ok
                     if ok:
-                        print("[ColaTracker] Cola registered as kinematic object")
+                        print("[ColaTracker] Cola registered as {} object".format(
+                            "dynamic" if want_dynamic else "kinematic"))
                     else:
-                        print("[ColaTracker] WARNING: failed to register Cola as kinematic")
+                        print("[ColaTracker] WARNING: failed to register Cola")
             except Exception as e:
                 print("[ColaTracker] WARNING during physics registration: " + str(e))
 
@@ -379,27 +363,19 @@ else:
             except Exception:
                 self._cola_scale = None
 
-            # 始终自动计算偏移：Cola 当前 scene 位置 − tracker 当前 scene 位置
-            # 使 Cola 从原位置开始相对随动，不跳变到 tracker 的原始坐标（防止"消失"）
             self._kinematic_offset = None
-            try:
-                mat = self._tracker.getTrackingMatrix()
-                col = mat.column(3)
-                tracker_sx = -col.x()
-                tracker_sy = -col.z()
-                tracker_sz =  col.y()
-
-                t_cola = getTransformNodeTranslation(self._cola_node, True)
-                self._kinematic_offset = QVector3D(
-                    t_cola.x() - tracker_sx,
-                    t_cola.y() - tracker_sy,
-                    t_cola.z() - tracker_sz)
-                print("[ColaTracker] Kinematic offset: ({:.3f}, {:.3f}, {:.3f})".format(
-                    self._kinematic_offset.x(),
-                    self._kinematic_offset.y(),
-                    self._kinematic_offset.z()))
-            except Exception as e:
-                print("[ColaTracker] WARNING: failed to compute kinematic offset: " + str(e))
+            if self._maintain_offset:
+                try:
+                    tracker_node = self._tracker.getNode()
+                    t_tracker = getTransformNodeTranslation(tracker_node, True)
+                    t_cola = getTransformNodeTranslation(self._cola_node, True)
+                    self._kinematic_offset = Vec3f(
+                        t_cola.x() - t_tracker.x(),
+                        t_cola.y() - t_tracker.y(),
+                        t_cola.z() - t_tracker.z())
+                    print("[ColaTracker] Kinematic maintain_offset enabled (position offset)")
+                except Exception as e:
+                    print("[ColaTracker] WARNING: failed to compute maintain_offset: " + str(e))
 
             if not self._kinematic_timer_connected:
                 self._kinematic_timer.connect(self._kinematic_update)
@@ -423,19 +399,20 @@ else:
                 return
 
             try:
-                # getTrackingMatrix() 返回 Tracking Y-Up 空间的位置，
-                # 需转换到 Scene Z-Up：scene_x=-track_x, scene_y=-track_z, scene_z=track_y
-                col = self._tracker.getTrackingMatrix().column(3)
-                tx = -col.x()
-                ty = -col.z()
-                tz =  col.y()
+                tracker_node = self._tracker.getNode()
+                t = getTransformNodeTranslation(tracker_node, True)
+                r = getTransformNodeRotation(tracker_node)
 
+                tx = t.x()
+                ty = t.y()
+                tz = t.z()
                 if self._kinematic_offset is not None:
                     tx += self._kinematic_offset.x()
                     ty += self._kinematic_offset.y()
                     tz += self._kinematic_offset.z()
 
                 setTransformNodeTranslation(self._cola_node, tx, ty, tz, True)
+                setTransformNodeRotation(self._cola_node, r.x(), r.y(), r.z())
 
                 # 每帧恢复 Cola 原始缩放，防止 tracker 缩放链条污染
                 if self._cola_scale is not None:
