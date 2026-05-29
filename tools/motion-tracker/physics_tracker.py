@@ -155,23 +155,31 @@ else:
             self._kinematic_timer_connected = False
             self._cola_scale = None
             self._kinematic_offset = None
-            # 碰撞高亮
+            # 碰撞高亮（距离检测）
             self._highlight_active = False
             self._highlight_scale_factor = 1.15
-            # 碰撞信号连接句柄
+            self._highlight_distance = 150.0   # 场景单位（mm），可通过 set_cola_highlight_distance 调整
+            self._console_node = None
+            self._console_node_name = ""
+            # 碰撞信号连接句柄（辅助用）
             self._sig_start = None
             self._sig_stop = None
             self._sig_cont = None
 
-        def setup(self, tracker_name="tracker-2", cola_node_name="Cola", maintain_offset=False):
-            """配置 tracker → Cola kinematic 物理绑定。"""
+        def setup(self, tracker_name="tracker-2", cola_node_name="Cola", maintain_offset=False,
+                  console_node_name=""):
+            """配置 tracker → Cola kinematic 物理绑定。
+
+            console_node_name: 用于高亮检测的目标节点名（如 "Console1"）。留空则不检测。
+            """
             if self._active:
                 self.stop()
             self._tracker_name = tracker_name
             self._cola_node_name = cola_node_name
             self._maintain_offset = maintain_offset
-            print("[ColaTracker] Configured: {} -> '{}' (maintain_offset={})".format(
-                tracker_name, cola_node_name, maintain_offset))
+            self._console_node_name = console_node_name
+            print("[ColaTracker] Configured: {} -> '{}' (maintain_offset={}, console_highlight='{}')".format(
+                tracker_name, cola_node_name, maintain_offset, console_node_name))
 
         def start(self):
             """
@@ -256,6 +264,7 @@ else:
             self._highlight_active = False
             self._tracker = None
             self._cola_node = None
+            self._console_node = None
             self._cola_scale = None
             print("[ColaTracker] Stopped: {} -> '{}'".format(
                 self._tracker_name, self._cola_node_name))
@@ -314,6 +323,20 @@ else:
             except Exception:
                 self._cola_scale = None
 
+            # 解析高亮目标节点
+            self._console_node = None
+            if self._console_node_name:
+                try:
+                    self._console_node = findNode(self._console_node_name)
+                    if self._console_node:
+                        print("[ColaTracker] Highlight target: '{}' (distance threshold={})".format(
+                            self._console_node_name, self._highlight_distance))
+                    else:
+                        print("[ColaTracker] WARNING: highlight target node not found: '{}'".format(
+                            self._console_node_name))
+                except Exception as e:
+                    print("[ColaTracker] WARNING: error finding highlight target: " + str(e))
+
             self._kinematic_offset = None
             if self._maintain_offset:
                 try:
@@ -365,13 +388,25 @@ else:
                 setTransformNodeTranslation(self._cola_node, tx, ty, tz, True)
                 setTransformNodeRotation(self._cola_node, r.x(), r.y(), r.z())
 
-                # 每帧恢复 Cola 原始缩放；碰撞时放大高亮
-                if self._cola_scale is not None:
-                    f = self._highlight_scale_factor if self._highlight_active else 1.0
-                    setTransformNodeScale(self._cola_node,
-                                          self._cola_scale.x() * f,
-                                          self._cola_scale.y() * f,
-                                          self._cola_scale.z() * f)
+                # 距离检测高亮（不依赖碰撞信号，kinematic/static 对均有效）
+                if self._console_node is not None:
+                    try:
+                        c = getTransformNodeTranslation(self._console_node, True)
+                        dist = max(abs(tx - c.x()), abs(ty - c.y()), abs(tz - c.z()))
+                        prev = self._highlight_active
+                        self._highlight_active = dist < self._highlight_distance
+                        if self._highlight_active != prev:
+                            print("[ColaTracker] Highlight {} (dist={:.1f})".format(
+                                "ON" if self._highlight_active else "OFF", dist))
+                    except Exception:
+                        pass
+
+                # 每帧应用 scale（正常锁定 or 高亮放大）
+                sx = self._cola_scale.x() if self._cola_scale is not None else 1.0
+                sy = self._cola_scale.y() if self._cola_scale is not None else 1.0
+                sz = self._cola_scale.z() if self._cola_scale is not None else 1.0
+                f = self._highlight_scale_factor if self._highlight_active else 1.0
+                setTransformNodeScale(self._cola_node, sx * f, sy * f, sz * f)
             except Exception as e:
                 print("[ColaTracker] WARNING kinematic update failed: " + str(e))
 
@@ -499,7 +534,8 @@ def setup_transform(tracker_name, node_name, maintain_offset=False):
     global _transform_tracker
     _transform_tracker.setup(tracker_name, node_name, maintain_offset)
 
-def setup_cola(tracker_name="tracker-2", cola_node_name="Cola", maintain_offset=False):
+def setup_cola(tracker_name="tracker-2", cola_node_name="Cola", maintain_offset=False,
+               console_node_name=""):
     """
     配置 tracker-2 → Cola kinematic 物理绑定。
 
@@ -507,9 +543,19 @@ def setup_cola(tracker_name="tracker-2", cola_node_name="Cola", maintain_offset=
         tracker_name (str): tracker 设备名，默认 "tracker-2"
         cola_node_name (str): Cola 节点名，默认 "Cola"
         maintain_offset (bool): True=保留初始偏移，False=直接吸附
+        console_node_name (str): 高亮检测目标节点名（如 "Console1"），留空则不检测
     """
     global _cola_tracker
-    _cola_tracker.setup(tracker_name, cola_node_name, maintain_offset)
+    _cola_tracker.setup(tracker_name, cola_node_name, maintain_offset, console_node_name)
+
+def set_cola_highlight_distance(distance):
+    """设置高亮距离阈值（场景单位，默认 150）。Cola 与目标节点中心距离小于此值时触发高亮。"""
+    global _cola_tracker
+    try:
+        _cola_tracker._highlight_distance = float(distance)
+        print("[ColaTracker] Highlight distance threshold set to {}".format(distance))
+    except Exception:
+        print("[ColaTracker] WARNING: invalid distance={}".format(distance))
 
 def set_cola_highlight_scale(factor):
     """
