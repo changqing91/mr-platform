@@ -20,22 +20,19 @@ class KinematicColaTracker:
         self._tracker_name = "tracker-2"
         self._cola_node_name = "Cola"
         self._console_node_name = "Console1"
-        self._maintain_offset = False
+        self._maintain_offset = True  # preserve initial offset between tracker and Cola
 
         self._tracker = None
         self._cola_node = None
         self._console_node = None
 
         self._active = False
-        self._timer = vrTimer()
-        self._timer_connected = False
 
-        # Kinematic follow tuning (position only)
+        # ParentConstraint that drives Cola → tracker
+        self._constraint = None
+
+        # Kept for API compatibility (not used for tracking)
         self._max_step = 40.0
-
-        # Start anchors used when maintain_offset=True
-        self._tracker_anchor = None
-        self._cola_anchor = None
 
         # Collision highlight state
         self._highlight_active = False
@@ -87,6 +84,7 @@ class KinematicColaTracker:
         if not self._resolve_scene_objects():
             return
 
+        # Activate physics service for collision detection.
         try:
             if not vrPhysicsService.isActive():
                 vrPhysicsService.setActive(True)
@@ -96,41 +94,42 @@ class KinematicColaTracker:
             except Exception:
                 pass
         except Exception as e:
-            print("[KinematicColaTracker] ERROR activating physics service: " + str(e))
-            return
+            print("[KinematicColaTracker] WARNING: physics service issue: " + str(e))
+            # Continue even if physics fails — constraint tracking still works.
 
-        self._validate_kinematic_role()
-
-        # Capture anchors when offset tracking is requested.
+        # Create a ParentConstraint: Cola follows tracker node.
+        # maintain_offset=True preserves the initial position difference so Cola
+        # does not snap to the tracker's exact origin.
         try:
-            tx, ty, tz = self._tracker_scene_position()
-            cur = getTransformNodeTranslation(self._cola_node, True)
-            self._tracker_anchor = (tx, ty, tz)
-            self._cola_anchor = (cur.x(), cur.y(), cur.z())
+            tracker_node = self._tracker.getNode()
+            self._constraint = vrConstraintService.createParentConstraint(
+                [tracker_node], self._cola_node, self._maintain_offset)
+            if not self._constraint:
+                print("[KinematicColaTracker] ERROR: createParentConstraint returned None")
+                return
+            print("[KinematicColaTracker] ParentConstraint created (maintain_offset={})".format(
+                self._maintain_offset))
         except Exception as e:
-            self._tracker_anchor = None
-            self._cola_anchor = None
-            print("[KinematicColaTracker] WARNING: failed to build anchors: " + str(e))
-
-        if not self._timer_connected:
-            self._timer.connect(self._update)
-            self._timer_connected = True
-        self._timer.setActive(1)
+            print("[KinematicColaTracker] ERROR creating ParentConstraint: " + str(e))
+            return
 
         self._connect_collision_signals()
 
         self._active = True
-        print("[KinematicColaTracker] Started: '{}' kinematically follows '{}'".format(
+        print("[KinematicColaTracker] Started: '{}' follows '{}' via ParentConstraint".format(
             self._cola_node_name, self._tracker_name))
 
     def stop(self):
         if not self._active:
             return
 
-        try:
-            self._timer.setActive(0)
-        except Exception:
-            pass
+        # Remove the ParentConstraint.
+        if self._constraint is not None:
+            try:
+                vrConstraintService.removeConstraint(self._constraint)
+            except Exception:
+                pass
+            self._constraint = None
 
         self._set_collision_highlight(False)
         self._disconnect_collision_signals()
@@ -139,8 +138,6 @@ class KinematicColaTracker:
         self._tracker = None
         self._cola_node = None
         self._console_node = None
-        self._tracker_anchor = None
-        self._cola_anchor = None
 
         print("[KinematicColaTracker] Stopped")
 
@@ -192,64 +189,6 @@ class KinematicColaTracker:
             return False
 
         return True
-
-    def _validate_kinematic_role(self):
-        """
-        Soft check: warn if Cola is not in Kinematic set when API is available.
-        """
-        try:
-            if hasattr(vrPhysicsService, "getKinematicObjects"):
-                kin_names = {n.getName() for n in vrPhysicsService.getKinematicObjects()}
-                if self._cola_node.getName() not in kin_names:
-                    print("[KinematicColaTracker] WARNING: '{}' is not Kinematic in Physics Editor".format(
-                        self._cola_node.getName()))
-            else:
-                print("[KinematicColaTracker] INFO: getKinematicObjects API not available, skip strict role check")
-        except Exception as e:
-            print("[KinematicColaTracker] WARNING reading kinematic objects: " + str(e))
-
-    def _tracker_scene_position(self):
-        """
-        Convert tracker tracking-space position (Y-up) to scene-space (Z-up):
-          scene_x = -track_x
-          scene_y = -track_z
-          scene_z =  track_y
-        """
-        col = self._tracker.getTrackingMatrix().column(3)
-        return -col.x(), -col.z(), col.y()
-
-    def _update(self):
-        if not self._active:
-            return
-        if not self._tracker or not self._cola_node:
-            return
-
-        try:
-            tx, ty, tz = self._tracker_scene_position()
-
-            if self._maintain_offset and self._tracker_anchor is not None and self._cola_anchor is not None:
-                tx = self._cola_anchor[0] + (tx - self._tracker_anchor[0])
-                ty = self._cola_anchor[1] + (ty - self._tracker_anchor[1])
-                tz = self._cola_anchor[2] + (tz - self._tracker_anchor[2])
-
-            cur = getTransformNodeTranslation(self._cola_node, True)
-
-            dx = tx - cur.x()
-            dy = ty - cur.y()
-            dz = tz - cur.z()
-
-            # Kinematic limiter to avoid one-frame jumps.
-            dx = max(min(dx, self._max_step), -self._max_step)
-            dy = max(min(dy, self._max_step), -self._max_step)
-            dz = max(min(dz, self._max_step), -self._max_step)
-
-            setTransformNodeTranslation(self._cola_node,
-                                        cur.x() + dx,
-                                        cur.y() + dy,
-                                        cur.z() + dz,
-                                        True)
-        except Exception as e:
-            print("[KinematicColaTracker] WARNING update failed: " + str(e))
 
     def _try_get_scale_xyz(self, node):
         try:
@@ -468,12 +407,12 @@ def toggle_transform():
 
 
 print("[KinematicColaTracker] Initialized.")
-print("[KinematicColaTracker] Use setup_cola('tracker-2', 'Cola', False, 'kinematic', 'Console1') then start_cola().")
+print("[KinematicColaTracker] Use setup_cola('tracker-2', 'Cola', True, 'kinematic', 'Console1') then start_cola().")
 
 # Auto-run on script load.
 try:
-    setup_cola("tracker-2", "Cola", False, "kinematic", "Console1")
-    set_cola_kinematic_tuning(max_step=40.0, highlight_scale_factor=1.08)
+    setup_cola("tracker-2", "Cola", True, "kinematic", "Console1")
+    set_cola_kinematic_tuning(highlight_scale_factor=1.08)
     start_cola()
     print("[KinematicColaTracker] Auto setup+start executed.")
 except Exception as e:
