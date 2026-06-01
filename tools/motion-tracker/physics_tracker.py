@@ -164,19 +164,19 @@ else:
                 return
             try:
                 tracker_node = self._tracker.getNode()
-                # 用世界矩阵整体复制位置+旋转（tracker 节点内部用矩阵存储变换，
-                # getTransformNodeRotation 可能返回零向量）
-                mat = getTransformNodeMatrix(tracker_node, True)
-                setTransformNodeMatrix(self._node, mat, True)
+                t = getTransformNodeTranslation(tracker_node, True)
+                r = getTransformNodeRotation(tracker_node)
 
-                # maintain_offset：在矩阵已应用旋转后单独覆盖位置偏移
+                tx = t.x()
+                ty = t.y()
+                tz = t.z()
                 if self._node_offset is not None:
-                    t = getTransformNodeTranslation(tracker_node, True)
-                    setTransformNodeTranslation(self._node,
-                                               t.x() + self._node_offset.x(),
-                                               t.y() + self._node_offset.y(),
-                                               t.z() + self._node_offset.z(),
-                                               True)
+                    tx += self._node_offset.x()
+                    ty += self._node_offset.y()
+                    tz += self._node_offset.z()
+
+                setTransformNodeTranslation(self._node, tx, ty, tz, True)
+                setTransformNodeRotation(self._node, r.x(), r.y(), r.z())
 
                 # 每帧恢复原始 scale，防止 tracker scale 链条污染
                 if self._node_scale is not None:
@@ -424,19 +424,19 @@ else:
 
             try:
                 tracker_node = self._tracker.getNode()
-                # 用世界矩阵整体复制位置+旋转（tracker 节点内部用矩阵存储变换，
-                # getTransformNodeRotation 可能返回零向量）
-                mat = getTransformNodeMatrix(tracker_node, True)
-                setTransformNodeMatrix(self._cola_node, mat, True)
+                t = getTransformNodeTranslation(tracker_node, True)
+                r = getTransformNodeRotation(tracker_node)
 
-                # maintain_offset：在矩阵已应用旋转后单独覆盖位置偏移
+                tx = t.x()
+                ty = t.y()
+                tz = t.z()
                 if self._kinematic_offset is not None:
-                    t = getTransformNodeTranslation(tracker_node, True)
-                    setTransformNodeTranslation(self._cola_node,
-                                               t.x() + self._kinematic_offset.x(),
-                                               t.y() + self._kinematic_offset.y(),
-                                               t.z() + self._kinematic_offset.z(),
-                                               True)
+                    tx += self._kinematic_offset.x()
+                    ty += self._kinematic_offset.y()
+                    tz += self._kinematic_offset.z()
+
+                setTransformNodeTranslation(self._cola_node, tx, ty, tz, True)
+                setTransformNodeRotation(self._cola_node, r.x(), r.y(), r.z())
 
                 # 每帧恢复 Cola 原始缩放，防止 tracker 缩放链条污染
                 if self._cola_scale is not None:
