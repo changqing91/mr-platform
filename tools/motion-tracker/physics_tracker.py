@@ -57,33 +57,12 @@ else:
             a[2][0] * b[0][2] + a[2][1] * b[1][2] + a[2][2] * b[2][2]]]
 
     def _extract_device_rotation(device):
-        """获取 VR 设备旋转。优先节点旋转，失败时回退到 tracking matrix 反解欧拉角。"""
-        # 1) tracker 节点旋转
-        try:
-            node = device.getNode()
-            try:
-                return getTransformNodeRotation(node, True)
-            except Exception:
-                return getTransformNodeRotation(node)
-        except Exception:
-            pass
-
-        # 2) 可视化节点旋转（某些设备场景下比 getNode() 更稳定）
-        try:
-            vis = device.getVisualizationNode()
-            if vis:
-                try:
-                    return getTransformNodeRotation(vis, True)
-                except Exception:
-                    return getTransformNodeRotation(vis)
-        except Exception:
-            pass
-
-        # 3) tracking matrix -> scene euler（XYZ）
+        """获取 VR 设备旋转。优先 tracking matrix（最可靠），失败时回退到节点旋转。"""
+        # 1) tracking matrix -> scene euler（XYZ）
         try:
             m = device.getTrackingMatrix()
             if not m:
-                return None
+                raise RuntimeError("tracking matrix unavailable")
 
             c0 = m.column(0)
             c1 = m.column(1)
@@ -128,6 +107,27 @@ else:
                 rz = 0.0
 
             return Vec3f(math.degrees(rx), math.degrees(ry), math.degrees(rz))
+        except Exception:
+            pass
+
+        # 2) 可视化节点旋转（某些设备场景下比 getNode() 更稳定）
+        try:
+            vis = device.getVisualizationNode()
+            if vis:
+                try:
+                    return getTransformNodeRotation(vis, True)
+                except Exception:
+                    return getTransformNodeRotation(vis)
+        except Exception:
+            pass
+
+        # 3) tracker 节点旋转（兜底）
+        try:
+            node = device.getNode()
+            try:
+                return getTransformNodeRotation(node, True)
+            except Exception:
+                return getTransformNodeRotation(node)
         except Exception:
             return None
 
@@ -268,10 +268,7 @@ else:
 
                 setTransformNodeTranslation(self._node, tx, ty, tz, True)
                 if r is not None:
-                    try:
-                        setTransformNodeRotation(self._node, r.x(), r.y(), r.z(), True)
-                    except Exception:
-                        setTransformNodeRotation(self._node, r.x(), r.y(), r.z())
+                    setTransformNodeRotation(self._node, r.x(), r.y(), r.z())
 
                 # 每帧恢复原始 scale，防止 tracker scale 链条污染
                 if self._node_scale is not None:
@@ -532,10 +529,7 @@ else:
 
                 setTransformNodeTranslation(self._cola_node, tx, ty, tz, True)
                 if r is not None:
-                    try:
-                        setTransformNodeRotation(self._cola_node, r.x(), r.y(), r.z(), True)
-                    except Exception:
-                        setTransformNodeRotation(self._cola_node, r.x(), r.y(), r.z())
+                    setTransformNodeRotation(self._cola_node, r.x(), r.y(), r.z())
 
                 # 每帧恢复 Cola 原始缩放，防止 tracker 缩放链条污染
                 if self._cola_scale is not None:
@@ -715,3 +709,19 @@ def physics_status():
     global _transform_tracker, _cola_tracker
     _transform_tracker.status()
     _cola_tracker.status()
+
+def debug_tracker_rotation(tracker_name="tracker-1"):
+    """调试：打印指定 tracker 的实时旋转（来自 tracking 数据解析）。"""
+    try:
+        dev = vrDeviceService.getVRDevice(tracker_name)
+        if not dev:
+            print("[PhysicsTracker] DEBUG: tracker not found: {}".format(tracker_name))
+            return
+        r = _extract_device_rotation(dev)
+        if r is None:
+            print("[PhysicsTracker] DEBUG: tracker '{}' rotation unavailable".format(tracker_name))
+            return
+        print("[PhysicsTracker] DEBUG {} rot=({:.2f}, {:.2f}, {:.2f})".format(
+            tracker_name, r.x(), r.y(), r.z()))
+    except Exception as e:
+        print("[PhysicsTracker] DEBUG ERROR: " + str(e))
