@@ -59,6 +59,7 @@ else:
             self._node = None
             self._node_scale = None
             self._node_offset = None
+            self._vrd_node = None  # V2 node for world-space transform
             self._timer = vrTimer()
             self._timer_connected = False
 
@@ -105,6 +106,14 @@ else:
             except Exception:
                 self._node_scale = None
 
+            # 缓存 V2 节点引用，用于 setWorldTransform（世界空间旋转）
+            try:
+                self._vrd_node = vrNodeService.findNode(self._node_name)
+                if self._vrd_node and self._vrd_node.isNull():
+                    self._vrd_node = None
+            except Exception:
+                self._vrd_node = None
+
             # maintain_offset：记录 tracker→节点 的初始位置偏移
             self._node_offset = None
             if self._maintain_offset:
@@ -142,6 +151,7 @@ else:
             self._node = None
             self._node_scale = None
             self._node_offset = None
+            self._vrd_node = None
             print("[TransformTracker] Stopped: {} -> '{}'".format(
                 self._tracker_name, self._node_name))
 
@@ -164,19 +174,36 @@ else:
                 return
             try:
                 tracker_node = self._tracker.getNode()
-                t = getTransformNodeTranslation(tracker_node, True)
-                r = getTransformNodeRotation(tracker_node)
 
-                tx = t.x()
-                ty = t.y()
-                tz = t.z()
-                if self._node_offset is not None:
-                    tx += self._node_offset.x()
-                    ty += self._node_offset.y()
-                    tz += self._node_offset.z()
+                # 使用 V2 setWorldTransform 将 tracker 世界位姿直接应用到目标节点。
+                # tracker 的 getNode() 不在场景图中（无父节点），其局部变换 = 世界变换。
+                # setWorldTransform 可以正确处理目标节点存在父节点旋转的情况。
+                world_set = False
+                if self._vrd_node is not None:
+                    try:
+                        from PySide2.QtGui import QMatrix4x4, QVector4D
+                        m = QMatrix4x4(tracker_node.getTransform())
+                        if self._node_offset is not None:
+                            col = m.column(3)
+                            m.setColumn(3, QVector4D(
+                                col.x() + self._node_offset.x(),
+                                col.y() + self._node_offset.y(),
+                                col.z() + self._node_offset.z(),
+                                col.w()))
+                        self._vrd_node.setWorldTransform(m)
+                        world_set = True
+                    except Exception:
+                        pass
 
-                setTransformNodeTranslation(self._node, tx, ty, tz, True)
-                setTransformNodeRotation(self._node, r.x(), r.y(), r.z())
+                if not world_set:
+                    # 降级方案：V1 API（仅在目标节点父链无旋转时正确）
+                    t = getTransformNodeTranslation(tracker_node, True)
+                    r = getTransformNodeRotation(tracker_node)
+                    tx = t.x() + (self._node_offset.x() if self._node_offset else 0)
+                    ty = t.y() + (self._node_offset.y() if self._node_offset else 0)
+                    tz = t.z() + (self._node_offset.z() if self._node_offset else 0)
+                    setTransformNodeTranslation(self._node, tx, ty, tz, True)
+                    setTransformNodeRotation(self._node, r.x(), r.y(), r.z())
 
                 # 每帧恢复原始 scale，防止 tracker scale 链条污染
                 if self._node_scale is not None:
@@ -208,6 +235,7 @@ else:
             self._physics_registered = False
             self._tracker = None
             self._cola_node = None
+            self._vrd_cola_node = None  # V2 node for world-space transform
             self._kinematic_timer = vrTimer()
             self._kinematic_timer_connected = False
             self._cola_scale = None
@@ -330,6 +358,7 @@ else:
             self._tracker = None
             self._cola_node = None
             self._cola_scale = None
+            self._vrd_cola_node = None
             print("[ColaTracker] Stopped: {} -> '{}'".format(
                 self._tracker_name, self._cola_node_name))
 
@@ -387,6 +416,14 @@ else:
             except Exception:
                 self._cola_scale = None
 
+            # 缓存 V2 节点引用，用于 setWorldTransform（世界空间旋转）
+            try:
+                self._vrd_cola_node = vrNodeService.findNode(self._cola_node_name)
+                if self._vrd_cola_node and self._vrd_cola_node.isNull():
+                    self._vrd_cola_node = None
+            except Exception:
+                self._vrd_cola_node = None
+
             self._kinematic_offset = None
             if self._maintain_offset:
                 try:
@@ -415,6 +452,7 @@ else:
             except Exception:
                 pass
             self._kinematic_offset = None
+            self._vrd_cola_node = None
 
         def _kinematic_update(self):
             if not self._active:
@@ -424,19 +462,36 @@ else:
 
             try:
                 tracker_node = self._tracker.getNode()
-                t = getTransformNodeTranslation(tracker_node, True)
-                r = getTransformNodeRotation(tracker_node)
 
-                tx = t.x()
-                ty = t.y()
-                tz = t.z()
-                if self._kinematic_offset is not None:
-                    tx += self._kinematic_offset.x()
-                    ty += self._kinematic_offset.y()
-                    tz += self._kinematic_offset.z()
+                # 使用 V2 setWorldTransform 将 tracker 世界位姿直接应用到 Cola 节点。
+                # tracker 的 getNode() 不在场景图中（无父节点），其局部变换 = 世界变换。
+                # setWorldTransform 可以正确处理 Cola 存在父节点旋转的情况。
+                world_set = False
+                if self._vrd_cola_node is not None:
+                    try:
+                        from PySide2.QtGui import QMatrix4x4, QVector4D
+                        m = QMatrix4x4(tracker_node.getTransform())
+                        if self._kinematic_offset is not None:
+                            col = m.column(3)
+                            m.setColumn(3, QVector4D(
+                                col.x() + self._kinematic_offset.x(),
+                                col.y() + self._kinematic_offset.y(),
+                                col.z() + self._kinematic_offset.z(),
+                                col.w()))
+                        self._vrd_cola_node.setWorldTransform(m)
+                        world_set = True
+                    except Exception:
+                        pass
 
-                setTransformNodeTranslation(self._cola_node, tx, ty, tz, True)
-                setTransformNodeRotation(self._cola_node, r.x(), r.y(), r.z())
+                if not world_set:
+                    # 降级方案：V1 API（仅在 Cola 父链无旋转时正确）
+                    t = getTransformNodeTranslation(tracker_node, True)
+                    r = getTransformNodeRotation(tracker_node)
+                    tx = t.x() + (self._kinematic_offset.x() if self._kinematic_offset else 0)
+                    ty = t.y() + (self._kinematic_offset.y() if self._kinematic_offset else 0)
+                    tz = t.z() + (self._kinematic_offset.z() if self._kinematic_offset else 0)
+                    setTransformNodeTranslation(self._cola_node, tx, ty, tz, True)
+                    setTransformNodeRotation(self._cola_node, r.x(), r.y(), r.z())
 
                 # 每帧恢复 Cola 原始缩放，防止 tracker 缩放链条污染
                 if self._cola_scale is not None:
