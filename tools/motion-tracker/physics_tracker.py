@@ -19,6 +19,8 @@
 # 右手 B 键（右手控制器）：切换 tracker-2 Cola 追踪开/关
 # ======================================================================
 
+import math
+
 global _transform_tracker, _cola_tracker
 
 # 每次重新加载时强制重新初始化，确保代码更新生效
@@ -39,6 +41,95 @@ if '_physics_tracker_initialized' in globals() and _physics_tracker_initialized:
     print("[PhysicsTracker] Already initialized, skipping re-init")
 else:
     _physics_tracker_initialized = False
+
+    def _mul3x3(a, b):
+        return [[
+            a[0][0] * b[0][0] + a[0][1] * b[1][0] + a[0][2] * b[2][0],
+            a[0][0] * b[0][1] + a[0][1] * b[1][1] + a[0][2] * b[2][1],
+            a[0][0] * b[0][2] + a[0][1] * b[1][2] + a[0][2] * b[2][2]],
+            [
+            a[1][0] * b[0][0] + a[1][1] * b[1][0] + a[1][2] * b[2][0],
+            a[1][0] * b[0][1] + a[1][1] * b[1][1] + a[1][2] * b[2][1],
+            a[1][0] * b[0][2] + a[1][1] * b[1][2] + a[1][2] * b[2][2]],
+            [
+            a[2][0] * b[0][0] + a[2][1] * b[1][0] + a[2][2] * b[2][0],
+            a[2][0] * b[0][1] + a[2][1] * b[1][1] + a[2][2] * b[2][1],
+            a[2][0] * b[0][2] + a[2][1] * b[1][2] + a[2][2] * b[2][2]]]
+
+    def _extract_device_rotation(device):
+        """获取 VR 设备旋转。优先节点旋转，失败时回退到 tracking matrix 反解欧拉角。"""
+        # 1) tracker 节点旋转
+        try:
+            node = device.getNode()
+            try:
+                return getTransformNodeRotation(node, True)
+            except Exception:
+                return getTransformNodeRotation(node)
+        except Exception:
+            pass
+
+        # 2) 可视化节点旋转（某些设备场景下比 getNode() 更稳定）
+        try:
+            vis = device.getVisualizationNode()
+            if vis:
+                try:
+                    return getTransformNodeRotation(vis, True)
+                except Exception:
+                    return getTransformNodeRotation(vis)
+        except Exception:
+            pass
+
+        # 3) tracking matrix -> scene euler（XYZ）
+        try:
+            m = device.getTrackingMatrix()
+            if not m:
+                return None
+
+            c0 = m.column(0)
+            c1 = m.column(1)
+            c2 = m.column(2)
+
+            # tracking(Y-up) 旋转矩阵（列向量为轴方向）
+            rt = [
+                [c0.x(), c1.x(), c2.x()],
+                [c0.y(), c1.y(), c2.y()],
+                [c0.z(), c1.z(), c2.z()]
+            ]
+
+            # 坐标系变换：scene_x=-track_x, scene_y=-track_z, scene_z=track_y
+            s = [
+                [-1.0, 0.0, 0.0],
+                [0.0, 0.0, -1.0],
+                [0.0, 1.0, 0.0]
+            ]
+            s_inv = [
+                [-1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0],
+                [0.0, -1.0, 0.0]
+            ]
+
+            rs = _mul3x3(_mul3x3(s, rt), s_inv)
+
+            # 反解欧拉角（XYZ）
+            sy = -rs[2][0]
+            if sy > 1.0:
+                sy = 1.0
+            elif sy < -1.0:
+                sy = -1.0
+
+            if abs(sy) < 0.999999:
+                rx = math.atan2(rs[2][1], rs[2][2])
+                ry = math.asin(sy)
+                rz = math.atan2(rs[1][0], rs[0][0])
+            else:
+                # 万向锁时退化处理
+                rx = math.atan2(-rs[1][2], rs[1][1])
+                ry = math.asin(sy)
+                rz = 0.0
+
+            return Vec3f(math.degrees(rx), math.degrees(ry), math.degrees(rz))
+        except Exception:
+            return None
 
     # ======================================================================
     # TransformTracker — tracker-1 → Transform3D 节点（ParentConstraint）
@@ -165,11 +256,7 @@ else:
             try:
                 tracker_node = self._tracker.getNode()
                 t = getTransformNodeTranslation(tracker_node, True)
-                # 优先使用世界旋转，保证在父层级下也实时跟随 tracker 朝向
-                try:
-                    r = getTransformNodeRotation(tracker_node, True)
-                except TypeError:
-                    r = getTransformNodeRotation(tracker_node)
+                r = _extract_device_rotation(self._tracker)
 
                 tx = t.x()
                 ty = t.y()
@@ -180,10 +267,11 @@ else:
                     tz += self._node_offset.z()
 
                 setTransformNodeTranslation(self._node, tx, ty, tz, True)
-                try:
-                    setTransformNodeRotation(self._node, r.x(), r.y(), r.z(), True)
-                except TypeError:
-                    setTransformNodeRotation(self._node, r.x(), r.y(), r.z())
+                if r is not None:
+                    try:
+                        setTransformNodeRotation(self._node, r.x(), r.y(), r.z(), True)
+                    except Exception:
+                        setTransformNodeRotation(self._node, r.x(), r.y(), r.z())
 
                 # 每帧恢复原始 scale，防止 tracker scale 链条污染
                 if self._node_scale is not None:
@@ -432,11 +520,7 @@ else:
             try:
                 tracker_node = self._tracker.getNode()
                 t = getTransformNodeTranslation(tracker_node, True)
-                # 优先使用世界旋转，保证 Cola 与 tracker 朝向实时一致
-                try:
-                    r = getTransformNodeRotation(tracker_node, True)
-                except TypeError:
-                    r = getTransformNodeRotation(tracker_node)
+                r = _extract_device_rotation(self._tracker)
 
                 tx = t.x()
                 ty = t.y()
@@ -447,10 +531,11 @@ else:
                     tz += self._kinematic_offset.z()
 
                 setTransformNodeTranslation(self._cola_node, tx, ty, tz, True)
-                try:
-                    setTransformNodeRotation(self._cola_node, r.x(), r.y(), r.z(), True)
-                except TypeError:
-                    setTransformNodeRotation(self._cola_node, r.x(), r.y(), r.z())
+                if r is not None:
+                    try:
+                        setTransformNodeRotation(self._cola_node, r.x(), r.y(), r.z(), True)
+                    except Exception:
+                        setTransformNodeRotation(self._cola_node, r.x(), r.y(), r.z())
 
                 # 每帧恢复 Cola 原始缩放，防止 tracker 缩放链条污染
                 if self._cola_scale is not None:
