@@ -174,34 +174,27 @@ else:
                 return
             try:
                 tracker_node = self._tracker.getNode()
+                t = getTransformNodeTranslation(tracker_node, True)
+                r = getTransformNodeRotation(tracker_node)
 
-                # 使用 V2 setWorldTransform 将 tracker 世界位姿直接应用到目标节点。
-                # tracker 的 getNode() 不在场景图中（无父节点），其局部变换 = 世界变换。
-                # setWorldTransform 可以正确处理目标节点存在父节点旋转的情况。
-                world_set = False
+                tx = t.x() + (self._node_offset.x() if self._node_offset else 0)
+                ty = t.y() + (self._node_offset.y() if self._node_offset else 0)
+                tz = t.z() + (self._node_offset.z() if self._node_offset else 0)
+
                 if self._vrd_node is not None:
-                    try:
-                        from PySide2.QtGui import QMatrix4x4, QVector4D
-                        m = QMatrix4x4(tracker_node.getTransform())
-                        if self._node_offset is not None:
-                            col = m.column(3)
-                            m.setColumn(3, QVector4D(
-                                col.x() + self._node_offset.x(),
-                                col.y() + self._node_offset.y(),
-                                col.z() + self._node_offset.z(),
-                                col.w()))
-                        self._vrd_node.setWorldTransform(m)
-                        world_set = True
-                    except Exception:
-                        pass
-
-                if not world_set:
+                    # 使用 V2 setWorldTransform 在世界空间设置位置+旋转，
+                    # 正确处理目标节点父链有旋转的情况。
+                    # getTransformNodeRotation 返回 XYZ Euler 角（度），
+                    # VRED 默认 XYZ 内旋顺序: R_world = Rz * Ry * Rx
+                    from PySide2.QtGui import QMatrix4x4
+                    m = QMatrix4x4()
+                    m.translate(tx, ty, tz)
+                    m.rotate(r.z(), 0.0, 0.0, 1.0)
+                    m.rotate(r.y(), 0.0, 1.0, 0.0)
+                    m.rotate(r.x(), 1.0, 0.0, 0.0)
+                    self._vrd_node.setWorldTransform(m)
+                else:
                     # 降级方案：V1 API（仅在目标节点父链无旋转时正确）
-                    t = getTransformNodeTranslation(tracker_node, True)
-                    r = getTransformNodeRotation(tracker_node)
-                    tx = t.x() + (self._node_offset.x() if self._node_offset else 0)
-                    ty = t.y() + (self._node_offset.y() if self._node_offset else 0)
-                    tz = t.z() + (self._node_offset.z() if self._node_offset else 0)
                     setTransformNodeTranslation(self._node, tx, ty, tz, True)
                     setTransformNodeRotation(self._node, r.x(), r.y(), r.z())
 
@@ -462,34 +455,27 @@ else:
 
             try:
                 tracker_node = self._tracker.getNode()
+                t = getTransformNodeTranslation(tracker_node, True)
+                r = getTransformNodeRotation(tracker_node)
 
-                # 使用 V2 setWorldTransform 将 tracker 世界位姿直接应用到 Cola 节点。
-                # tracker 的 getNode() 不在场景图中（无父节点），其局部变换 = 世界变换。
-                # setWorldTransform 可以正确处理 Cola 存在父节点旋转的情况。
-                world_set = False
+                tx = t.x() + (self._kinematic_offset.x() if self._kinematic_offset else 0)
+                ty = t.y() + (self._kinematic_offset.y() if self._kinematic_offset else 0)
+                tz = t.z() + (self._kinematic_offset.z() if self._kinematic_offset else 0)
+
                 if self._vrd_cola_node is not None:
-                    try:
-                        from PySide2.QtGui import QMatrix4x4, QVector4D
-                        m = QMatrix4x4(tracker_node.getTransform())
-                        if self._kinematic_offset is not None:
-                            col = m.column(3)
-                            m.setColumn(3, QVector4D(
-                                col.x() + self._kinematic_offset.x(),
-                                col.y() + self._kinematic_offset.y(),
-                                col.z() + self._kinematic_offset.z(),
-                                col.w()))
-                        self._vrd_cola_node.setWorldTransform(m)
-                        world_set = True
-                    except Exception:
-                        pass
-
-                if not world_set:
+                    # 使用 V2 setWorldTransform 在世界空间设置位置+旋转，
+                    # 正确处理 Cola 父链有旋转的情况。
+                    # getTransformNodeRotation 返回 XYZ Euler 角（度），
+                    # VRED 默认 XYZ 内旋顺序: R_world = Rz * Ry * Rx
+                    from PySide2.QtGui import QMatrix4x4
+                    m = QMatrix4x4()
+                    m.translate(tx, ty, tz)
+                    m.rotate(r.z(), 0.0, 0.0, 1.0)
+                    m.rotate(r.y(), 0.0, 1.0, 0.0)
+                    m.rotate(r.x(), 1.0, 0.0, 0.0)
+                    self._vrd_cola_node.setWorldTransform(m)
+                else:
                     # 降级方案：V1 API（仅在 Cola 父链无旋转时正确）
-                    t = getTransformNodeTranslation(tracker_node, True)
-                    r = getTransformNodeRotation(tracker_node)
-                    tx = t.x() + (self._kinematic_offset.x() if self._kinematic_offset else 0)
-                    ty = t.y() + (self._kinematic_offset.y() if self._kinematic_offset else 0)
-                    tz = t.z() + (self._kinematic_offset.z() if self._kinematic_offset else 0)
                     setTransformNodeTranslation(self._cola_node, tx, ty, tz, True)
                     setTransformNodeRotation(self._cola_node, r.x(), r.y(), r.z())
 
