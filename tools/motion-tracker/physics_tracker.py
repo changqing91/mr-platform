@@ -522,6 +522,8 @@ else:
                 pass
             self._kinematic_offset = None
             self._kinematic_rot_offset = None
+
+        def _kinematic_update(self):
             if not self._active:
                 return
             if not self._tracker or not self._cola_node:
