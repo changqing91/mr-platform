@@ -85,7 +85,31 @@ else:
                 [m[0][2], m[1][2], m[2][2]]]
 
     def _get_tracker_mat3(device):
-        """从 tracking matrix 提取 3x3 旋转矩阵。"""
+        """从 tracker 提取世界空间 3x3 旋转矩阵。
+        优先使用节点世界变换（不随摄像机方向变化），
+        回退到 getTrackingMatrix()（可能受摄像机影响）。
+        列主序 4x4 矩阵：列 0-2 的前三行即旋转矩阵。
+        """
+        # 方法1：v1 API node.getWorldTransform() → 16 浮点数列主序 4x4
+        try:
+            node = device.getNode()
+            wm = node.getWorldTransform()
+            if wm and len(wm) == 16:
+                return [[wm[0], wm[4], wm[8]],
+                        [wm[1], wm[5], wm[9]],
+                        [wm[2], wm[6], wm[10]]]
+        except Exception:
+            pass
+        # 方法2：v1 API device.getWorldMatrix() → 16 浮点数列主序 4x4
+        try:
+            wm = device.getWorldMatrix()
+            if wm and len(wm) == 16:
+                return [[wm[0], wm[4], wm[8]],
+                        [wm[1], wm[5], wm[9]],
+                        [wm[2], wm[6], wm[10]]]
+        except Exception:
+            pass
+        # 方法3：回退 — getTrackingMatrix（可能随摄像机方向变化）
         try:
             m = device.getTrackingMatrix()
             if not m:
@@ -112,9 +136,62 @@ else:
             rz = 0.0
         return math.degrees(rx), math.degrees(ry), math.degrees(rz)
 
+    def _debug_rot_methods(tracker_name):
+        """对比所有旋转数据来源，用于排查坐标空间问题（内部实现）。"""
+        try:
+            device = vrDeviceService.getVRDevice(tracker_name)
+        except Exception as e:
+            print("找不到设备: " + str(e))
+            return
+        print("=== rotation debug: " + tracker_name + " ===")
+        # getTransformNodeRotation (local Euler)
+        try:
+            node = device.getNode()
+            r = getTransformNodeRotation(node)
+            print("  getTransformNodeRotation: %.2f %.2f %.2f" % (r.x(), r.y(), r.z()))
+        except Exception as e:
+            print("  getTransformNodeRotation: ERROR " + str(e))
+        # node.getWorldRotation() v1 API
+        try:
+            wr = node.getWorldRotation()
+            print("  node.getWorldRotation(): " + str(wr))
+        except Exception as e:
+            print("  node.getWorldRotation(): ERROR " + str(e))
+        # node.getWorldTransform() v1 API → 16 floats
+        try:
+            wm = node.getWorldTransform()
+            if wm and len(wm) == 16:
+                r3 = [[wm[0], wm[4], wm[8]], [wm[1], wm[5], wm[9]], [wm[2], wm[6], wm[10]]]
+                rx, ry, rz = _mat3_to_euler(r3)
+                print("  node.getWorldTransform() euler: %.2f %.2f %.2f" % (rx, ry, rz))
+            else:
+                print("  node.getWorldTransform(): None or wrong length")
+        except Exception as e:
+            print("  node.getWorldTransform(): ERROR " + str(e))
+        # device.getWorldMatrix() v1 API → 16 floats
+        try:
+            wm = device.getWorldMatrix()
+            if wm and len(wm) == 16:
+                r3 = [[wm[0], wm[4], wm[8]], [wm[1], wm[5], wm[9]], [wm[2], wm[6], wm[10]]]
+                rx, ry, rz = _mat3_to_euler(r3)
+                print("  device.getWorldMatrix() euler: %.2f %.2f %.2f" % (rx, ry, rz))
+            else:
+                print("  device.getWorldMatrix(): None or wrong length")
+        except Exception as e:
+            print("  device.getWorldMatrix(): ERROR " + str(e))
+        # getTrackingMatrix (current fallback)
+        try:
+            m = device.getTrackingMatrix()
+            if m:
+                c0, c1, c2 = m.column(0), m.column(1), m.column(2)
+                r3 = [[c0.x(), c1.x(), c2.x()], [c0.y(), c1.y(), c2.y()], [c0.z(), c1.z(), c2.z()]]
+                rx, ry, rz = _mat3_to_euler(r3)
+                print("  getTrackingMatrix() euler: %.2f %.2f %.2f" % (rx, ry, rz))
+        except Exception as e:
+            print("  getTrackingMatrix(): ERROR " + str(e))
+        print("=== end debug ===")
 
 
-    # ======================================================================
     # TransformTracker — tracker-1 → Transform3D 节点（ParentConstraint）
     # ======================================================================
     class TransformTracker:
@@ -731,17 +808,7 @@ def physics_status():
     _cola_tracker.status()
 
 def debug_tracker_rotation(tracker_name="tracker-1"):
-    """调试：打印指定 tracker 的实时旋转（来自 tracking 数据解析）。"""
-    try:
-        dev = vrDeviceService.getVRDevice(tracker_name)
-        if not dev:
-            print("[PhysicsTracker] DEBUG: tracker not found: {}".format(tracker_name))
-            return
-        r = _extract_device_rotation(dev)
-        if r is None:
-            print("[PhysicsTracker] DEBUG: tracker '{}' rotation unavailable".format(tracker_name))
-            return
-        print("[PhysicsTracker] DEBUG {} rot=({:.2f}, {:.2f}, {:.2f})".format(
-            tracker_name, r.x(), r.y(), r.z()))
-    except Exception as e:
-        print("[PhysicsTracker] DEBUG ERROR: " + str(e))
+    """对比所有旋转数据来源，排查坐标空间问题。
+    用法：debug_tracker_rotation("tracker-2")
+    """
+    _debug_rot_methods(tracker_name)
