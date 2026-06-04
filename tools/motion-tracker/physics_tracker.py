@@ -85,31 +85,19 @@ else:
                 [m[0][2], m[1][2], m[2][2]]]
 
     def _get_tracker_mat3(device):
-        """从 tracker 提取世界空间 3x3 旋转矩阵。
-        优先使用节点世界变换（不随摄像机方向变化），
-        回退到 getTrackingMatrix()（可能受摄像机影响）。
-        列主序 4x4 矩阵：列 0-2 的前三行即旋转矩阵。
-        """
-        # 方法1：v1 API node.getWorldTransform() → 16 浮点数列主序 4x4
+        """从 tracker 节点世界变换提取 3x3 旋转矩阵（不随摄像机方向变化）。"""
+        # 方法1：node.getWorldTransform() → QMatrix4x4，与 getTrackingMatrix() 格式相同
         try:
             node = device.getNode()
-            wm = node.getWorldTransform()
-            if wm and len(wm) == 16:
-                return [[wm[0], wm[4], wm[8]],
-                        [wm[1], wm[5], wm[9]],
-                        [wm[2], wm[6], wm[10]]]
+            m = node.getWorldTransform()
+            if m:
+                c0, c1, c2 = m.column(0), m.column(1), m.column(2)
+                return [[c0.x(), c1.x(), c2.x()],
+                        [c0.y(), c1.y(), c2.y()],
+                        [c0.z(), c1.z(), c2.z()]]
         except Exception:
             pass
-        # 方法2：v1 API device.getWorldMatrix() → 16 浮点数列主序 4x4
-        try:
-            wm = device.getWorldMatrix()
-            if wm and len(wm) == 16:
-                return [[wm[0], wm[4], wm[8]],
-                        [wm[1], wm[5], wm[9]],
-                        [wm[2], wm[6], wm[10]]]
-        except Exception:
-            pass
-        # 方法3：回退 — getTrackingMatrix（可能随摄像机方向变化）
+        # 方法2：回退 — getTrackingMatrix（可能随摄像机方向变化）
         try:
             m = device.getTrackingMatrix()
             if not m:
@@ -157,28 +145,18 @@ else:
             print("  node.getWorldRotation(): " + str(wr))
         except Exception as e:
             print("  node.getWorldRotation(): ERROR " + str(e))
-        # node.getWorldTransform() v1 API → 16 floats
+        # node.getWorldTransform() → QMatrix4x4（与 getTrackingMatrix 格式相同）
         try:
-            wm = node.getWorldTransform()
-            if wm and len(wm) == 16:
-                r3 = [[wm[0], wm[4], wm[8]], [wm[1], wm[5], wm[9]], [wm[2], wm[6], wm[10]]]
+            m = node.getWorldTransform()
+            if m:
+                c0, c1, c2 = m.column(0), m.column(1), m.column(2)
+                r3 = [[c0.x(), c1.x(), c2.x()], [c0.y(), c1.y(), c2.y()], [c0.z(), c1.z(), c2.z()]]
                 rx, ry, rz = _mat3_to_euler(r3)
                 print("  node.getWorldTransform() euler: %.2f %.2f %.2f" % (rx, ry, rz))
             else:
-                print("  node.getWorldTransform(): None or wrong length")
+                print("  node.getWorldTransform(): None")
         except Exception as e:
             print("  node.getWorldTransform(): ERROR " + str(e))
-        # device.getWorldMatrix() v1 API → 16 floats
-        try:
-            wm = device.getWorldMatrix()
-            if wm and len(wm) == 16:
-                r3 = [[wm[0], wm[4], wm[8]], [wm[1], wm[5], wm[9]], [wm[2], wm[6], wm[10]]]
-                rx, ry, rz = _mat3_to_euler(r3)
-                print("  device.getWorldMatrix() euler: %.2f %.2f %.2f" % (rx, ry, rz))
-            else:
-                print("  device.getWorldMatrix(): None or wrong length")
-        except Exception as e:
-            print("  device.getWorldMatrix(): ERROR " + str(e))
         # getTrackingMatrix (current fallback)
         try:
             m = device.getTrackingMatrix()
