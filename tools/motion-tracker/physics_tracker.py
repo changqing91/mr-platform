@@ -83,14 +83,15 @@ else:
                 [c0.z(), c1.z(), c2.z()]
             ]
 
-            # 坐标系变换：scene_x=-track_x, scene_y=-track_z, scene_z=track_y
+            # 坐标系变换：Y-up(tracking) -> Z-up(scene)
+            # scene_x=track_x, scene_y=-track_z, scene_z=track_y  (det=+1, 正手性)
             s = [
-                [-1.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
                 [0.0, 0.0, -1.0],
                 [0.0, 1.0, 0.0]
             ]
             s_inv = [
-                [-1.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
                 [0.0, 0.0, 1.0],
                 [0.0, -1.0, 0.0]
             ]
