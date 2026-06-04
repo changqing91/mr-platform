@@ -57,17 +57,7 @@ else:
             a[2][0] * b[0][2] + a[2][1] * b[1][2] + a[2][2] * b[2][2]]]
 
     def _extract_device_translation(device):
-        """获取 VR 设备位置。优先 tracking matrix 平移列；失败时回退到设备节点世界位置。"""
-        try:
-            m = device.getTrackingMatrix()
-            if not m:
-                raise RuntimeError("tracking matrix unavailable")
-            c3 = m.column(3)
-            # 在当前工程中 trackingMatrix 的平移分量已与场景坐标系对齐
-            return Vec3f(c3.x(), c3.y(), c3.z())
-        except Exception:
-            pass
-
+        """获取 VR 设备位置。从 tracker 场景节点世界坐标读取（与位置跟随一致）。"""
         try:
             node = device.getNode()
             return getTransformNodeTranslation(node, True)
@@ -197,9 +187,7 @@ else:
             self._node_offset = None
             if self._maintain_offset:
                 try:
-                    t_tracker = _extract_device_translation(self._tracker)
-                    if t_tracker is None:
-                        raise RuntimeError("tracker translation unavailable")
+                    t_tracker = getTransformNodeTranslation(self._tracker.getNode(), True)
                     t_node = getTransformNodeTranslation(self._node, True)
                     self._node_offset = Vec3f(
                         t_node.x() - t_tracker.x(),
@@ -481,9 +469,7 @@ else:
             self._kinematic_offset = None
             if self._maintain_offset:
                 try:
-                    t_tracker = _extract_device_translation(self._tracker)
-                    if t_tracker is None:
-                        raise RuntimeError("tracker translation unavailable")
+                    t_tracker = getTransformNodeTranslation(self._tracker.getNode(), True)
                     t_cola = getTransformNodeTranslation(self._cola_node, True)
                     self._kinematic_offset = Vec3f(
                         t_cola.x() - t_tracker.x(),
