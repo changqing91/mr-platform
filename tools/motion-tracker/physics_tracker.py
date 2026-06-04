@@ -103,7 +103,7 @@ else:
                 ry = math.asin(sy)
                 rz = 0.0
 
-            return Vec3f(math.degrees(rx) + 90.0, math.degrees(ry), math.degrees(rz))
+            return Vec3f(math.degrees(rx), math.degrees(ry), math.degrees(rz) + 90.0)
         except Exception:
             return None
 
