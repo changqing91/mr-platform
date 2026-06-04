@@ -64,56 +64,55 @@ else:
         except Exception:
             return None
 
-    _rot_debug_count = [0]  # 调试帧计数，可在 Script Editor 执行 _rot_debug_count[0]=0 来重置
+    def _euler_to_mat3(rx_deg, ry_deg, rz_deg):
+        """Euler 角（度）→ 3x3 旋转矩阵，R = Rz*Ry*Rx 顺序（与 _mat3_to_euler 一致）。"""
+        rx = math.radians(rx_deg)
+        ry = math.radians(ry_deg)
+        rz = math.radians(rz_deg)
+        cx, sx = math.cos(rx), math.sin(rx)
+        cy, sy_v = math.cos(ry), math.sin(ry)
+        cz, sz = math.cos(rz), math.sin(rz)
+        return [
+            [cz*cy,              cz*sy_v*sx - sz*cx,  cz*sy_v*cx + sz*sx],
+            [sz*cy,              sz*sy_v*sx + cz*cx,  sz*sy_v*cx - cz*sx],
+            [-sy_v,              cy*sx,               cy*cx]
+        ]
 
-    def _extract_device_rotation(device):
-        """获取 VR 设备旋转。统一从 tracking matrix 读取并转换到场景欧拉角。"""
-        # tracking matrix -> scene euler（XYZ）
+    def _mat3_t(m):
+        """转置 3x3 矩阵（正交旋转矩阵的转置 = 逆）。"""
+        return [[m[0][0], m[1][0], m[2][0]],
+                [m[0][1], m[1][1], m[2][1]],
+                [m[0][2], m[1][2], m[2][2]]]
+
+    def _get_tracker_mat3(device):
+        """从 tracking matrix 提取 3x3 旋转矩阵。"""
         try:
             m = device.getTrackingMatrix()
             if not m:
-                raise RuntimeError("tracking matrix unavailable")
-
-            c0 = m.column(0)
-            c1 = m.column(1)
-            c2 = m.column(2)
-
-            # tracking 旋转矩阵（列向量为轴方向）
-            rt = [
-                [c0.x(), c1.x(), c2.x()],
-                [c0.y(), c1.y(), c2.y()],
-                [c0.z(), c1.z(), c2.z()]
-            ]
-
-            # trackingMatrix 已是 VRED 场景坐标（Z-up），无需额外坐标转换
-            rs = rt
-
-            sy = -rs[2][0]
-            if sy > 1.0:
-                sy = 1.0
-            elif sy < -1.0:
-                sy = -1.0
-
-            if abs(sy) < 0.999999:
-                rx = math.atan2(rs[2][1], rs[2][2])
-                ry = math.asin(sy)
-                rz = math.atan2(rs[1][0], rs[0][0])
-            else:
-                rx = math.atan2(-rs[1][2], rs[1][1])
-                ry = math.asin(sy)
-                rz = 0.0
-
-            is_identity = (abs(rt[0][0]-1)<0.01 and abs(rt[1][1]-1)<0.01 and abs(rt[2][2]-1)<0.01
-                          and abs(rt[0][1])<0.01 and abs(rt[0][2])<0.01 and abs(rt[2][0])<0.01)
-            if not is_identity and _rot_debug_count[0] < 5:
-                _rot_debug_count[0] += 1
-                print("[ROT_DEBUG] matrix rows: {} | {} | {}".format(rt[0], rt[1], rt[2]))
-                print("[ROT_DEBUG] euler(deg): rx={:.1f} ry={:.1f} rz={:.1f}".format(
-                    math.degrees(rx), math.degrees(ry), math.degrees(rz)))
-
-            return Vec3f(math.degrees(rx), math.degrees(ry), math.degrees(rz))
+                return None
+            c0, c1, c2 = m.column(0), m.column(1), m.column(2)
+            return [[c0.x(), c1.x(), c2.x()],
+                    [c0.y(), c1.y(), c2.y()],
+                    [c0.z(), c1.z(), c2.z()]]
         except Exception:
             return None
+
+    def _mat3_to_euler(rs):
+        """3x3 旋转矩阵 → Euler 角（度），R = Rz*Ry*Rx 顺序。"""
+        sy = -rs[2][0]
+        if sy > 1.0: sy = 1.0
+        elif sy < -1.0: sy = -1.0
+        if abs(sy) < 0.999999:
+            rx = math.atan2(rs[2][1], rs[2][2])
+            ry = math.asin(sy)
+            rz = math.atan2(rs[1][0], rs[0][0])
+        else:
+            rx = math.atan2(-rs[1][2], rs[1][1])
+            ry = math.asin(sy)
+            rz = 0.0
+        return math.degrees(rx), math.degrees(ry), math.degrees(rz)
+
+
 
     # ======================================================================
     # TransformTracker — tracker-1 → Transform3D 节点（ParentConstraint）
@@ -134,6 +133,7 @@ else:
             self._node = None
             self._node_scale = None
             self._node_offset = None
+            self._rot_offset = None  # 旋转偏移矩阵 R_node_init * inv(R_tracker_init)
             self._timer = vrTimer()
             self._timer_connected = False
 
@@ -194,6 +194,19 @@ else:
                 except Exception as e:
                     print("[TransformTracker] WARNING: failed to compute offset: " + str(e))
 
+            # 旋转 maintain_offset：记录 R_node_init * inv(R_tracker_init)
+            # 确保节点始终从其初始场景旋转出发跟随 tracker 旋转
+            self._rot_offset = None
+            try:
+                node_euler = getTransformNodeRotation(self._node)
+                R_node_init = _euler_to_mat3(node_euler.x(), node_euler.y(), node_euler.z())
+                rt_init = _get_tracker_mat3(self._tracker)
+                if rt_init is not None:
+                    self._rot_offset = _mul3x3(R_node_init, _mat3_t(rt_init))
+                    print("[TransformTracker] rotation offset computed")
+            except Exception as e:
+                print("[TransformTracker] WARNING rotation offset: " + str(e))
+
             if not self._timer_connected:
                 self._timer.connect(self._update)
                 self._timer_connected = True
@@ -216,6 +229,7 @@ else:
             self._node = None
             self._node_scale = None
             self._node_offset = None
+            self._rot_offset = None
             print("[TransformTracker] Stopped: {} -> '{}'".format(
                 self._tracker_name, self._node_name))
 
@@ -238,7 +252,6 @@ else:
                 return
             try:
                 t = _extract_device_translation(self._tracker)
-                r = _extract_device_rotation(self._tracker)
                 if t is None:
                     return
 
@@ -251,8 +264,13 @@ else:
                     tz += self._node_offset.z()
 
                 setTransformNodeTranslation(self._node, tx, ty, tz, True)
-                if r is not None:
-                    setTransformNodeRotation(self._node, r.x(), r.y(), r.z())
+
+                # 应用旋转（带初始偏移，保持节点初始朝向作为基准）
+                rt = _get_tracker_mat3(self._tracker)
+                if rt is not None:
+                    rs = _mul3x3(self._rot_offset, rt) if self._rot_offset is not None else rt
+                    rx_d, ry_d, rz_d = _mat3_to_euler(rs)
+                    setTransformNodeRotation(self._node, rx_d, ry_d, rz_d)
 
                 # 每帧恢复原始 scale，防止 tracker scale 链条污染
                 if self._node_scale is not None:
@@ -288,6 +306,7 @@ else:
             self._kinematic_timer_connected = False
             self._cola_scale = None
             self._kinematic_offset = None
+            self._kinematic_rot_offset = None  # 旋转偏移矩阵
             # 碰撞信号连接句柄
             self._sig_start = None
             self._sig_stop = None
@@ -476,6 +495,18 @@ else:
                 except Exception as e:
                     print("[ColaTracker] WARNING: failed to compute maintain_offset: " + str(e))
 
+            # 旋转 maintain_offset：记录 R_cola_init * inv(R_tracker_init)
+            self._kinematic_rot_offset = None
+            try:
+                cola_euler = getTransformNodeRotation(self._cola_node)
+                R_cola_init = _euler_to_mat3(cola_euler.x(), cola_euler.y(), cola_euler.z())
+                rt_init = _get_tracker_mat3(self._tracker)
+                if rt_init is not None:
+                    self._kinematic_rot_offset = _mul3x3(R_cola_init, _mat3_t(rt_init))
+                    print("[ColaTracker] rotation offset computed")
+            except Exception as e:
+                print("[ColaTracker] WARNING rotation offset: " + str(e))
+
             if not self._kinematic_timer_connected:
                 self._kinematic_timer.connect(self._kinematic_update)
                 self._kinematic_timer_connected = True
@@ -490,8 +521,7 @@ else:
             except Exception:
                 pass
             self._kinematic_offset = None
-
-        def _kinematic_update(self):
+            self._kinematic_rot_offset = None
             if not self._active:
                 return
             if not self._tracker or not self._cola_node:
@@ -499,7 +529,6 @@ else:
 
             try:
                 t = _extract_device_translation(self._tracker)
-                r = _extract_device_rotation(self._tracker)
                 if t is None:
                     return
 
@@ -512,8 +541,13 @@ else:
                     tz += self._kinematic_offset.z()
 
                 setTransformNodeTranslation(self._cola_node, tx, ty, tz, True)
-                if r is not None:
-                    setTransformNodeRotation(self._cola_node, r.x(), r.y(), r.z())
+
+                # 应用旋转（带初始偏移）
+                rt = _get_tracker_mat3(self._tracker)
+                if rt is not None:
+                    rs = _mul3x3(self._kinematic_rot_offset, rt) if self._kinematic_rot_offset is not None else rt
+                    rx_d, ry_d, rz_d = _mat3_to_euler(rs)
+                    setTransformNodeRotation(self._cola_node, rx_d, ry_d, rz_d)
 
                 # 每帧恢复 Cola 原始缩放，防止 tracker 缩放链条污染
                 if self._cola_scale is not None:
