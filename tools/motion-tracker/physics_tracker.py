@@ -83,22 +83,10 @@ else:
                 [c0.z(), c1.z(), c2.z()]
             ]
 
-            # 坐标系变换：Y-up(tracking) -> Z-up(scene)
-            # scene_x=track_x, scene_y=-track_z, scene_z=track_y  (det=+1, 正手性)
-            s = [
-                [1.0, 0.0, 0.0],
-                [0.0, 0.0, -1.0],
-                [0.0, 1.0, 0.0]
-            ]
-            s_inv = [
-                [1.0, 0.0, 0.0],
-                [0.0, 0.0, 1.0],
-                [0.0, -1.0, 0.0]
-            ]
+            # trackingMatrix 已是 VRED 场景坐标（Z-up），无需额外坐标转换
+            # 直接用旋转矩阵 rt 反解欧拉角（XYZ 顺序）
+            rs = rt
 
-            rs = _mul3x3(_mul3x3(s, rt), s_inv)
-
-            # 反解欧拉角（XYZ）
             sy = -rs[2][0]
             if sy > 1.0:
                 sy = 1.0
