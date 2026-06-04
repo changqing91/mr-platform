@@ -64,6 +64,8 @@ else:
         except Exception:
             return None
 
+    _rot_debug_count = [0]  # 只打印前几帧，避免刷屏
+
     def _extract_device_rotation(device):
         """获取 VR 设备旋转。统一从 tracking matrix 读取并转换到场景欧拉角。"""
         # tracking matrix -> scene euler（XYZ）
@@ -76,7 +78,7 @@ else:
             c1 = m.column(1)
             c2 = m.column(2)
 
-            # tracking(Y-up) 旋转矩阵（列向量为轴方向）
+            # tracking 旋转矩阵（列向量为轴方向）
             rt = [
                 [c0.x(), c1.x(), c2.x()],
                 [c0.y(), c1.y(), c2.y()],
@@ -84,7 +86,6 @@ else:
             ]
 
             # trackingMatrix 已是 VRED 场景坐标（Z-up），无需额外坐标转换
-            # 直接用旋转矩阵 rt 反解欧拉角（XYZ 顺序）
             rs = rt
 
             sy = -rs[2][0]
@@ -98,12 +99,17 @@ else:
                 ry = math.asin(sy)
                 rz = math.atan2(rs[1][0], rs[0][0])
             else:
-                # 万向锁时退化处理
                 rx = math.atan2(-rs[1][2], rs[1][1])
                 ry = math.asin(sy)
                 rz = 0.0
 
-            return Vec3f(math.degrees(rx), math.degrees(ry), math.degrees(rz) + 90.0)
+            if _rot_debug_count[0] < 5:
+                _rot_debug_count[0] += 1
+                print("[ROT_DEBUG] matrix rows: {} | {} | {}".format(rt[0], rt[1], rt[2]))
+                print("[ROT_DEBUG] euler(deg): rx={:.1f} ry={:.1f} rz={:.1f}".format(
+                    math.degrees(rx), math.degrees(ry), math.degrees(rz)))
+
+            return Vec3f(math.degrees(rx), math.degrees(ry), math.degrees(rz))
         except Exception:
             return None
 
