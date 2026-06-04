@@ -294,6 +294,22 @@ else:
             else:
                 self.start()
 
+        def recalibrate_rotation(self, target_rx=0.0, target_ry=0.0, target_rz=0.0):
+            """在 tracker 处于目标位置时调用，重新计算旋转偏移。
+            target_rx/ry/rz：此刻节点应有的目标旋转（度），默认 0,0,0。
+            """
+            if not self._active or not self._tracker:
+                print("[TransformTracker] Not active, cannot recalibrate.")
+                return
+            rt = _get_tracker_mat3(self._tracker)
+            if rt is None:
+                print("[TransformTracker] Cannot get tracker rotation for recalibration.")
+                return
+            R_target = _euler_to_mat3(target_rx, target_ry, target_rz)
+            self._rot_offset = _mul3x3(R_target, _mat3_t(rt))
+            print("[TransformTracker] Rotation recalibrated. Target: ({}, {}, {})".format(
+                target_rx, target_ry, target_rz))
+
         def status(self):
             state = "ACTIVE" if self._active else "stopped"
             cfg = "{} -> '{}'".format(self._tracker_name, self._node_name) \
@@ -570,6 +586,22 @@ else:
             print("[ColaTracker] Kinematic timer follow active (scale locked)")
             return True
 
+        def recalibrate_rotation(self, target_rx=0.0, target_ry=0.0, target_rz=0.0):
+            """在 tracker 处于目标位置时调用，重新计算旋转偏移。
+            target_rx/ry/rz：此刻节点应有的目标旋转（度），默认 0,0,0。
+            """
+            if not self._active or not self._tracker:
+                print("[ColaTracker] Not active, cannot recalibrate.")
+                return
+            rt = _get_tracker_mat3(self._tracker)
+            if rt is None:
+                print("[ColaTracker] Cannot get tracker rotation for recalibration.")
+                return
+            R_target = _euler_to_mat3(target_rx, target_ry, target_rz)
+            self._kinematic_rot_offset = _mul3x3(R_target, _mat3_t(rt))
+            print("[ColaTracker] Rotation recalibrated. Target: ({}, {}, {})".format(
+                target_rx, target_ry, target_rz))
+
         def _stop_kinematic_follow(self):
             try:
                 self._kinematic_timer.setActive(0)
@@ -790,3 +822,19 @@ def debug_tracker_rotation(tracker_name="tracker-1"):
     用法：debug_tracker_rotation("tracker-2")
     """
     _debug_rot_methods(tracker_name)
+
+def recalibrate_transform_rotation(target_rx=0.0, target_ry=0.0, target_rz=0.0):
+    """在 tracker 处于"瓶子/椅子竖立"位置时调用，重新计算旋转偏移。
+    target_rx/ry/rz：节点在该位置应有的目标旋转（度），默认 0,0,0（竖立）。
+    用法：start_transform() 后，把 tracker 放到目标姿态，然后调用此函数。
+    """
+    global _transform_tracker
+    _transform_tracker.recalibrate_rotation(target_rx, target_ry, target_rz)
+
+def recalibrate_cola_rotation(target_rx=0.0, target_ry=0.0, target_rz=0.0):
+    """在 tracker 处于"瓶子竖立"位置时调用，重新计算旋转偏移。
+    target_rx/ry/rz：Cola 在该位置应有的目标旋转（度），默认 0,0,0（竖立）。
+    用法：start_cola() 后，把 tracker 放到目标姿态，然后调用此函数。
+    """
+    global _cola_tracker
+    _cola_tracker.recalibrate_rotation(target_rx, target_ry, target_rz)
