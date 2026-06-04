@@ -56,9 +56,21 @@ else:
             a[2][0] * b[0][1] + a[2][1] * b[1][1] + a[2][2] * b[2][1],
             a[2][0] * b[0][2] + a[2][1] * b[1][2] + a[2][2] * b[2][2]]]
 
+    def _extract_device_translation(device):
+        """获取 VR 设备位置。统一从 tracking matrix 读取并转换到场景坐标。"""
+        try:
+            m = device.getTrackingMatrix()
+            if not m:
+                return None
+            c3 = m.column(3)
+            # tracking(Y-up) -> scene(Z-up)
+            return Vec3f(-c3.x(), -c3.z(), c3.y())
+        except Exception:
+            return None
+
     def _extract_device_rotation(device):
-        """获取 VR 设备旋转。优先 tracking matrix（最可靠），失败时回退到节点旋转。"""
-        # 1) tracking matrix -> scene euler（XYZ）
+        """获取 VR 设备旋转。统一从 tracking matrix 读取并转换到场景欧拉角。"""
+        # tracking matrix -> scene euler（XYZ）
         try:
             m = device.getTrackingMatrix()
             if not m:
@@ -107,27 +119,6 @@ else:
                 rz = 0.0
 
             return Vec3f(math.degrees(rx), math.degrees(ry), math.degrees(rz))
-        except Exception:
-            pass
-
-        # 2) 可视化节点旋转（某些设备场景下比 getNode() 更稳定）
-        try:
-            vis = device.getVisualizationNode()
-            if vis:
-                try:
-                    return getTransformNodeRotation(vis, True)
-                except Exception:
-                    return getTransformNodeRotation(vis)
-        except Exception:
-            pass
-
-        # 3) tracker 节点旋转（兜底）
-        try:
-            node = device.getNode()
-            try:
-                return getTransformNodeRotation(node, True)
-            except Exception:
-                return getTransformNodeRotation(node)
         except Exception:
             return None
 
@@ -200,8 +191,9 @@ else:
             self._node_offset = None
             if self._maintain_offset:
                 try:
-                    tracker_node = self._tracker.getNode()
-                    t_tracker = getTransformNodeTranslation(tracker_node, True)
+                    t_tracker = _extract_device_translation(self._tracker)
+                    if t_tracker is None:
+                        raise RuntimeError("tracker translation unavailable")
                     t_node = getTransformNodeTranslation(self._node, True)
                     self._node_offset = Vec3f(
                         t_node.x() - t_tracker.x(),
@@ -254,9 +246,10 @@ else:
             if not self._tracker or not self._node:
                 return
             try:
-                tracker_node = self._tracker.getNode()
-                t = getTransformNodeTranslation(tracker_node, True)
+                t = _extract_device_translation(self._tracker)
                 r = _extract_device_rotation(self._tracker)
+                if t is None:
+                    return
 
                 tx = t.x()
                 ty = t.y()
@@ -482,8 +475,9 @@ else:
             self._kinematic_offset = None
             if self._maintain_offset:
                 try:
-                    tracker_node = self._tracker.getNode()
-                    t_tracker = getTransformNodeTranslation(tracker_node, True)
+                    t_tracker = _extract_device_translation(self._tracker)
+                    if t_tracker is None:
+                        raise RuntimeError("tracker translation unavailable")
                     t_cola = getTransformNodeTranslation(self._cola_node, True)
                     self._kinematic_offset = Vec3f(
                         t_cola.x() - t_tracker.x(),
@@ -515,9 +509,10 @@ else:
                 return
 
             try:
-                tracker_node = self._tracker.getNode()
-                t = getTransformNodeTranslation(tracker_node, True)
+                t = _extract_device_translation(self._tracker)
                 r = _extract_device_rotation(self._tracker)
+                if t is None:
+                    return
 
                 tx = t.x()
                 ty = t.y()
