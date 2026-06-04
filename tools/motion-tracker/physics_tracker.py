@@ -249,15 +249,15 @@ else:
                 except Exception as e:
                     print("[TransformTracker] WARNING: failed to compute offset: " + str(e))
 
-            # 旋转 maintain_offset：记录 R_node_init * inv(R_tracker_init)
-            # 确保节点始终从其初始场景旋转出发跟随 tracker 旋转
+            # 旋转 maintain_offset：记录 inv(R_tracker_init) * R_node_init
+            # R_result = R_tracker_current * R_offset，保证旋转方向与 tracker 一致
             self._rot_offset = None
             try:
                 node_euler = getTransformNodeRotation(self._node)
                 R_node_init = _euler_to_mat3(node_euler.x(), node_euler.y(), node_euler.z())
                 rt_init = _get_tracker_mat3(self._tracker)
                 if rt_init is not None:
-                    self._rot_offset = _mul3x3(R_node_init, _mat3_t(rt_init))
+                    self._rot_offset = _mul3x3(_mat3_t(rt_init), R_node_init)
                     print("[TransformTracker] rotation offset computed")
             except Exception as e:
                 print("[TransformTracker] WARNING rotation offset: " + str(e))
@@ -306,7 +306,7 @@ else:
                 print("[TransformTracker] Cannot get tracker rotation for recalibration.")
                 return
             R_target = _euler_to_mat3(target_rx, target_ry, target_rz)
-            self._rot_offset = _mul3x3(R_target, _mat3_t(rt))
+            self._rot_offset = _mul3x3(_mat3_t(rt), R_target)
             print("[TransformTracker] Rotation recalibrated. Target: ({}, {}, {})".format(
                 target_rx, target_ry, target_rz))
 
@@ -339,7 +339,7 @@ else:
                 # 应用旋转（带初始偏移，保持节点初始朝向作为基准）
                 rt = _get_tracker_mat3(self._tracker)
                 if rt is not None:
-                    rs = _mul3x3(self._rot_offset, rt) if self._rot_offset is not None else rt
+                    rs = _mul3x3(rt, self._rot_offset) if self._rot_offset is not None else rt
                     rx_d, ry_d, rz_d = _mat3_to_euler(rs)
                     setTransformNodeRotation(self._node, rx_d, ry_d, rz_d)
 
@@ -566,14 +566,15 @@ else:
                 except Exception as e:
                     print("[ColaTracker] WARNING: failed to compute maintain_offset: " + str(e))
 
-            # 旋转 maintain_offset：记录 R_cola_init * inv(R_tracker_init)
+            # 旋转 maintain_offset：记录 inv(R_tracker_init) * R_cola_init
+            # R_result = R_tracker_current * R_offset，保证旋转方向与 tracker 一致
             self._kinematic_rot_offset = None
             try:
                 cola_euler = getTransformNodeRotation(self._cola_node)
                 R_cola_init = _euler_to_mat3(cola_euler.x(), cola_euler.y(), cola_euler.z())
                 rt_init = _get_tracker_mat3(self._tracker)
                 if rt_init is not None:
-                    self._kinematic_rot_offset = _mul3x3(R_cola_init, _mat3_t(rt_init))
+                    self._kinematic_rot_offset = _mul3x3(_mat3_t(rt_init), R_cola_init)
                     print("[ColaTracker] rotation offset computed")
             except Exception as e:
                 print("[ColaTracker] WARNING rotation offset: " + str(e))
@@ -598,7 +599,7 @@ else:
                 print("[ColaTracker] Cannot get tracker rotation for recalibration.")
                 return
             R_target = _euler_to_mat3(target_rx, target_ry, target_rz)
-            self._kinematic_rot_offset = _mul3x3(R_target, _mat3_t(rt))
+            self._kinematic_rot_offset = _mul3x3(_mat3_t(rt), R_target)
             print("[ColaTracker] Rotation recalibrated. Target: ({}, {}, {})".format(
                 target_rx, target_ry, target_rz))
 
@@ -634,7 +635,7 @@ else:
                 # 应用旋转（带初始偏移）
                 rt = _get_tracker_mat3(self._tracker)
                 if rt is not None:
-                    rs = _mul3x3(self._kinematic_rot_offset, rt) if self._kinematic_rot_offset is not None else rt
+                    rs = _mul3x3(rt, self._kinematic_rot_offset) if self._kinematic_rot_offset is not None else rt
                     rx_d, ry_d, rz_d = _mat3_to_euler(rs)
                     setTransformNodeRotation(self._cola_node, rx_d, ry_d, rz_d)
 
