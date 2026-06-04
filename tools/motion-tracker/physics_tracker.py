@@ -64,7 +64,7 @@ else:
         except Exception:
             return None
 
-    _rot_debug_count = [0]  # 只打印前几帧，避免刷屏
+    _rot_debug_count = [0]  # 调试帧计数，可在 Script Editor 执行 _rot_debug_count[0]=0 来重置
 
     def _extract_device_rotation(device):
         """获取 VR 设备旋转。统一从 tracking matrix 读取并转换到场景欧拉角。"""
