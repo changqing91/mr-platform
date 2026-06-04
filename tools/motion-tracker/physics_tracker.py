@@ -57,14 +57,20 @@ else:
             a[2][0] * b[0][2] + a[2][1] * b[1][2] + a[2][2] * b[2][2]]]
 
     def _extract_device_translation(device):
-        """获取 VR 设备位置。统一从 tracking matrix 读取并转换到场景坐标。"""
+        """获取 VR 设备位置。优先 tracking matrix 平移列；失败时回退到设备节点世界位置。"""
         try:
             m = device.getTrackingMatrix()
             if not m:
-                return None
+                raise RuntimeError("tracking matrix unavailable")
             c3 = m.column(3)
-            # tracking(Y-up) -> scene(Z-up)
-            return Vec3f(-c3.x(), -c3.z(), c3.y())
+            # 在当前工程中 trackingMatrix 的平移分量已与场景坐标系对齐
+            return Vec3f(c3.x(), c3.y(), c3.z())
+        except Exception:
+            pass
+
+        try:
+            node = device.getNode()
+            return getTransformNodeTranslation(node, True)
         except Exception:
             return None
 
