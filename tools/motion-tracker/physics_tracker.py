@@ -103,7 +103,9 @@ else:
                 ry = math.asin(sy)
                 rz = 0.0
 
-            if _rot_debug_count[0] < 5:
+            is_identity = (abs(rt[0][0]-1)<0.01 and abs(rt[1][1]-1)<0.01 and abs(rt[2][2]-1)<0.01
+                          and abs(rt[0][1])<0.01 and abs(rt[0][2])<0.01 and abs(rt[2][0])<0.01)
+            if not is_identity and _rot_debug_count[0] < 5:
                 _rot_debug_count[0] += 1
                 print("[ROT_DEBUG] matrix rows: {} | {} | {}".format(rt[0], rt[1], rt[2]))
                 print("[ROT_DEBUG] euler(deg): rx={:.1f} ry={:.1f} rz={:.1f}".format(
