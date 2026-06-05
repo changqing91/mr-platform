@@ -1,105 +1,53 @@
 # ======================================================================
 # VRED Physics Tracker
 #
-# tracker-1 → TransformTracker: timer 驱动任意 Transform3D 节点（保持相对偏移）
-# tracker-2 → ColaTracker: 作为可乐瓶 (Cola) 的物理运动学对象
-#             ├── kinematic: timer 同步位姿并锁定缩放（避免瓶子变大）
-#             ├── 自动确保 Cola 注册为 kinematic physics 对象
-#             └── 碰撞回调：打印碰撞开始/结束事件及接触点信息
+# tracker-1 → TransformTracker: vrConstraintService.createParentConstraint 驱动
+# tracker-2 → ColaTracker: ParentConstraint + kinematic physics + 碰撞检测
 #
 # 用法（VRED Python 控制台）：
 #   # ── 椅子（tracker 固定在椅子某处）──
-#   setup_transform("tracker-1", "SeatNode", maintain_offset=True)
-#   start_transform()                          # 启动追踪，自动记录初始偏移
-#   recalibrate_transform_rotation()           # 椅子摆正后校准旋转基准
+#   setup_transform("tracker-1", "SeatNode")   # maintain_offset=True（默认，保持初始相对位置）
+#   start_transform()
+#   recalibrate_transform()                    # 如需重置基准（重建约束）
 #
 #   # ── 瓶子（tracker 固定在瓶子顶部）──
-#   setup_cola("tracker-2", "Cola")            # 配置（默认 maintain_offset=False）
-#   start_cola()                               # 启动物理追踪
-#   recalibrate_cola_rotation()                # 瓶子竖立时校准旋转基准
-#   recalibrate_cola_position(0, -15, 0)       # 将 Cola 置于 tracker 下方 15 单位
-#                                              # （Y轴朝上用第2参数，Z轴朝上用第3参数）
-#                                              # 也可不传参数，从当前场景位置差自动抓取
+#   setup_cola("tracker-2", "Cola")
+#   start_cola()
+#   recalibrate_cola(dz=-15)                   # 将 Cola 定位到 tracker 本地 Z 轴下方 15 单位
+#                                              # dz 为负 = Cola 在 tracker 下方（Z 朝上时）
+#                                              # 调整 dz 数值直到 VR 中视觉位置正确
+#   stop_cola()                                # 停止，删除约束
+#   physics_status()                           # 打印状态
+#   debug_tracker_rotation("tracker-2")        # 旋转数据调试
 #
-#   stop_cola()                                # 停止，解除约束
-#   physics_status()                           # 打印当前状态
-#   debug_tracker_rotation("tracker-2")        # 排查旋转数据来源
-#
-# 右手 Y 键（左手控制器）：切换 tracker-1 追踪开/关
-# 右手 B 键（右手控制器）：切换 tracker-2 Cola 追踪开/关
+# 左手 Y 键：切换 tracker-1 追踪开/关
+# 右手 B 键：切换 tracker-2 Cola 追踪开/关
 # ======================================================================
 
 import math
 
 global _transform_tracker, _cola_tracker
 
-# 每次重新加载时强制重新初始化，确保代码更新生效
-if '_cola_tracker' in globals() and _cola_tracker is not None:
-    try:
-        _cola_tracker.stop()
-    except Exception:
-        pass
-if '_transform_tracker' in globals() and _transform_tracker is not None:
-    try:
-        _transform_tracker.stop()
-    except Exception:
-        pass
+# 每次重载先停止旧实例，确保代码更新生效
+for _n in ('_cola_tracker', '_transform_tracker'):
+    if _n in globals() and globals()[_n] is not None:
+        try:
+            globals()[_n].stop()
+        except Exception:
+            pass
+
 global _physics_tracker_initialized
 _physics_tracker_initialized = False
 
-if '_physics_tracker_initialized' in globals() and _physics_tracker_initialized:
-    print("[PhysicsTracker] Already initialized, skipping re-init")
-else:
-    _physics_tracker_initialized = False
+if not _physics_tracker_initialized:
 
-    def _mul3x3(a, b):
-        return [[
-            a[0][0] * b[0][0] + a[0][1] * b[1][0] + a[0][2] * b[2][0],
-            a[0][0] * b[0][1] + a[0][1] * b[1][1] + a[0][2] * b[2][1],
-            a[0][0] * b[0][2] + a[0][1] * b[1][2] + a[0][2] * b[2][2]],
-            [
-            a[1][0] * b[0][0] + a[1][1] * b[1][0] + a[1][2] * b[2][0],
-            a[1][0] * b[0][1] + a[1][1] * b[1][1] + a[1][2] * b[2][1],
-            a[1][0] * b[0][2] + a[1][1] * b[1][2] + a[1][2] * b[2][2]],
-            [
-            a[2][0] * b[0][0] + a[2][1] * b[1][0] + a[2][2] * b[2][0],
-            a[2][0] * b[0][1] + a[2][1] * b[1][1] + a[2][2] * b[2][1],
-            a[2][0] * b[0][2] + a[2][1] * b[1][2] + a[2][2] * b[2][2]]]
-
-    def _extract_device_translation(device):
-        """获取 VR 设备位置。从 tracker 场景节点世界坐标读取（与位置跟随一致）。"""
-        try:
-            node = device.getNode()
-            return getTransformNodeTranslation(node, True)
-        except Exception:
-            return None
-
-    def _euler_to_mat3(rx_deg, ry_deg, rz_deg):
-        """Euler 角（度）→ 3x3 旋转矩阵，R = Rz*Ry*Rx 顺序（与 _mat3_to_euler 一致）。"""
-        rx = math.radians(rx_deg)
-        ry = math.radians(ry_deg)
-        rz = math.radians(rz_deg)
-        cx, sx = math.cos(rx), math.sin(rx)
-        cy, sy_v = math.cos(ry), math.sin(ry)
-        cz, sz = math.cos(rz), math.sin(rz)
-        return [
-            [cz*cy,              cz*sy_v*sx - sz*cx,  cz*sy_v*cx + sz*sx],
-            [sz*cy,              sz*sy_v*sx + cz*cx,  sz*sy_v*cx - cz*sx],
-            [-sy_v,              cy*sx,               cy*cx]
-        ]
-
-    def _mat3_t(m):
-        """转置 3x3 矩阵（正交旋转矩阵的转置 = 逆）。"""
-        return [[m[0][0], m[1][0], m[2][0]],
-                [m[0][1], m[1][1], m[2][1]],
-                [m[0][2], m[1][2], m[2][2]]]
-
+    # ------------------------------------------------------------------
+    # 工具函数（仅供 recalibrate 定位使用）
+    # ------------------------------------------------------------------
     def _get_tracker_mat3(device):
-        """从 tracker 节点世界变换提取 3x3 旋转矩阵（不随摄像机方向变化）。"""
-        # 方法1：node.getWorldTransform() → QMatrix4x4，与 getTrackingMatrix() 格式相同
+        """获取 tracker 节点世界旋转矩阵（3x3），不随摄像机方向变化。"""
         try:
-            node = device.getNode()
-            m = node.getWorldTransform()
+            m = device.getNode().getWorldTransform()
             if m:
                 c0, c1, c2 = m.column(0), m.column(1), m.column(2)
                 return [[c0.x(), c1.x(), c2.x()],
@@ -107,103 +55,56 @@ else:
                         [c0.z(), c1.z(), c2.z()]]
         except Exception:
             pass
-        # 方法2：回退 — getTrackingMatrix（可能随摄像机方向变化）
-        try:
-            m = device.getTrackingMatrix()
-            if not m:
-                return None
-            c0, c1, c2 = m.column(0), m.column(1), m.column(2)
-            return [[c0.x(), c1.x(), c2.x()],
-                    [c0.y(), c1.y(), c2.y()],
-                    [c0.z(), c1.z(), c2.z()]]
-        except Exception:
-            return None
-
-    def _mat3_to_euler(rs):
-        """3x3 旋转矩阵 → Euler 角（度），R = Rz*Ry*Rx 顺序。"""
-        sy = -rs[2][0]
-        if sy > 1.0: sy = 1.0
-        elif sy < -1.0: sy = -1.0
-        if abs(sy) < 0.999999:
-            rx = math.atan2(rs[2][1], rs[2][2])
-            ry = math.asin(sy)
-            rz = math.atan2(rs[1][0], rs[0][0])
-        else:
-            rx = math.atan2(-rs[1][2], rs[1][1])
-            ry = math.asin(sy)
-            rz = 0.0
-        return math.degrees(rx), math.degrees(ry), math.degrees(rz)
+        return None
 
     def _debug_rot_methods(tracker_name):
-        """对比所有旋转数据来源，用于排查坐标空间问题（内部实现）。"""
+        """对比所有旋转数据来源，用于排查坐标空间问题。"""
         try:
             device = vrDeviceService.getVRDevice(tracker_name)
         except Exception as e:
             print("找不到设备: " + str(e))
             return
         print("=== rotation debug: " + tracker_name + " ===")
-        # getTransformNodeRotation (local Euler)
         try:
             node = device.getNode()
             r = getTransformNodeRotation(node)
             print("  getTransformNodeRotation: %.2f %.2f %.2f" % (r.x(), r.y(), r.z()))
         except Exception as e:
             print("  getTransformNodeRotation: ERROR " + str(e))
-        # node.getWorldRotation() v1 API
-        try:
-            wr = node.getWorldRotation()
-            print("  node.getWorldRotation(): " + str(wr))
-        except Exception as e:
-            print("  node.getWorldRotation(): ERROR " + str(e))
-        # node.getWorldTransform() → QMatrix4x4（与 getTrackingMatrix 格式相同）
         try:
             m = node.getWorldTransform()
             if m:
                 c0, c1, c2 = m.column(0), m.column(1), m.column(2)
-                r3 = [[c0.x(), c1.x(), c2.x()], [c0.y(), c1.y(), c2.y()], [c0.z(), c1.z(), c2.z()]]
-                rx, ry, rz = _mat3_to_euler(r3)
+                r3 = [[c0.x(), c1.x(), c2.x()],
+                      [c0.y(), c1.y(), c2.y()],
+                      [c0.z(), c1.z(), c2.z()]]
+                sy = max(-1.0, min(1.0, -r3[2][0]))
+                ry = math.degrees(math.asin(sy))
+                if abs(sy) < 0.999999:
+                    rx = math.degrees(math.atan2(r3[2][1], r3[2][2]))
+                    rz = math.degrees(math.atan2(r3[1][0], r3[0][0]))
+                else:
+                    rx = math.degrees(math.atan2(-r3[1][2], r3[1][1]))
+                    rz = 0.0
                 print("  node.getWorldTransform() euler: %.2f %.2f %.2f" % (rx, ry, rz))
-            else:
-                print("  node.getWorldTransform(): None")
         except Exception as e:
             print("  node.getWorldTransform(): ERROR " + str(e))
-        # getTrackingMatrix (current fallback)
-        try:
-            m = device.getTrackingMatrix()
-            if m:
-                c0, c1, c2 = m.column(0), m.column(1), m.column(2)
-                r3 = [[c0.x(), c1.x(), c2.x()], [c0.y(), c1.y(), c2.y()], [c0.z(), c1.z(), c2.z()]]
-                rx, ry, rz = _mat3_to_euler(r3)
-                print("  getTrackingMatrix() euler: %.2f %.2f %.2f" % (rx, ry, rz))
-        except Exception as e:
-            print("  getTrackingMatrix(): ERROR " + str(e))
         print("=== end debug ===")
 
-
-    # TransformTracker — tracker-1 → Transform3D 节点（ParentConstraint）
+    # ======================================================================
+    # TransformTracker
     # ======================================================================
     class TransformTracker:
-        """
-        通过 vrTimer 将指定 tracker 设备的位姿（位置+旋转）同步到任意 Transform3D 场景节点。
-        每帧同步并锁定目标节点 scale，防止 tracker scale 链条污染。
-        与 ColaTracker 保持一致的 kinematic timer 驱动方式。
-        """
-
         def __init__(self):
             self._tracker_name = None
             self._node_name = None
             self._active = False
-            self._maintain_offset = False
+            self._maintain_offset = True
+            self._constraint = None
             self._tracker = None
             self._node = None
-            self._node_scale = None
-            self._node_offset = None
-            self._rot_offset = None  # 旋转偏移矩阵 R_node_init * inv(R_tracker_init)
-            self._timer = vrTimer()
-            self._timer_connected = False
 
-        def setup(self, tracker_name, node_name, maintain_offset=False):
-            """配置 tracker → 节点绑定。如已激活先停止再更新。"""
+        def setup(self, tracker_name, node_name, maintain_offset=True):
             if self._active:
                 self.stop()
             self._tracker_name = tracker_name
@@ -213,97 +114,49 @@ else:
                 tracker_name, node_name, maintain_offset))
 
         def start(self):
-            """激活 timer 追踪，开始位置/旋转同步。"""
             if self._active:
                 print("[TransformTracker] Already active.")
                 return
             if not self._tracker_name or not self._node_name:
-                print("[TransformTracker] Not configured. Call setup(tracker_name, node_name) first.")
+                print("[TransformTracker] Not configured. Call setup() first.")
                 return
-
             try:
                 self._tracker = vrDeviceService.getVRDevice(self._tracker_name)
                 if not self._tracker:
-                    print("[TransformTracker] WARNING: tracker not found: " + self._tracker_name)
+                    print("[TransformTracker] Tracker not found: " + self._tracker_name)
                     return
             except Exception as e:
                 print("[TransformTracker] ERROR getting tracker: " + str(e))
                 return
-
             try:
                 self._node = findNode(self._node_name)
                 if not self._node:
-                    print("[TransformTracker] WARNING: node not found: " + self._node_name)
+                    print("[TransformTracker] Node not found: " + self._node_name)
                     return
             except Exception as e:
                 print("[TransformTracker] ERROR finding node: " + str(e))
                 return
-
-            # 记录节点原始 scale，每帧恢复
             try:
-                self._node_scale = getTransformNodeScale(self._node)
-            except Exception:
-                self._node_scale = None
-
-            # 位置偏移存储为 tracker 本地坐标系，使其随 tracker 旋转一同变化
-            # （例如 tracker 在瓶顶时翻转，瓶子依然在 tracker 本地"下方"而非世界"上方"）
-            self._node_offset = None
-            # 提前获取 rt_init，位置偏移和旋转偏移共用，避免重复调用
-            rt_init = _get_tracker_mat3(self._tracker)
-            if self._maintain_offset:
-                try:
-                    t_tracker = getTransformNodeTranslation(self._tracker.getNode(), True)
-                    t_node = getTransformNodeTranslation(self._node, True)
-                    wx = t_node.x() - t_tracker.x()
-                    wy = t_node.y() - t_tracker.y()
-                    wz = t_node.z() - t_tracker.z()
-                    # 世界偏移 → tracker 本地坐标系
-                    if rt_init is not None:
-                        ri = _mat3_t(rt_init)
-                        lx = ri[0][0]*wx + ri[0][1]*wy + ri[0][2]*wz
-                        ly = ri[1][0]*wx + ri[1][1]*wy + ri[1][2]*wz
-                        lz = ri[2][0]*wx + ri[2][1]*wy + ri[2][2]*wz
-                    else:
-                        lx, ly, lz = wx, wy, wz
-                    self._node_offset = Vec3f(lx, ly, lz)
-                    print("[TransformTracker] maintain_offset (local): ({:.3f}, {:.3f}, {:.3f})".format(lx, ly, lz))
-                except Exception as e:
-                    print("[TransformTracker] WARNING: failed to compute offset: " + str(e))
-
-            # 旋转偏移：复用已获取的 rt_init
-            self._rot_offset = None
-            try:
-                node_euler = getTransformNodeRotation(self._node)
-                R_node_init = _euler_to_mat3(node_euler.x(), node_euler.y(), node_euler.z())
-                if rt_init is not None:
-                    self._rot_offset = _mul3x3(_mat3_t(rt_init), R_node_init)
-                    print("[TransformTracker] rotation offset computed")
+                self._constraint = vrConstraintService.createParentConstraint(
+                    [self._tracker.getNode()], self._node, self._maintain_offset)
+                self._active = True
+                print("[TransformTracker] Started: {} -> '{}' (ParentConstraint, maintainOffset={})".format(
+                    self._tracker_name, self._node_name, self._maintain_offset))
             except Exception as e:
-                print("[TransformTracker] WARNING rotation offset: " + str(e))
-
-            if not self._timer_connected:
-                self._timer.connect(self._update)
-                self._timer_connected = True
-
-            self._timer.setActive(1)
-            self._active = True
-            print("[TransformTracker] Started: {} -> '{}' (timer, scale locked)".format(
-                self._tracker_name, self._node_name))
+                print("[TransformTracker] ERROR creating constraint: " + str(e))
 
         def stop(self):
-            """停止 timer，节点保持最后位置。"""
             if not self._active:
                 return
             try:
-                self._timer.setActive(0)
-            except Exception:
-                pass
+                if self._constraint:
+                    vrConstraintService.deleteConstraint(self._constraint)
+                    self._constraint = None
+            except Exception as e:
+                print("[TransformTracker] WARNING deleting constraint: " + str(e))
             self._active = False
             self._tracker = None
             self._node = None
-            self._node_scale = None
-            self._node_offset = None
-            self._rot_offset = None
             print("[TransformTracker] Stopped: {} -> '{}'".format(
                 self._tracker_name, self._node_name))
 
@@ -313,53 +166,39 @@ else:
             else:
                 self.start()
 
-        def recalibrate_rotation(self, target_rx=0.0, target_ry=0.0, target_rz=0.0):
-            """在 tracker 处于目标位置时调用，重新计算旋转偏移。
-            target_rx/ry/rz：此刻节点应有的目标旋转（度），默认 0,0,0。
+        def recalibrate(self, dz=0.0):
+            """重建约束，重置节点与 tracker 的相对位置/旋转基准。
+            dz：沿 tracker 本地 Z 轴的位置偏移（场景单位，负值=节点在tracker下方）。
             """
-            if not self._active or not self._tracker:
+            if not self._active or not self._tracker or not self._node:
                 print("[TransformTracker] Not active, cannot recalibrate.")
                 return
-            rt = _get_tracker_mat3(self._tracker)
-            if rt is None:
-                print("[TransformTracker] Cannot get tracker rotation for recalibration.")
-                return
-            R_target = _euler_to_mat3(target_rx, target_ry, target_rz)
-            self._rot_offset = _mul3x3(_mat3_t(rt), R_target)
-            print("[TransformTracker] Rotation recalibrated. Target: ({}, {}, {})".format(
-                target_rx, target_ry, target_rz))
-
-        def recalibrate_position(self, world_dx=None, world_dy=None, world_dz=None):
-            """设置节点相对于 tracker 的位置偏移（存储为 tracker 本地坐标系）。
-            两种用法：
-              a) 直接指定世界坐标系偏移量（Z轴朝上时，负Z=节点在 tracker 下方）：
-                 recalibrate_transform_position(0, 0, -15)
-              b) 不传参数：从场景实时抓取当前 Cola 与 tracker 位置差作为新基准。
-            """
-            if not self._active or not self._tracker:
-                print("[TransformTracker] Not active, cannot recalibrate position.")
-                return
             try:
-                rt = _get_tracker_mat3(self._tracker)
-                if world_dx is None:
-                    t_tracker = getTransformNodeTranslation(self._tracker.getNode(), True)
-                    t_node = getTransformNodeTranslation(self._node, True)
-                    wx = t_node.x() - t_tracker.x()
-                    wy = t_node.y() - t_tracker.y()
-                    wz = t_node.z() - t_tracker.z()
-                else:
-                    wx, wy, wz = float(world_dx), float(world_dy or 0), float(world_dz or 0)
-                if rt is not None:
-                    ri = _mat3_t(rt)
-                    lx = ri[0][0]*wx + ri[0][1]*wy + ri[0][2]*wz
-                    ly = ri[1][0]*wx + ri[1][1]*wy + ri[1][2]*wz
-                    lz = ri[2][0]*wx + ri[2][1]*wy + ri[2][2]*wz
-                else:
-                    lx, ly, lz = wx, wy, wz
-                self._node_offset = Vec3f(lx, ly, lz)
-                print("[TransformTracker] Position recalibrated (local): ({:.3f}, {:.3f}, {:.3f})".format(lx, ly, lz))
+                if self._constraint:
+                    vrConstraintService.deleteConstraint(self._constraint)
+                    self._constraint = None
+            except Exception:
+                pass
+            if dz != 0.0:
+                try:
+                    rt = _get_tracker_mat3(self._tracker)
+                    tp = getTransformNodeTranslation(self._tracker.getNode(), True)
+                    if rt:
+                        nx = tp.x() + rt[0][2] * dz
+                        ny = tp.y() + rt[1][2] * dz
+                        nz = tp.z() + rt[2][2] * dz
+                    else:
+                        nx, ny, nz = tp.x(), tp.y(), tp.z() + dz
+                    setTransformNodeTranslation(self._node, nx, ny, nz, True)
+                    setTransformNodeRotation(self._node, 0, 0, 0)
+                except Exception as e:
+                    print("[TransformTracker] WARNING positioning: " + str(e))
+            try:
+                self._constraint = vrConstraintService.createParentConstraint(
+                    [self._tracker.getNode()], self._node, True)
+                print("[TransformTracker] Recalibrated. dz={:.2f}".format(dz))
             except Exception as e:
-                print("[TransformTracker] ERROR recalibrating position: " + str(e))
+                print("[TransformTracker] ERROR recreating constraint: " + str(e))
 
         def status(self):
             state = "ACTIVE" if self._active else "stopped"
@@ -367,83 +206,27 @@ else:
                 if self._tracker_name else "(not configured)"
             print("[TransformTracker] {} [{}]".format(cfg, state))
 
-        def _update(self):
-            if not self._active:
-                return
-            if not self._tracker or not self._node:
-                return
-            try:
-                t = _extract_device_translation(self._tracker)
-                if t is None:
-                    return
-
-                # 提前获取旋转矩阵，位置偏移和旋转计算共用
-                rt = _get_tracker_mat3(self._tracker)
-
-                tx = t.x()
-                ty = t.y()
-                tz = t.z()
-                # 将本地坐标系偏移旋转回世界坐标后叠加
-                if self._node_offset is not None and rt is not None:
-                    ox = rt[0][0]*self._node_offset.x() + rt[0][1]*self._node_offset.y() + rt[0][2]*self._node_offset.z()
-                    oy = rt[1][0]*self._node_offset.x() + rt[1][1]*self._node_offset.y() + rt[1][2]*self._node_offset.z()
-                    oz = rt[2][0]*self._node_offset.x() + rt[2][1]*self._node_offset.y() + rt[2][2]*self._node_offset.z()
-                    tx += ox; ty += oy; tz += oz
-                elif self._node_offset is not None:
-                    tx += self._node_offset.x()
-                    ty += self._node_offset.y()
-                    tz += self._node_offset.z()
-
-                setTransformNodeTranslation(self._node, tx, ty, tz, True)
-
-                # 应用旋转（带初始偏移，保持节点初始朝向作为基准）
-                if rt is not None:
-                    rs = _mul3x3(rt, self._rot_offset) if self._rot_offset is not None else rt
-                    rx_d, ry_d, rz_d = _mat3_to_euler(rs)
-                    setTransformNodeRotation(self._node, rx_d, ry_d, rz_d)
-
-                # 每帧恢复原始 scale，防止 tracker scale 链条污染
-                if self._node_scale is not None:
-                    setTransformNodeScale(self._node,
-                                         self._node_scale.x(),
-                                         self._node_scale.y(),
-                                         self._node_scale.z())
-            except Exception as e:
-                print("[TransformTracker] WARNING update failed: " + str(e))
-
     # ======================================================================
-    # ColaTracker — tracker-2 → Cola 物理运动学对象 + 碰撞检测
+    # ColaTracker
     # ======================================================================
     class ColaTracker:
-        """
-        将 tracker-2 绑定到 Cola 节点（kinematic 模式）：
-          1. 确保 Cola 在 vrPhysicsService 中注册为 kinematic 对象
-          2. timer 同步位置+旋转并锁定 scale，避免瓶子变形
-          3. 监听 collisionStarted / collisionStopped / collisionContinues 信号，
-             打印碰撞事件及接触点坐标；通过 vrdPhysicsObjectNode.setHighlightEnabled() 启用 VRED 内置碰撞高亮
-        """
-
         def __init__(self):
             self._tracker_name = None
             self._cola_node_name = None
-            self._constraint = None
             self._active = False
-            self._maintain_offset = False
+            self._maintain_offset = True
+            self._constraint = None
             self._physics_registered = False
             self._tracker = None
             self._cola_node = None
-            self._kinematic_timer = vrTimer()
-            self._kinematic_timer_connected = False
             self._cola_scale = None
-            self._kinematic_offset = None
-            self._kinematic_rot_offset = None  # 旋转偏移矩阵
-            # 碰撞信号连接句柄
+            self._scale_timer = vrTimer()
+            self._scale_timer_connected = False
             self._sig_start = None
             self._sig_stop = None
             self._sig_cont = None
 
-        def setup(self, tracker_name="tracker-2", cola_node_name="Cola", maintain_offset=False):
-            """配置 tracker → Cola kinematic 物理绑定。"""
+        def setup(self, tracker_name="tracker-2", cola_node_name="Cola", maintain_offset=True):
             if self._active:
                 self.stop()
             self._tracker_name = tracker_name
@@ -453,104 +236,90 @@ else:
                 tracker_name, cola_node_name, maintain_offset))
 
         def start(self):
-            """
-            激活物理追踪：
-            1. 确保 Physics 服务激活
-            2. 确保 Cola 注册为 kinematic
-            3. 启动 timer pose-sync
-            4. 连接碰撞信号
-            """
             if self._active:
                 print("[ColaTracker] Already active.")
                 return
             if not self._tracker_name or not self._cola_node_name:
-                print("[ColaTracker] Not configured. Call setup(tracker_name, cola_node_name) first.")
+                print("[ColaTracker] Not configured. Call setup() first.")
                 return
-
-            # 获取 tracker 设备
-            tracker = None
             try:
-                tracker = vrDeviceService.getVRDevice(self._tracker_name)
-                if not tracker:
-                    print("[ColaTracker] WARNING: tracker not found: " + self._tracker_name)
+                self._tracker = vrDeviceService.getVRDevice(self._tracker_name)
+                if not self._tracker:
+                    print("[ColaTracker] Tracker not found: " + self._tracker_name)
                     return
             except Exception as e:
                 print("[ColaTracker] ERROR getting tracker: " + str(e))
                 return
-
-            # 获取 Cola 节点
-            colaNode = None
             try:
-                colaNode = findNode(self._cola_node_name)
-                if not colaNode:
-                    print("[ColaTracker] WARNING: Cola node not found: " + self._cola_node_name)
+                self._cola_node = findNode(self._cola_node_name)
+                if not self._cola_node:
+                    print("[ColaTracker] Cola node not found: " + self._cola_node_name)
                     return
             except Exception as e:
                 print("[ColaTracker] ERROR finding Cola node: " + str(e))
                 return
 
-            # 确保物理服务已激活
             try:
                 if not vrPhysicsService.isActive():
                     vrPhysicsService.setActive(True)
                     print("[ColaTracker] Physics service activated")
             except Exception as e:
-                print("[ColaTracker] WARNING: failed to activate physics service: " + str(e))
+                print("[ColaTracker] WARNING activating physics: " + str(e))
 
-            # 确保 Cola 为 kinematic 物理对象
-            self._ensure_physics_mode(colaNode)
+            self._ensure_physics_mode(self._cola_node)
 
-            # 开启 VRED 原生碰撞高亮（vrdPhysicsObjectNode.setHighlightEnabled）
             try:
-                cola_phys_node = vrPhysicsService.getPhysicsObject(colaNode, True)
-                if cola_phys_node:
-                    cola_phys_node.setHighlightEnabled(True)
-                    print("[ColaTracker] Collision highlighting enabled on Cola physics object")
-                else:
-                    print("[ColaTracker] WARNING: could not get Cola physics object for highlight")
+                phys_node = vrPhysicsService.getPhysicsObject(self._cola_node, True)
+                if phys_node:
+                    phys_node.setHighlightEnabled(True)
             except Exception as e:
-                print("[ColaTracker] WARNING: setHighlightEnabled failed: " + str(e))
+                print("[ColaTracker] WARNING setHighlightEnabled: " + str(e))
 
-            self._tracker = tracker
-            self._cola_node = colaNode
+            try:
+                self._cola_scale = getTransformNodeScale(self._cola_node)
+            except Exception:
+                self._cola_scale = None
 
-            if not self._start_kinematic_follow():
+            # 核心：一行 ParentConstraint 替代所有 timer + 矩阵运算
+            try:
+                self._constraint = vrConstraintService.createParentConstraint(
+                    [self._tracker.getNode()], self._cola_node, self._maintain_offset)
+            except Exception as e:
+                print("[ColaTracker] ERROR creating constraint: " + str(e))
                 return
 
-            # 连接碰撞信号（先断开再连，防止重复注册）
-            self._connect_collision_signals(colaNode)
+            if self._cola_scale is not None:
+                if not self._scale_timer_connected:
+                    self._scale_timer.connect(self._restore_scale)
+                    self._scale_timer_connected = True
+                self._scale_timer.setActive(1)
 
+            self._connect_collision_signals(self._cola_node)
             self._active = True
-            print("[ColaTracker] Started. Cola kinematic follow by {}, collisions active.".format(
-                self._tracker_name))
+            print("[ColaTracker] Started: {} -> '{}' (ParentConstraint + kinematic physics)".format(
+                self._tracker_name, self._cola_node_name))
 
         def stop(self):
-            """解除约束并断开碰撞信号，Cola 保持最后位置。"""
             if not self._active:
                 return
-
-            # 解除约束
             try:
-                if self._constraint is not None:
+                if self._constraint:
                     vrConstraintService.deleteConstraint(self._constraint)
                     self._constraint = None
             except Exception as e:
                 print("[ColaTracker] WARNING deleting constraint: " + str(e))
-
-            self._stop_kinematic_follow()
-
-            # 关闭高亮
             try:
-                if self._cola_node:
-                    cola_phys_node = vrPhysicsService.getPhysicsObject(self._cola_node, True)
-                    if cola_phys_node:
-                        cola_phys_node.setHighlightEnabled(False)
+                self._scale_timer.setActive(0)
             except Exception:
                 pass
-
-            # 断开碰撞信号
+            try:
+                if self._cola_node:
+                    phys_node = vrPhysicsService.getPhysicsObject(self._cola_node, True)
+                    if phys_node:
+                        phys_node.setHighlightEnabled(False)
+            except Exception:
+                pass
             self._disconnect_collision_signals()
-
             self._active = False
             self._tracker = None
             self._cola_node = None
@@ -564,16 +333,57 @@ else:
             else:
                 self.start()
 
+        def recalibrate(self, dz=0.0):
+            """重建约束，重置 Cola 与 tracker 的相对位置/旋转基准。
+            dz：沿 tracker 本地 Z 轴的位置偏移（负值=Cola在tracker下方）。
+            示例：recalibrate_cola(dz=-15)  # Cola 在 tracker 下方 15 单位
+            """
+            if not self._active or not self._tracker or not self._cola_node:
+                print("[ColaTracker] Not active, cannot recalibrate.")
+                return
+            try:
+                if self._constraint:
+                    vrConstraintService.deleteConstraint(self._constraint)
+                    self._constraint = None
+            except Exception:
+                pass
+            if dz != 0.0:
+                try:
+                    rt = _get_tracker_mat3(self._tracker)
+                    tp = getTransformNodeTranslation(self._tracker.getNode(), True)
+                    if rt:
+                        nx = tp.x() + rt[0][2] * dz
+                        ny = tp.y() + rt[1][2] * dz
+                        nz = tp.z() + rt[2][2] * dz
+                    else:
+                        nx, ny, nz = tp.x(), tp.y(), tp.z() + dz
+                    setTransformNodeTranslation(self._cola_node, nx, ny, nz, True)
+                    setTransformNodeRotation(self._cola_node, 0, 0, 0)
+                except Exception as e:
+                    print("[ColaTracker] WARNING positioning: " + str(e))
+            try:
+                self._constraint = vrConstraintService.createParentConstraint(
+                    [self._tracker.getNode()], self._cola_node, True)
+                print("[ColaTracker] Recalibrated. dz={:.2f}".format(dz))
+            except Exception as e:
+                print("[ColaTracker] ERROR recreating constraint: " + str(e))
+
         def status(self):
             state = "ACTIVE" if self._active else "stopped"
             cfg = "{} -> '{}'".format(self._tracker_name, self._cola_node_name) \
                 if self._tracker_name else "(not configured)"
-            phys = "kinematic registered" if self._physics_registered else "physics not registered"
+            phys = "kinematic" if self._physics_registered else "no physics"
             print("[ColaTracker] {} [{}] ({})".format(cfg, state, phys))
 
-        # ------------------------------------------------------------------
-        # 内部：物理注册
-        # ------------------------------------------------------------------
+        def _restore_scale(self):
+            if not self._active or not self._cola_node or not self._cola_scale:
+                return
+            try:
+                setTransformNodeScale(self._cola_node,
+                    self._cola_scale.x(), self._cola_scale.y(), self._cola_scale.z())
+            except Exception:
+                pass
+
         def _ensure_physics_mode(self, colaNode):
             try:
                 if vrPhysicsService.hasPhysicsObject(colaNode):
@@ -581,189 +391,22 @@ else:
                     is_kinematic = any(n.getName() == colaNode.getName() for n in kinematic_nodes)
                     if is_kinematic:
                         self._physics_registered = True
-                        print("[ColaTracker] Cola already registered as kinematic (Physics Editor)")
+                        print("[ColaTracker] Cola already registered as kinematic")
                     else:
-                        print("[ColaTracker] WARNING: Cola exists in physics but not as kinematic, re-registering...")
+                        print("[ColaTracker] Re-registering Cola as kinematic...")
                         vrPhysicsService.removeObject(colaNode)
-                        hullConf = vrdPhysicsHullConfig()
-                        ok = vrPhysicsService.addKinematicObject(colaNode, hullConf)
+                        ok = vrPhysicsService.addKinematicObject(colaNode, vrdPhysicsHullConfig())
                         self._physics_registered = ok
-                        if ok:
-                            print("[ColaTracker] Cola re-registered as kinematic")
-                        else:
-                            print("[ColaTracker] WARNING: failed to re-register Cola as kinematic")
+                        print("[ColaTracker] Cola re-registered: " + str(ok))
                 else:
-                    hullConf = vrdPhysicsHullConfig()
-                    ok = vrPhysicsService.addKinematicObject(colaNode, hullConf)
+                    ok = vrPhysicsService.addKinematicObject(colaNode, vrdPhysicsHullConfig())
                     self._physics_registered = ok
-                    if ok:
-                        print("[ColaTracker] Cola registered as kinematic object")
-                    else:
-                        print("[ColaTracker] WARNING: failed to register Cola as kinematic")
+                    print("[ColaTracker] Cola registered as kinematic: " + str(ok))
             except Exception as e:
-                print("[ColaTracker] WARNING during physics registration: " + str(e))
+                print("[ColaTracker] WARNING physics registration: " + str(e))
 
-        # ------------------------------------------------------------------
-        # 内部：kinematic 模式（无缩放传递）
-        # ------------------------------------------------------------------
-        def _start_kinematic_follow(self):
-            try:
-                self._cola_scale = getTransformNodeScale(self._cola_node)
-            except Exception:
-                self._cola_scale = None
-
-            # 提前获取 tracker 旋转矩阵，位置偏移和旋转偏移共用
-            rt_init = _get_tracker_mat3(self._tracker)
-
-            # 位置偏移存储为 tracker 本地坐标系，使其随 tracker 旋转一同变化
-            self._kinematic_offset = None
-            if self._maintain_offset:
-                try:
-                    t_tracker = getTransformNodeTranslation(self._tracker.getNode(), True)
-                    t_cola = getTransformNodeTranslation(self._cola_node, True)
-                    wx = t_cola.x() - t_tracker.x()
-                    wy = t_cola.y() - t_tracker.y()
-                    wz = t_cola.z() - t_tracker.z()
-                    # 世界偏移 → tracker 本地坐标系
-                    if rt_init is not None:
-                        ri = _mat3_t(rt_init)
-                        lx = ri[0][0]*wx + ri[0][1]*wy + ri[0][2]*wz
-                        ly = ri[1][0]*wx + ri[1][1]*wy + ri[1][2]*wz
-                        lz = ri[2][0]*wx + ri[2][1]*wy + ri[2][2]*wz
-                    else:
-                        lx, ly, lz = wx, wy, wz
-                    self._kinematic_offset = Vec3f(lx, ly, lz)
-                    print("[ColaTracker] maintain_offset (local): ({:.3f}, {:.3f}, {:.3f})".format(lx, ly, lz))
-                except Exception as e:
-                    print("[ColaTracker] WARNING: failed to compute maintain_offset: " + str(e))
-
-            # 旋转偏移：复用已获取的 rt_init
-            self._kinematic_rot_offset = None
-            try:
-                cola_euler = getTransformNodeRotation(self._cola_node)
-                R_cola_init = _euler_to_mat3(cola_euler.x(), cola_euler.y(), cola_euler.z())
-                if rt_init is not None:
-                    self._kinematic_rot_offset = _mul3x3(_mat3_t(rt_init), R_cola_init)
-                    print("[ColaTracker] rotation offset computed")
-            except Exception as e:
-                print("[ColaTracker] WARNING rotation offset: " + str(e))
-
-            if not self._kinematic_timer_connected:
-                self._kinematic_timer.connect(self._kinematic_update)
-                self._kinematic_timer_connected = True
-
-            self._kinematic_timer.setActive(1)
-            print("[ColaTracker] Kinematic timer follow active (scale locked)")
-            return True
-
-        def recalibrate_rotation(self, target_rx=0.0, target_ry=0.0, target_rz=0.0):
-            """在 tracker 处于目标位置时调用，重新计算旋转偏移。
-            target_rx/ry/rz：此刻节点应有的目标旋转（度），默认 0,0,0。
-            """
-            if not self._active or not self._tracker:
-                print("[ColaTracker] Not active, cannot recalibrate.")
-                return
-            rt = _get_tracker_mat3(self._tracker)
-            if rt is None:
-                print("[ColaTracker] Cannot get tracker rotation for recalibration.")
-                return
-            R_target = _euler_to_mat3(target_rx, target_ry, target_rz)
-            self._kinematic_rot_offset = _mul3x3(_mat3_t(rt), R_target)
-            print("[ColaTracker] Rotation recalibrated. Target: ({}, {}, {})".format(
-                target_rx, target_ry, target_rz))
-
-        def recalibrate_position(self, world_dx=None, world_dy=None, world_dz=None):
-            """设置 Cola 相对于 tracker 的位置偏移（存储为 tracker 本地坐标系）。
-            两种用法：
-              a) 直接指定世界坐标系偏移量（Z轴朝上时，负Z=Cola 在 tracker 下方）：
-                 recalibrate_cola_position(0, 0, -15)
-              b) 不传参数：从场景实时抓取当前 Cola 与 tracker 位置差作为新基准。
-            """
-            if not self._active or not self._tracker:
-                print("[ColaTracker] Not active, cannot recalibrate position.")
-                return
-            try:
-                rt = _get_tracker_mat3(self._tracker)
-                if world_dx is None:
-                    t_tracker = getTransformNodeTranslation(self._tracker.getNode(), True)
-                    t_cola = getTransformNodeTranslation(self._cola_node, True)
-                    wx = t_cola.x() - t_tracker.x()
-                    wy = t_cola.y() - t_tracker.y()
-                    wz = t_cola.z() - t_tracker.z()
-                else:
-                    wx, wy, wz = float(world_dx), float(world_dy or 0), float(world_dz or 0)
-                if rt is not None:
-                    ri = _mat3_t(rt)
-                    lx = ri[0][0]*wx + ri[0][1]*wy + ri[0][2]*wz
-                    ly = ri[1][0]*wx + ri[1][1]*wy + ri[1][2]*wz
-                    lz = ri[2][0]*wx + ri[2][1]*wy + ri[2][2]*wz
-                else:
-                    lx, ly, lz = wx, wy, wz
-                self._kinematic_offset = Vec3f(lx, ly, lz)
-                print("[ColaTracker] Position recalibrated (local): ({:.3f}, {:.3f}, {:.3f})".format(lx, ly, lz))
-            except Exception as e:
-                print("[ColaTracker] ERROR recalibrating position: " + str(e))
-
-        def _stop_kinematic_follow(self):
-            try:
-                self._kinematic_timer.setActive(0)
-            except Exception:
-                pass
-            self._kinematic_offset = None
-            self._kinematic_rot_offset = None
-
-        def _kinematic_update(self):
-            if not self._active:
-                return
-            if not self._tracker or not self._cola_node:
-                return
-
-            try:
-                t = _extract_device_translation(self._tracker)
-                if t is None:
-                    return
-
-                # 提前获取旋转矩阵，位置偏移和旋转计算共用
-                rt = _get_tracker_mat3(self._tracker)
-
-                tx = t.x()
-                ty = t.y()
-                tz = t.z()
-                # 将本地坐标系偏移旋转回世界坐标后叠加
-                if self._kinematic_offset is not None and rt is not None:
-                    ox = rt[0][0]*self._kinematic_offset.x() + rt[0][1]*self._kinematic_offset.y() + rt[0][2]*self._kinematic_offset.z()
-                    oy = rt[1][0]*self._kinematic_offset.x() + rt[1][1]*self._kinematic_offset.y() + rt[1][2]*self._kinematic_offset.z()
-                    oz = rt[2][0]*self._kinematic_offset.x() + rt[2][1]*self._kinematic_offset.y() + rt[2][2]*self._kinematic_offset.z()
-                    tx += ox; ty += oy; tz += oz
-                elif self._kinematic_offset is not None:
-                    tx += self._kinematic_offset.x()
-                    ty += self._kinematic_offset.y()
-                    tz += self._kinematic_offset.z()
-
-                setTransformNodeTranslation(self._cola_node, tx, ty, tz, True)
-
-                # 应用旋转（带初始偏移）
-                if rt is not None:
-                    rs = _mul3x3(rt, self._kinematic_rot_offset) if self._kinematic_rot_offset is not None else rt
-                    rx_d, ry_d, rz_d = _mat3_to_euler(rs)
-                    setTransformNodeRotation(self._cola_node, rx_d, ry_d, rz_d)
-
-                # 每帧恢复 Cola 原始缩放，防止 tracker 缩放链条污染
-                if self._cola_scale is not None:
-                    setTransformNodeScale(self._cola_node,
-                                          self._cola_scale.x(),
-                                          self._cola_scale.y(),
-                                          self._cola_scale.z())
-            except Exception as e:
-                print("[ColaTracker] WARNING kinematic update failed: " + str(e))
-
-        # ------------------------------------------------------------------
-        # 内部：碰撞信号管理
-        # ------------------------------------------------------------------
         def _connect_collision_signals(self, colaNode):
             cola_name = colaNode.getName()
-
-            # 先断开旧连接
             self._disconnect_collision_signals()
 
             def on_collision_started(info):
@@ -820,84 +463,56 @@ else:
                     vrPhysicsService.collisionContinues.disconnect(self._sig_cont)
                     self._sig_cont = None
             except Exception:
-                # 若未连接则忽略
-                self._sig_start = None
-                self._sig_stop = None
-                self._sig_cont = None
+                self._sig_start = self._sig_stop = self._sig_cont = None
 
     # ======================================================================
-    # 实例化管理器
+    # 实例化
     # ======================================================================
     _transform_tracker = TransformTracker()
     _cola_tracker = ColaTracker()
 
     # ======================================================================
-    # 控制器按键绑定（直连设备信号，不创建 Interaction，不影响内置 Teleport）
+    # 控制器按键绑定（直连设备信号，不影响内置 Teleport）
     # ======================================================================
-    # 左手 Y 键 → toggle TransformTracker
-    # 右手 B 键 → toggle ColaTracker
     try:
-        # 先清除旧的残余 interaction（如果存在）
         try:
             _old_pt = vrDeviceService.getInteraction("PhysicsTrackerInteraction")
             if _old_pt and _old_pt.isValid():
                 vrDeviceService.removeInteraction(_old_pt)
         except Exception:
             pass
-
         left_ctrl  = vrDeviceService.getDevice("LeftController")
         right_ctrl = vrDeviceService.getDevice("RightController")
-
-        left_y  = left_ctrl.getButton("ButtonY")
-        right_b = right_ctrl.getButton("ButtonB")
-
-        left_y.signal().pressed.connect(lambda: _transform_tracker.toggle())
-        right_b.signal().pressed.connect(lambda: _cola_tracker.toggle())
-
-        print("[PhysicsTracker] Buttons bound: left-Y=TransformTracker, right-B=ColaTracker (direct signal)")
+        left_ctrl.getButton("ButtonY").signal().pressed.connect(lambda: _transform_tracker.toggle())
+        right_ctrl.getButton("ButtonB").signal().pressed.connect(lambda: _cola_tracker.toggle())
+        print("[PhysicsTracker] Buttons bound: left-Y=TransformTracker, right-B=ColaTracker")
     except Exception as e:
         print("[PhysicsTracker] WARNING binding buttons: " + str(e))
 
     _physics_tracker_initialized = True
-    print("[PhysicsTracker] Initialized.")
-    print("[PhysicsTracker] Call setup_transform(tracker, node) and setup_cola(tracker, node) to configure.")
+    print("[PhysicsTracker] Initialized (ParentConstraint-based).")
 
 # ======================================================================
 # 模块级公开 API
 # ======================================================================
 
 def setup_transform(tracker_name, node_name, maintain_offset=True):
-    """
-    配置 tracker-1 → Transform3D 节点绑定。
-
-    Args:
-        tracker_name (str): tracker 设备名，如 "tracker-1"
-        node_name (str): VRED 场景节点名，如 "Seat"
-        maintain_offset (bool): True=保留初始相对偏移（默认，节点在 tracker 上方时保持相交关系），
-                                False=直接吸附到 tracker 位置
-    """
+    """配置 tracker-1 → Transform3D 节点绑定。maintain_offset=True 保持初始相对位置。"""
     global _transform_tracker
     _transform_tracker.setup(tracker_name, node_name, maintain_offset)
 
-def setup_cola(tracker_name="tracker-2", cola_node_name="Cola", maintain_offset=False):
-    """
-    配置 tracker-2 → Cola kinematic 物理绑定。
-
-    Args:
-        tracker_name (str): tracker 设备名，默认 "tracker-2"
-        cola_node_name (str): Cola 节点名，默认 "Cola"
-        maintain_offset (bool): True=保留初始偏移，False=直接吸附
-    """
+def setup_cola(tracker_name="tracker-2", cola_node_name="Cola", maintain_offset=True):
+    """配置 tracker-2 → Cola kinematic 物理绑定。maintain_offset=True 保持初始相对位置。"""
     global _cola_tracker
     _cola_tracker.setup(tracker_name, cola_node_name, maintain_offset)
 
 def start_transform():
-    """激活 tracker-1 → Transform3D 追踪。"""
+    """启动 tracker-1 追踪（创建 ParentConstraint）。"""
     global _transform_tracker
     _transform_tracker.start()
 
 def stop_transform():
-    """停止 tracker-1 追踪，节点保持最后位置。"""
+    """停止 tracker-1 追踪（删除约束）。"""
     global _transform_tracker
     _transform_tracker.stop()
 
@@ -907,12 +522,12 @@ def toggle_transform():
     _transform_tracker.toggle()
 
 def start_cola():
-    """激活 tracker-2 → Cola 物理追踪及碰撞检测。"""
+    """启动 tracker-2 → Cola 物理追踪（创建 ParentConstraint + kinematic 物理）。"""
     global _cola_tracker
     _cola_tracker.start()
 
 def stop_cola():
-    """停止 Cola 追踪，解除约束与碰撞回调。"""
+    """停止 Cola 追踪（删除约束，断开碰撞信号）。"""
     global _cola_tracker
     _cola_tracker.stop()
 
@@ -928,43 +543,35 @@ def physics_status():
     _cola_tracker.status()
 
 def debug_tracker_rotation(tracker_name="tracker-1"):
-    """对比所有旋转数据来源，排查坐标空间问题。
-    用法：debug_tracker_rotation("tracker-2")
-    """
+    """对比旋转数据来源，排查坐标空间问题。"""
     _debug_rot_methods(tracker_name)
 
-def recalibrate_transform_rotation(target_rx=0.0, target_ry=0.0, target_rz=0.0):
-    """在 tracker 处于"瓶子/椅子竖立"位置时调用，重新计算旋转偏移。
-    target_rx/ry/rz：节点在该位置应有的目标旋转（度），默认 0,0,0（竖立）。
-    用法：start_transform() 后，把 tracker 放到目标姿态，然后调用此函数。
+def recalibrate_transform(dz=0.0):
+    """重建 TransformTracker 约束，重置相对位置/旋转基准。
+    dz：沿 tracker 本地 Z 轴的位置偏移（场景单位，负值=节点在tracker下方）。
     """
     global _transform_tracker
-    _transform_tracker.recalibrate_rotation(target_rx, target_ry, target_rz)
+    _transform_tracker.recalibrate(dz)
 
-def recalibrate_cola_rotation(target_rx=0.0, target_ry=0.0, target_rz=0.0):
-    """在 tracker 处于"瓶子竖立"位置时调用，重新计算旋转偏移。
-    target_rx/ry/rz：Cola 在该位置应有的目标旋转（度），默认 0,0,0（竖立）。
-    用法：start_cola() 后，把 tracker 放到目标姿态，然后调用此函数。
+def recalibrate_cola(dz=0.0):
+    """重建 ColaTracker 约束，重置 Cola 与 tracker 的相对位置/旋转基准。
+    dz：tracker 在瓶顶时，dz=-瓶高 将 Cola 定位到 tracker 正下方。
+    翻转 tracker 后 Cola 跟着翻转，始终保持本地坐标系相对位置不变。
+
+    示例：recalibrate_cola(dz=-15)   # Cola 在 tracker 下方 15 单位
     """
     global _cola_tracker
-    _cola_tracker.recalibrate_rotation(target_rx, target_ry, target_rz)
+    _cola_tracker.recalibrate(dz)
+
+# 向后兼容别名
+def recalibrate_cola_rotation(target_rx=0.0, target_ry=0.0, target_rz=0.0):
+    recalibrate_cola()
+
+def recalibrate_transform_rotation(target_rx=0.0, target_ry=0.0, target_rz=0.0):
+    recalibrate_transform()
 
 def recalibrate_cola_position(world_dx=None, world_dy=None, world_dz=None):
-    """设置 Cola 相对于 tracker 的位置偏移（自动转为 tracker 本地坐标，随旋转一起变化）。
-
-    用法 A：直接指定偏移量（世界坐标系，VRED 默认 Y 轴朝上）
-      recalibrate_cola_position(0, -15, 0)  # Cola 在 tracker 下方 15 单位（Y朝上时）
-      recalibrate_cola_position(0, 0, -15)  # Cola 在 tracker 下方 15 单位（Z朝上时）
-
-    用法 B：不传参数，从场景实时抓取 Cola 与 tracker 当前位置差
-      recalibrate_cola_position()  # 需先在 VRED 中把 Cola 移到目标位置
-
-    效果：瓶子翻转时 Cola 随之翻转（始终保持与 tracker 的本地相对位置不变）。
-    """
-    global _cola_tracker
-    _cola_tracker.recalibrate_position(world_dx, world_dy, world_dz)
+    recalibrate_cola(dz=world_dz or 0.0)
 
 def recalibrate_transform_position(world_dx=None, world_dy=None, world_dz=None):
-    """设置 Transform3D 节点相对于 tracker 的位置偏移（用法同 recalibrate_cola_position）。"""
-    global _transform_tracker
-    _transform_tracker.recalibrate_position(world_dx, world_dy, world_dz)
+    recalibrate_transform(dz=world_dz or 0.0)
