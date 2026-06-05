@@ -14,12 +14,12 @@
 #   recalibrate_transform_rotation()           # 椅子摆正后校准旋转基准
 #
 #   # ── 瓶子（tracker 固定在瓶子顶部）──
-#   setup_cola("tracker-2", "Cola", maintain_offset=True)
-#                                              # maintain_offset=True：记录 Cola 与 tracker
-#                                              # 的相对偏移，且偏移随 tracker 旋转一同变化，
-#                                              # 确保翻转时瓶子始终在定位器下方（而非世界上方）
+#   setup_cola("tracker-2", "Cola")            # 配置（默认 maintain_offset=False）
 #   start_cola()                               # 启动物理追踪
 #   recalibrate_cola_rotation()                # 瓶子竖立时校准旋转基准
+#   recalibrate_cola_position(0, -15, 0)       # 将 Cola 置于 tracker 下方 15 单位
+#                                              # （Y轴朝上用第2参数，Z轴朝上用第3参数）
+#                                              # 也可不传参数，从当前场景位置差自动抓取
 #
 #   stop_cola()                                # 停止，解除约束
 #   physics_status()                           # 打印当前状态
@@ -328,6 +328,38 @@ else:
             self._rot_offset = _mul3x3(_mat3_t(rt), R_target)
             print("[TransformTracker] Rotation recalibrated. Target: ({}, {}, {})".format(
                 target_rx, target_ry, target_rz))
+
+        def recalibrate_position(self, world_dx=None, world_dy=None, world_dz=None):
+            """设置节点相对于 tracker 的位置偏移（存储为 tracker 本地坐标系）。
+            两种用法：
+              a) 直接指定世界坐标系偏移量（Z轴朝上时，负Z=节点在 tracker 下方）：
+                 recalibrate_transform_position(0, 0, -15)
+              b) 不传参数：从场景实时抓取当前 Cola 与 tracker 位置差作为新基准。
+            """
+            if not self._active or not self._tracker:
+                print("[TransformTracker] Not active, cannot recalibrate position.")
+                return
+            try:
+                rt = _get_tracker_mat3(self._tracker)
+                if world_dx is None:
+                    t_tracker = getTransformNodeTranslation(self._tracker.getNode(), True)
+                    t_node = getTransformNodeTranslation(self._node, True)
+                    wx = t_node.x() - t_tracker.x()
+                    wy = t_node.y() - t_tracker.y()
+                    wz = t_node.z() - t_tracker.z()
+                else:
+                    wx, wy, wz = float(world_dx), float(world_dy or 0), float(world_dz or 0)
+                if rt is not None:
+                    ri = _mat3_t(rt)
+                    lx = ri[0][0]*wx + ri[0][1]*wy + ri[0][2]*wz
+                    ly = ri[1][0]*wx + ri[1][1]*wy + ri[1][2]*wz
+                    lz = ri[2][0]*wx + ri[2][1]*wy + ri[2][2]*wz
+                else:
+                    lx, ly, lz = wx, wy, wz
+                self._node_offset = Vec3f(lx, ly, lz)
+                print("[TransformTracker] Position recalibrated (local): ({:.3f}, {:.3f}, {:.3f})".format(lx, ly, lz))
+            except Exception as e:
+                print("[TransformTracker] ERROR recalibrating position: " + str(e))
 
         def status(self):
             state = "ACTIVE" if self._active else "stopped"
@@ -640,6 +672,38 @@ else:
             print("[ColaTracker] Rotation recalibrated. Target: ({}, {}, {})".format(
                 target_rx, target_ry, target_rz))
 
+        def recalibrate_position(self, world_dx=None, world_dy=None, world_dz=None):
+            """设置 Cola 相对于 tracker 的位置偏移（存储为 tracker 本地坐标系）。
+            两种用法：
+              a) 直接指定世界坐标系偏移量（Z轴朝上时，负Z=Cola 在 tracker 下方）：
+                 recalibrate_cola_position(0, 0, -15)
+              b) 不传参数：从场景实时抓取当前 Cola 与 tracker 位置差作为新基准。
+            """
+            if not self._active or not self._tracker:
+                print("[ColaTracker] Not active, cannot recalibrate position.")
+                return
+            try:
+                rt = _get_tracker_mat3(self._tracker)
+                if world_dx is None:
+                    t_tracker = getTransformNodeTranslation(self._tracker.getNode(), True)
+                    t_cola = getTransformNodeTranslation(self._cola_node, True)
+                    wx = t_cola.x() - t_tracker.x()
+                    wy = t_cola.y() - t_tracker.y()
+                    wz = t_cola.z() - t_tracker.z()
+                else:
+                    wx, wy, wz = float(world_dx), float(world_dy or 0), float(world_dz or 0)
+                if rt is not None:
+                    ri = _mat3_t(rt)
+                    lx = ri[0][0]*wx + ri[0][1]*wy + ri[0][2]*wz
+                    ly = ri[1][0]*wx + ri[1][1]*wy + ri[1][2]*wz
+                    lz = ri[2][0]*wx + ri[2][1]*wy + ri[2][2]*wz
+                else:
+                    lx, ly, lz = wx, wy, wz
+                self._kinematic_offset = Vec3f(lx, ly, lz)
+                print("[ColaTracker] Position recalibrated (local): ({:.3f}, {:.3f}, {:.3f})".format(lx, ly, lz))
+            except Exception as e:
+                print("[ColaTracker] ERROR recalibrating position: " + str(e))
+
         def _stop_kinematic_follow(self):
             try:
                 self._kinematic_timer.setActive(0)
@@ -884,3 +948,23 @@ def recalibrate_cola_rotation(target_rx=0.0, target_ry=0.0, target_rz=0.0):
     """
     global _cola_tracker
     _cola_tracker.recalibrate_rotation(target_rx, target_ry, target_rz)
+
+def recalibrate_cola_position(world_dx=None, world_dy=None, world_dz=None):
+    """设置 Cola 相对于 tracker 的位置偏移（自动转为 tracker 本地坐标，随旋转一起变化）。
+
+    用法 A：直接指定偏移量（世界坐标系，VRED 默认 Y 轴朝上）
+      recalibrate_cola_position(0, -15, 0)  # Cola 在 tracker 下方 15 单位（Y朝上时）
+      recalibrate_cola_position(0, 0, -15)  # Cola 在 tracker 下方 15 单位（Z朝上时）
+
+    用法 B：不传参数，从场景实时抓取 Cola 与 tracker 当前位置差
+      recalibrate_cola_position()  # 需先在 VRED 中把 Cola 移到目标位置
+
+    效果：瓶子翻转时 Cola 随之翻转（始终保持与 tracker 的本地相对位置不变）。
+    """
+    global _cola_tracker
+    _cola_tracker.recalibrate_position(world_dx, world_dy, world_dz)
+
+def recalibrate_transform_position(world_dx=None, world_dy=None, world_dz=None):
+    """设置 Transform3D 节点相对于 tracker 的位置偏移（用法同 recalibrate_cola_position）。"""
+    global _transform_tracker
+    _transform_tracker.recalibrate_position(world_dx, world_dy, world_dz)
