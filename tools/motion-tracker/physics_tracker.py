@@ -124,14 +124,6 @@ else:
             rz = 0.0
         return math.degrees(rx), math.degrees(ry), math.degrees(rz)
 
-    def _mat3_mulv(m, v):
-        """3x3 矩阵乘 3 维向量列表 [x,y,z]，返回 [x,y,z]。"""
-        return [
-            m[0][0]*v[0] + m[0][1]*v[1] + m[0][2]*v[2],
-            m[1][0]*v[0] + m[1][1]*v[1] + m[1][2]*v[2],
-            m[2][0]*v[0] + m[2][1]*v[1] + m[2][2]*v[2],
-        ]
-
     def _debug_rot_methods(tracker_name):
         """对比所有旋转数据来源，用于排查坐标空间问题（内部实现）。"""
         try:
@@ -243,19 +235,17 @@ else:
             except Exception:
                 self._node_scale = None
 
-            # maintain_offset：记录 tracker→节点 的初始位置偏移（存 tracker 本地坐标，跟随翻转）
+            # maintain_offset：记录 tracker→节点 的初始位置偏移
             self._node_offset = None
             if self._maintain_offset:
                 try:
                     t_tracker = getTransformNodeTranslation(self._tracker.getNode(), True)
                     t_node = getTransformNodeTranslation(self._node, True)
-                    dw = [t_node.x()-t_tracker.x(), t_node.y()-t_tracker.y(), t_node.z()-t_tracker.z()]
-                    rt_init0 = _get_tracker_mat3(self._tracker)
-                    if rt_init0 is not None:
-                        self._node_offset = _mat3_mulv(_mat3_t(rt_init0), dw)
-                    else:
-                        self._node_offset = dw
-                    print("[TransformTracker] maintain_offset enabled (local space)")
+                    self._node_offset = Vec3f(
+                        t_node.x() - t_tracker.x(),
+                        t_node.y() - t_tracker.y(),
+                        t_node.z() - t_tracker.z())
+                    print("[TransformTracker] maintain_offset enabled")
                 except Exception as e:
                     print("[TransformTracker] WARNING: failed to compute offset: " + str(e))
 
@@ -335,24 +325,19 @@ else:
                 t = _extract_device_translation(self._tracker)
                 if t is None:
                     return
-                rt = _get_tracker_mat3(self._tracker)
 
                 tx = t.x()
                 ty = t.y()
                 tz = t.z()
-                # 位置偏移在 tracker 本地坐标存储，乘以当前旋转转回世界坐标
                 if self._node_offset is not None:
-                    if rt is not None:
-                        wo = _mat3_mulv(rt, self._node_offset)
-                        tx += wo[0]; ty += wo[1]; tz += wo[2]
-                    else:
-                        tx += self._node_offset[0]
-                        ty += self._node_offset[1]
-                        tz += self._node_offset[2]
+                    tx += self._node_offset.x()
+                    ty += self._node_offset.y()
+                    tz += self._node_offset.z()
 
                 setTransformNodeTranslation(self._node, tx, ty, tz, True)
 
                 # 应用旋转（带初始偏移，保持节点初始朝向作为基准）
+                rt = _get_tracker_mat3(self._tracker)
                 if rt is not None:
                     rs = _mul3x3(rt, self._rot_offset) if self._rot_offset is not None else rt
                     rx_d, ry_d, rz_d = _mat3_to_euler(rs)
@@ -573,13 +558,11 @@ else:
                 try:
                     t_tracker = getTransformNodeTranslation(self._tracker.getNode(), True)
                     t_cola = getTransformNodeTranslation(self._cola_node, True)
-                    dw = [t_cola.x()-t_tracker.x(), t_cola.y()-t_tracker.y(), t_cola.z()-t_tracker.z()]
-                    rt_init0 = _get_tracker_mat3(self._tracker)
-                    if rt_init0 is not None:
-                        self._kinematic_offset = _mat3_mulv(_mat3_t(rt_init0), dw)
-                    else:
-                        self._kinematic_offset = dw
-                    print("[ColaTracker] Kinematic maintain_offset enabled (local space)")
+                    self._kinematic_offset = Vec3f(
+                        t_cola.x() - t_tracker.x(),
+                        t_cola.y() - t_tracker.y(),
+                        t_cola.z() - t_tracker.z())
+                    print("[ColaTracker] Kinematic maintain_offset enabled (position offset)")
                 except Exception as e:
                     print("[ColaTracker] WARNING: failed to compute maintain_offset: " + str(e))
 
@@ -638,24 +621,19 @@ else:
                 t = _extract_device_translation(self._tracker)
                 if t is None:
                     return
-                rt = _get_tracker_mat3(self._tracker)
 
                 tx = t.x()
                 ty = t.y()
                 tz = t.z()
-                # 位置偏移在 tracker 本地坐标存储，乘以当前旋转转回世界坐标
                 if self._kinematic_offset is not None:
-                    if rt is not None:
-                        wo = _mat3_mulv(rt, self._kinematic_offset)
-                        tx += wo[0]; ty += wo[1]; tz += wo[2]
-                    else:
-                        tx += self._kinematic_offset[0]
-                        ty += self._kinematic_offset[1]
-                        tz += self._kinematic_offset[2]
+                    tx += self._kinematic_offset.x()
+                    ty += self._kinematic_offset.y()
+                    tz += self._kinematic_offset.z()
 
                 setTransformNodeTranslation(self._cola_node, tx, ty, tz, True)
 
                 # 应用旋转（带初始偏移）
+                rt = _get_tracker_mat3(self._tracker)
                 if rt is not None:
                     rs = _mul3x3(rt, self._kinematic_rot_offset) if self._kinematic_rot_offset is not None else rt
                     rx_d, ry_d, rz_d = _mat3_to_euler(rs)
