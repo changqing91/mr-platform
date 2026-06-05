@@ -166,9 +166,10 @@ if not _physics_tracker_initialized:
             else:
                 self.start()
 
-        def recalibrate(self, dz=0.0):
+        def recalibrate(self, dx=0.0, dy=0.0, dz=0.0):
             """重建约束，重置节点与 tracker 的相对位置/旋转基准。
-            dz：沿 tracker 本地 Z 轴的位置偏移（场景单位，负值=节点在tracker下方）。
+            dx/dy/dz：沿 tracker 本地 X/Y/Z 轴的位置偏移（场景单位）。
+            负值 dz = 节点在 tracker 下方（Z 朝上时）。
             """
             if not self._active or not self._tracker or not self._node:
                 print("[TransformTracker] Not active, cannot recalibrate.")
@@ -179,16 +180,16 @@ if not _physics_tracker_initialized:
                     self._constraint = None
             except Exception:
                 pass
-            if dz != 0.0:
+            if dx != 0.0 or dy != 0.0 or dz != 0.0:
                 try:
                     rt = _get_tracker_mat3(self._tracker)
                     tp = getTransformNodeTranslation(self._tracker.getNode(), True)
                     if rt:
-                        nx = tp.x() + rt[0][2] * dz
-                        ny = tp.y() + rt[1][2] * dz
-                        nz = tp.z() + rt[2][2] * dz
+                        nx = tp.x() + rt[0][0]*dx + rt[0][1]*dy + rt[0][2]*dz
+                        ny = tp.y() + rt[1][0]*dx + rt[1][1]*dy + rt[1][2]*dz
+                        nz = tp.z() + rt[2][0]*dx + rt[2][1]*dy + rt[2][2]*dz
                     else:
-                        nx, ny, nz = tp.x(), tp.y(), tp.z() + dz
+                        nx, ny, nz = tp.x() + dx, tp.y() + dy, tp.z() + dz
                     setTransformNodeTranslation(self._node, nx, ny, nz, True)
                     setTransformNodeRotation(self._node, 0, 0, 0)
                 except Exception as e:
@@ -196,7 +197,7 @@ if not _physics_tracker_initialized:
             try:
                 self._constraint = vrConstraintService.createParentConstraint(
                     [self._tracker.getNode()], self._node, True)
-                print("[TransformTracker] Recalibrated. dz={:.2f}".format(dz))
+                print("[TransformTracker] Recalibrated. dx={:.2f} dy={:.2f} dz={:.2f}".format(dx, dy, dz))
             except Exception as e:
                 print("[TransformTracker] ERROR recreating constraint: " + str(e))
 
@@ -333,10 +334,12 @@ if not _physics_tracker_initialized:
             else:
                 self.start()
 
-        def recalibrate(self, dz=0.0):
+        def recalibrate(self, dx=0.0, dy=0.0, dz=0.0):
             """重建约束，重置 Cola 与 tracker 的相对位置/旋转基准。
-            dz：沿 tracker 本地 Z 轴的位置偏移（负值=Cola在tracker下方）。
-            示例：recalibrate_cola(dz=-15)  # Cola 在 tracker 下方 15 单位
+            dx/dy/dz：沿 tracker 本地 X/Y/Z 轴的位置偏移（场景单位）。
+            负值 dz = Cola 在 tracker 下方（Z 朝上时）。
+            示例：recalibrate_cola(dz=-15)         # 下移 15
+                  recalibrate_cola(dx=2, dz=-15)   # 下移 15，右移 2
             """
             if not self._active or not self._tracker or not self._cola_node:
                 print("[ColaTracker] Not active, cannot recalibrate.")
@@ -347,16 +350,16 @@ if not _physics_tracker_initialized:
                     self._constraint = None
             except Exception:
                 pass
-            if dz != 0.0:
+            if dx != 0.0 or dy != 0.0 or dz != 0.0:
                 try:
                     rt = _get_tracker_mat3(self._tracker)
                     tp = getTransformNodeTranslation(self._tracker.getNode(), True)
                     if rt:
-                        nx = tp.x() + rt[0][2] * dz
-                        ny = tp.y() + rt[1][2] * dz
-                        nz = tp.z() + rt[2][2] * dz
+                        nx = tp.x() + rt[0][0]*dx + rt[0][1]*dy + rt[0][2]*dz
+                        ny = tp.y() + rt[1][0]*dx + rt[1][1]*dy + rt[1][2]*dz
+                        nz = tp.z() + rt[2][0]*dx + rt[2][1]*dy + rt[2][2]*dz
                     else:
-                        nx, ny, nz = tp.x(), tp.y(), tp.z() + dz
+                        nx, ny, nz = tp.x() + dx, tp.y() + dy, tp.z() + dz
                     setTransformNodeTranslation(self._cola_node, nx, ny, nz, True)
                     setTransformNodeRotation(self._cola_node, 0, 0, 0)
                 except Exception as e:
@@ -364,7 +367,7 @@ if not _physics_tracker_initialized:
             try:
                 self._constraint = vrConstraintService.createParentConstraint(
                     [self._tracker.getNode()], self._cola_node, True)
-                print("[ColaTracker] Recalibrated. dz={:.2f}".format(dz))
+                print("[ColaTracker] Recalibrated. dx={:.2f} dy={:.2f} dz={:.2f}".format(dx, dy, dz))
             except Exception as e:
                 print("[ColaTracker] ERROR recreating constraint: " + str(e))
 
@@ -546,22 +549,26 @@ def debug_tracker_rotation(tracker_name="tracker-1"):
     """对比旋转数据来源，排查坐标空间问题。"""
     _debug_rot_methods(tracker_name)
 
-def recalibrate_transform(dz=0.0):
+def recalibrate_transform(dx=0.0, dy=0.0, dz=0.0):
     """重建 TransformTracker 约束，重置相对位置/旋转基准。
-    dz：沿 tracker 本地 Z 轴的位置偏移（场景单位，负值=节点在tracker下方）。
+    dx/dy/dz：沿 tracker 本地 X/Y/Z 轴的位置偏移（场景单位）。
     """
     global _transform_tracker
-    _transform_tracker.recalibrate(dz)
+    _transform_tracker.recalibrate(dx, dy, dz)
 
-def recalibrate_cola(dz=0.0):
+def recalibrate_cola(dx=0.0, dy=0.0, dz=0.0):
     """重建 ColaTracker 约束，重置 Cola 与 tracker 的相对位置/旋转基准。
-    dz：tracker 在瓶顶时，dz=-瓶高 将 Cola 定位到 tracker 正下方。
-    翻转 tracker 后 Cola 跟着翻转，始终保持本地坐标系相对位置不变。
+    dx/dy/dz：沿 tracker 本地 X/Y/Z 轴的位置偏移（场景单位）。
+        tracker 在瓶顶时：dz=-瓶高（负）将 Cola 定位到正下方。
+        翻转 tracker 后 Cola 跟着翻转，始终保持本地坐标系相对位置不变。
 
-    示例：recalibrate_cola(dz=-15)   # Cola 在 tracker 下方 15 单位
+    示例：
+        recalibrate_cola(dz=-15)          # 仅下移 15 单位
+        recalibrate_cola(dx=2, dz=-15)    # 下移 15，右移 2
+        recalibrate_cola(dy=5, dz=-12)    # 下移 12，前移 5
     """
     global _cola_tracker
-    _cola_tracker.recalibrate(dz)
+    _cola_tracker.recalibrate(dx, dy, dz)
 
 # 向后兼容别名
 def recalibrate_cola_rotation(target_rx=0.0, target_ry=0.0, target_rz=0.0):
