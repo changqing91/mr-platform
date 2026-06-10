@@ -1,10 +1,10 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { ArrowLeft, Activity, Glasses, SplitSquareHorizontal, ImageIcon, Headset, FolderOpen, Monitor, RotateCcw, Power, Zap, Save, CheckCircle, XCircle, Mic, MicOff, Gamepad2, Sliders } from 'lucide-react';
+import { ArrowLeft, Activity, Glasses, SplitSquareHorizontal, ImageIcon, Headset, FolderOpen, Monitor, RotateCcw, Power, Zap, Save, CheckCircle, XCircle, Mic, MicOff, Gamepad2, Sliders, Wrench } from 'lucide-react';
 import ProjectThumbnail from './ProjectThumbnail';
 import { api } from '../services/api';
 import { api as vredApi } from '../services/vredPython';
 import { MR_TOOLS } from '../constants';
-import { getAllToolsScript, getSwitchToolCommand, getCleanupAllCommand } from '../utils/vredPy';
+import { getAllToolsScript, getSwitchToolCommand, getCleanupAllCommand, getWheelSwapScript } from '../utils/vredPy';
 
 // --- Camera helpers ---
 const parseVec3 = (v) => {
@@ -598,11 +598,13 @@ cam.setWorldTransform(QMatrix4x4(*m))`;
     }, [gamepadEnabled]);
 
     // --- Tab & MR Tools state ---
-    const [activeTab, setActiveTab] = useState(0); // 0: 控制面板, 1: MR 工具
+    const [activeTab, setActiveTab] = useState(0); // 0: 控制面板, 1: MR 工具, 2: POC
     const [gamepadPanelOpen, setGamepadPanelOpen] = useState(false);
     const [renderConfigPanelOpen, setRenderConfigPanelOpen] = useState(false);
     const [activeTool, setActiveTool] = useState(null);
     const [isToolsInjected, setIsToolsInjected] = useState(false);
+    const [isWheelSwapInjecting, setIsWheelSwapInjecting] = useState(false);
+    const [isWheelSwapInjected, setIsWheelSwapInjected] = useState(false);
 
     const getStreamPanelUrl = () => {
         const token = localStorage.getItem('jwt') || '';
@@ -633,6 +635,38 @@ cam.setWorldTransform(QMatrix4x4(*m))`;
             setIsToolsInjected(false);
         } catch (e) {
             console.error('Failed to reset MR tools:', e);
+        }
+    };
+
+    const handleInjectWheelSwap = async () => {
+        if (!machine) return;
+        setIsWheelSwapInjecting(true);
+        try {
+            await api.processes.executePython(machine.ip, machine.port || 8888, getWheelSwapScript());
+            setIsWheelSwapInjected(true);
+        } catch (e) {
+            console.error('Failed to inject wheel swap script:', e);
+        } finally {
+            setIsWheelSwapInjecting(false);
+        }
+    };
+
+    const handleResetWheelSwap = async () => {
+        if (!machine || !isWheelSwapInjected) return;
+        try {
+            await api.processes.executePython(machine.ip, machine.port || 8888,
+                `global _wheel_swap_tool
+if '_wheel_swap_tool' in globals() and _wheel_swap_tool is not None:
+    try:
+        _wheel_swap_tool.disable()
+    except Exception:
+        pass
+_wheel_swap_tool = None
+print('[WheelSwap] Cleared')`
+            );
+            setIsWheelSwapInjected(false);
+        } catch (e) {
+            console.error('Failed to reset wheel swap:', e);
         }
     };
 
@@ -985,6 +1019,12 @@ except Exception as e:
                         >
                             MR 工具
                         </button>
+                        <button
+                            onClick={() => setActiveTab(2)}
+                            className={`flex-1 py-3 text-xs font-bold tracking-wide transition-colors border-b-2 ${activeTab === 2 ? 'text-[#39C5BB] border-[#39C5BB]' : 'text-gray-500 border-transparent hover:text-gray-300'}`}
+                        >
+                            POC
+                        </button>
                     </div>
 
                     {/* Tab 1: 控制面板 */}
@@ -1131,9 +1171,64 @@ except Exception as e:
                             </div>
                         </div>
                     )}
-                    {/* Tab 3: 手柄控制 */}
+                    {/* Tab 3: POC */}
                     {activeTab === 2 && (
                         <div className="flex-1 flex flex-col p-4 overflow-y-auto custom-scrollbar">
+                            {/* Header */}
+                            <div className="flex items-center justify-between mb-4">
+                                <div className="flex items-center gap-2">
+                                    <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">POC 工具</span>
+                                    {isWheelSwapInjected && (
+                                        <div className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#39C5BB]/10 border border-[#39C5BB]/30">
+                                            <Zap size={10} className="text-[#39C5BB]" />
+                                            <span className="text-[10px] font-bold text-[#39C5BB]">已注入</span>
+                                        </div>
+                                    )}
+                                </div>
+                                <button
+                                    onClick={handleResetWheelSwap}
+                                    disabled={!isWheelSwapInjected}
+                                    className="text-[10px] px-2 py-1 rounded border border-red-800 text-red-400 bg-red-900/20 hover:bg-red-900/40 transition-all font-bold flex items-center gap-1 disabled:opacity-30 disabled:cursor-not-allowed"
+                                >
+                                    <RotateCcw size={10} /> 清除
+                                </button>
+                            </div>
+
+                            {/* POC Tools Grid */}
+                            <div className="grid grid-cols-2 gap-3">
+                                {/* Wheel Swap */}
+                                <button
+                                    onClick={handleInjectWheelSwap}
+                                    disabled={isWheelSwapInjecting || !machine}
+                                    className={`relative flex flex-col items-center p-4 rounded-xl border transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
+                                        isWheelSwapInjected
+                                            ? 'border-[#39C5BB] bg-[#39C5BB]/10 shadow-lg shadow-[#39C5BB]/10'
+                                            : 'border-gray-700 bg-gray-800/50 hover:border-gray-600 hover:bg-gray-800'
+                                    }`}
+                                >
+                                    {isWheelSwapInjected && (
+                                        <div className="absolute top-2 right-2 w-4 h-4 rounded-full bg-[#39C5BB] flex items-center justify-center animate-pulse">
+                                            <Power size={8} className="text-white" />
+                                        </div>
+                                    )}
+                                    {isWheelSwapInjecting && (
+                                        <div className="absolute top-2 right-2 w-4 h-4 rounded-full bg-gray-600 flex items-center justify-center">
+                                            <div className="w-2.5 h-2.5 border border-t-transparent border-[#39C5BB] rounded-full animate-spin" />
+                                        </div>
+                                    )}
+                                    <div className={`w-10 h-10 rounded-lg flex items-center justify-center mb-2 ${
+                                        isWheelSwapInjected ? 'bg-[#39C5BB]/20' : 'bg-gray-700/50'
+                                    }`}>
+                                        <Wrench size={20} style={{ color: isWheelSwapInjected ? '#39C5BB' : '#9ca3af' }} />
+                                    </div>
+                                    <span className="text-xs font-bold" style={{ color: isWheelSwapInjected ? '#39C5BB' : '#d1d5db' }}>
+                                        轮胎替换
+                                    </span>
+                                    <span className="text-[10px] text-center mt-0.5" style={{ color: isWheelSwapInjected ? '#6ee7e3' : '#6b7280' }}>
+                                        {isWheelSwapInjected ? '当前生效' : 'Trigger 拖拽安装'}
+                                    </span>
+                                </button>
+                            </div>
                         </div>
                     )}
                 </div>

@@ -1,23 +1,6 @@
 
-import measure from './vredPy/measure.py?raw';
-import flashlight from './vredPy/flashlight.py?raw';
-import section from './vredPy/section.py?raw';
-import turntable from './vredPy/turntable.py?raw';
-import adjust from './vredPy/adjust.py?raw';
-import voiceNote from './vredPy/voice_note.py?raw';
-import drawNote from './vredPy/draw_note.py?raw';
 import allTools from './vredPy/all_tools.py?raw';
-
-// 旧版：单个工具脚本 (保留向后兼容)
-export const TOOL_IMPLEMENTATIONS = {
-    measure,
-    flashlight,
-    section,
-    turntable,
-    adjust,
-    voice_note: voiceNote,
-    draw_note: drawNote
-};
+import wheelSwap from './vredPy/wheel_swap.py?raw';
 
 // 新版：统一脚本 - 一次注入所有工具
 export const ALL_TOOLS_SCRIPT = allTools;
@@ -45,4 +28,11 @@ export function getDisableAllCommand() {
 // 生成完全清除的 Python 命令 (禁用工具 + 删除所有创建的节点 + 重置状态)
 export function getCleanupAllCommand() {
     return 'cleanup_all_tools()';
+}
+
+// POC: 轮胎替换工具脚本
+export const WHEEL_SWAP_SCRIPT = wheelSwap;
+
+export function getWheelSwapScript() {
+    return wheelSwap;
 }
