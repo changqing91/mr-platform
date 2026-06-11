@@ -126,7 +126,7 @@ const StreamingView = ({
         schemeCompareActive: false,
         liveRefFolder: '',
         realtimeRefActive: false,
-        displayMode: 'standard', // 'standard', 'xr', 'mr'
+        displayMode: 'standard', // 'standard', 'xr', 'mr', 'vr'
         showCalibration: false
     });
 
@@ -327,6 +327,11 @@ const StreamingView = ({
         sendPython(`node = vrNodeService.findNode("ShadowPlane")
 if node.isValid():
     node.setVisibilityFlag(${visible ? 'True' : 'False'})`);
+    };
+
+    const handleEnterVR = async () => {
+        updateStreamParam('displayMode', 'vr');
+        sendPython('setDisplayMode(VR_DISPLAY_OPEN_VR)');
     };
 
     const handleEnterXR = async () => {
@@ -1319,6 +1324,26 @@ except Exception as e:
                                         {isPhysicsTrackerInjected ? '当前生效' : '注入 Physics Tracker'}
                                     </span>
                                 </button>
+                            </div>
+
+                            <div className="mt-auto pt-4 border-t border-gray-800 sticky bottom-0 bg-gray-900/95 backdrop-blur-md">
+                                <h3 className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-3">显示模式</h3>
+                                <div className="grid grid-cols-2 gap-2">
+                                    <button
+                                        onClick={handleStandardDisplay}
+                                        className={`py-3 rounded-lg font-bold text-sm flex items-center justify-center gap-2 transition-all ${streamParams.displayMode === 'standard' ? 'bg-[#39C5BB] text-white shadow-lg' : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white'}`}
+                                        style={{ backgroundColor: streamParams.displayMode === 'standard' ? THEME_COLOR : undefined }}
+                                    >
+                                        <Monitor size={18} /> 标准
+                                    </button>
+                                    <button
+                                        onClick={handleEnterVR}
+                                        className={`py-3 rounded-lg font-bold text-sm flex items-center justify-center gap-2 transition-all ${streamParams.displayMode === 'xr' ? 'bg-[#39C5BB] text-white shadow-lg' : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white'}`}
+                                        style={{ backgroundColor: streamParams.displayMode === 'vr' ? THEME_COLOR : undefined }}
+                                    >
+                                        <Glasses size={18} /> VR
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     )}
