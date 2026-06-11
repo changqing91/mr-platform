@@ -582,3 +582,8 @@ def recalibrate_cola_position(world_dx=None, world_dy=None, world_dz=None):
 
 def recalibrate_transform_position(world_dx=None, world_dy=None, world_dz=None):
     recalibrate_transform(dz=world_dz or 0.0)
+
+setup_transform("tracker-1", "SeatNode") 
+setup_cola("tracker-2", "Cola")
+start_transform()
+start_cola()
