@@ -1,6 +1,7 @@
 
 import allTools from './vredPy/all_tools.py?raw';
 import wheelSwap from './vredPy/wheel_swap.py?raw';
+import physicsTracker from './vredPy/physics_tracker/physics_tracker.py?raw';
 
 // 新版：统一脚本 - 一次注入所有工具
 export const ALL_TOOLS_SCRIPT = allTools;
@@ -32,7 +33,12 @@ export function getCleanupAllCommand() {
 
 // POC: 轮胎替换工具脚本
 export const WHEEL_SWAP_SCRIPT = wheelSwap;
+export const PHYSICS_TRACKER_SCRIPT = physicsTracker;
 
 export function getWheelSwapScript() {
     return wheelSwap;
+}
+
+export function getPhysicsTrackerScript() {
+    return physicsTracker;
 }

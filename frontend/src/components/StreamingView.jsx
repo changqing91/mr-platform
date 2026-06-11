@@ -4,7 +4,7 @@ import ProjectThumbnail from './ProjectThumbnail';
 import { api } from '../services/api';
 import { api as vredApi } from '../services/vredPython';
 import { MR_TOOLS } from '../constants';
-import { getAllToolsScript, getSwitchToolCommand, getCleanupAllCommand, getWheelSwapScript } from '../utils/vredPy';
+import { getAllToolsScript, getSwitchToolCommand, getCleanupAllCommand, getWheelSwapScript, getPhysicsTrackerScript } from '../utils/vredPy';
 
 // --- Camera helpers ---
 const parseVec3 = (v) => {
@@ -605,6 +605,8 @@ cam.setWorldTransform(QMatrix4x4(*m))`;
     const [isToolsInjected, setIsToolsInjected] = useState(false);
     const [isWheelSwapInjecting, setIsWheelSwapInjecting] = useState(false);
     const [isWheelSwapInjected, setIsWheelSwapInjected] = useState(false);
+    const [isPhysicsTrackerInjecting, setIsPhysicsTrackerInjecting] = useState(false);
+    const [isPhysicsTrackerInjected, setIsPhysicsTrackerInjected] = useState(false);
 
     const getStreamPanelUrl = () => {
         const token = localStorage.getItem('jwt') || '';
@@ -651,11 +653,12 @@ cam.setWorldTransform(QMatrix4x4(*m))`;
         }
     };
 
-    const handleResetWheelSwap = async () => {
-        if (!machine || !isWheelSwapInjected) return;
+    const handleResetPoc = async () => {
+        if (!machine || (!isWheelSwapInjected && !isPhysicsTrackerInjected)) return;
         try {
-            await api.processes.executePython(machine.ip, machine.port || 8888,
-                `global _wheel_swap_tool
+            if (isWheelSwapInjected) {
+                await api.processes.executePython(machine.ip, machine.port || 8888,
+                    `global _wheel_swap_tool
 if '_wheel_swap_tool' in globals() and _wheel_swap_tool is not None:
     try:
         _wheel_swap_tool.disable()
@@ -663,10 +666,65 @@ if '_wheel_swap_tool' in globals() and _wheel_swap_tool is not None:
         pass
 _wheel_swap_tool = None
 print('[WheelSwap] Cleared')`
-            );
-            setIsWheelSwapInjected(false);
+                );
+                setIsWheelSwapInjected(false);
+            }
+
+            if (isPhysicsTrackerInjected) {
+                await api.processes.executePython(machine.ip, machine.port || 8888,
+                    `global _transform_tracker, _cola_tracker
+if '_transform_tracker' in globals() and _transform_tracker is not None:
+    try:
+        _transform_tracker.stop()
+    except Exception:
+        pass
+if '_cola_tracker' in globals() and _cola_tracker is not None:
+    try:
+        _cola_tracker.stop()
+    except Exception:
+        pass
+print('[PhysicsTracker] Cleared')`
+                );
+                setIsPhysicsTrackerInjected(false);
+            }
         } catch (e) {
-            console.error('Failed to reset wheel swap:', e);
+            console.error('Failed to reset POC scripts:', e);
+        }
+    };
+
+    const handleInjectPhysicsTracker = async () => {
+        if (!machine) return;
+        setIsPhysicsTrackerInjecting(true);
+        try {
+            await api.processes.executePython(machine.ip, machine.port || 8888, getPhysicsTrackerScript());
+            setIsPhysicsTrackerInjected(true);
+        } catch (e) {
+            console.error('Failed to inject physics tracker script:', e);
+        } finally {
+            setIsPhysicsTrackerInjecting(false);
+        }
+    };
+
+    const handleResetPhysicsTracker = async () => {
+        if (!machine || !isPhysicsTrackerInjected) return;
+        try {
+            await api.processes.executePython(machine.ip, machine.port || 8888,
+                `global _transform_tracker, _cola_tracker
+if '_transform_tracker' in globals() and _transform_tracker is not None:
+    try:
+        _transform_tracker.stop()
+    except Exception:
+        pass
+if '_cola_tracker' in globals() and _cola_tracker is not None:
+    try:
+        _cola_tracker.stop()
+    except Exception:
+        pass
+print('[PhysicsTracker] Cleared')`
+            );
+            setIsPhysicsTrackerInjected(false);
+        } catch (e) {
+            console.error('Failed to reset physics tracker:', e);
         }
     };
 
@@ -1178,7 +1236,7 @@ except Exception as e:
                             <div className="flex items-center justify-between mb-4">
                                 <div className="flex items-center gap-2">
                                     <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">POC 工具</span>
-                                    {isWheelSwapInjected && (
+                                    {(isWheelSwapInjected || isPhysicsTrackerInjected) && (
                                         <div className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#39C5BB]/10 border border-[#39C5BB]/30">
                                             <Zap size={10} className="text-[#39C5BB]" />
                                             <span className="text-[10px] font-bold text-[#39C5BB]">已注入</span>
@@ -1186,8 +1244,8 @@ except Exception as e:
                                     )}
                                 </div>
                                 <button
-                                    onClick={handleResetWheelSwap}
-                                    disabled={!isWheelSwapInjected}
+                                    onClick={handleResetPoc}
+                                    disabled={!isWheelSwapInjected && !isPhysicsTrackerInjected}
                                     className="text-[10px] px-2 py-1 rounded border border-red-800 text-red-400 bg-red-900/20 hover:bg-red-900/40 transition-all font-bold flex items-center gap-1 disabled:opacity-30 disabled:cursor-not-allowed"
                                 >
                                     <RotateCcw size={10} /> 清除
@@ -1226,6 +1284,39 @@ except Exception as e:
                                     </span>
                                     <span className="text-[10px] text-center mt-0.5" style={{ color: isWheelSwapInjected ? '#6ee7e3' : '#6b7280' }}>
                                         {isWheelSwapInjected ? '当前生效' : 'Trigger 拖拽安装'}
+                                    </span>
+                                </button>
+
+                                {/* Collision Detection */}
+                                <button
+                                    onClick={handleInjectPhysicsTracker}
+                                    disabled={isPhysicsTrackerInjecting || !machine}
+                                    className={`relative flex flex-col items-center p-4 rounded-xl border transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
+                                        isPhysicsTrackerInjected
+                                            ? 'border-[#39C5BB] bg-[#39C5BB]/10 shadow-lg shadow-[#39C5BB]/10'
+                                            : 'border-gray-700 bg-gray-800/50 hover:border-gray-600 hover:bg-gray-800'
+                                    }`}
+                                >
+                                    {isPhysicsTrackerInjected && (
+                                        <div className="absolute top-2 right-2 w-4 h-4 rounded-full bg-[#39C5BB] flex items-center justify-center animate-pulse">
+                                            <Power size={8} className="text-white" />
+                                        </div>
+                                    )}
+                                    {isPhysicsTrackerInjecting && (
+                                        <div className="absolute top-2 right-2 w-4 h-4 rounded-full bg-gray-600 flex items-center justify-center">
+                                            <div className="w-2.5 h-2.5 border border-t-transparent border-[#39C5BB] rounded-full animate-spin" />
+                                        </div>
+                                    )}
+                                    <div className={`w-10 h-10 rounded-lg flex items-center justify-center mb-2 ${
+                                        isPhysicsTrackerInjected ? 'bg-[#39C5BB]/20' : 'bg-gray-700/50'
+                                    }`}>
+                                        <Activity size={20} style={{ color: isPhysicsTrackerInjected ? '#39C5BB' : '#9ca3af' }} />
+                                    </div>
+                                    <span className="text-xs font-bold" style={{ color: isPhysicsTrackerInjected ? '#39C5BB' : '#d1d5db' }}>
+                                        碰撞检测
+                                    </span>
+                                    <span className="text-[10px] text-center mt-0.5" style={{ color: isPhysicsTrackerInjected ? '#6ee7e3' : '#6b7280' }}>
+                                        {isPhysicsTrackerInjected ? '当前生效' : '注入 Physics Tracker'}
                                     </span>
                                 </button>
                             </div>
