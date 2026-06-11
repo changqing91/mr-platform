@@ -1,4 +1,4 @@
-# ======================================================================
+# ====================================================================== 
 # VRED 轮胎替换工具
 # 手柄 trigger 抓取 WheelRack 上的轮胎（Wheel_1~Wheel_4），拖动至
 # Hub 安装区（FL/FR/BL/BR），松手后：
@@ -33,7 +33,6 @@ _MIN_DRAG_DISTANCE = 250.0
 
 _TRACKER_NAME          = "tracker-1"
 _TRACKER_BIND_NODE     = "Jahuar_project_7"
-_TRACKER_ANCHOR_NODE   = "Wheel1"
 _TRACKER_FIXED_Z       = None   # None 自动取汽车初始 Z
 
 # ------------------------------------------------------------------
@@ -186,21 +185,54 @@ def _get_vr_device(name):
     return None
 
 # ------------------------------------------------------------------
-# tracker 绑定（手动更新，Z 轴固定）
+# 旋转辅助函数 —— 正确处理欧拉角
+# ------------------------------------------------------------------
+def _rot_to_tuple(rot):
+    """将 Rotation 对象转为 (x, y, z) 元组"""
+    try:
+        return (rot.x(), rot.y(), rot.z())
+    except:
+        try:
+            return (rot[0], rot[1], rot[2])
+        except:
+            return (float(rot.x), float(rot.y), float(rot.z))
+
+def _normalize_angle_deg(angle):
+    """将角度归一化到 [-180, 180]"""
+    while angle > 180:
+        angle -= 360
+    while angle < -180:
+        angle += 360
+    return angle
+
+def _angle_diff(a, b):
+    """计算两个角度之间的最短差值（考虑环绕）"""
+    diff = a - b
+    while diff > 180:
+        diff -= 360
+    while diff < -180:
+        diff += 360
+    return diff
+
+# ------------------------------------------------------------------
+# tracker 绑定（手动更新，Z 轴固定，跟随旋转）
 # ------------------------------------------------------------------
 class TrackerBinding:
     def __init__(self):
         self.active = False
         self.tracker = None
         self.car_node = None
-        self.anchor_node = None
         self.offset_x = 0.0
         self.offset_y = 0.0
-        self.fixed_z = 0.0
+        self.offset_z = 0.0
+        self.fixed_z = None
         self.timer = None
         self.timer_connected = False
+        # 旋转偏移（tracker 旋转变化量 -> car 旋转变化量）
+        self._initial_tracker_rot = None
+        self._initial_car_rot = None
 
-    def setup(self, tracker_name, car_node_name, anchor_node_name, fixed_z=None):
+    def setup(self, tracker_name, car_node_name, fixed_z=None):
         self.tracker = _get_vr_device(tracker_name)
         if not self.tracker:
             print("[TrackerBinding] Tracker not found:", tracker_name)
@@ -209,32 +241,40 @@ class TrackerBinding:
         if not self.car_node:
             print("[TrackerBinding] Car node not found:", car_node_name)
             return False
-        self.anchor_node = _scan_node_by_name(anchor_node_name)
-        if not self.anchor_node:
-            print("[TrackerBinding] Anchor node not found:", anchor_node_name)
-            return False
 
-        try:
-            setTransformNodeRotation(self.car_node, 0, 0, 0)
-        except Exception as e:
-            print("[TrackerBinding] WARNING reset rotation:", e)
+        tracker_node = self.tracker.getNode()
 
+        # 记录初始位置和旋转
+        tracker_pos = getTransformNodeTranslation(tracker_node, 1)
         car_pos = getTransformNodeTranslation(self.car_node, 1)
-        anchor_pos = getTransformNodeTranslation(self.anchor_node, 1)
-        self.offset_x = anchor_pos.x() - car_pos.x()
-        self.offset_y = anchor_pos.y() - car_pos.y()
 
+        # 偏移 = car - tracker（tracker 移动时，car 保持相同偏移）
+        self.offset_x = car_pos.x() - tracker_pos.x()
+        self.offset_y = car_pos.y() - tracker_pos.y()
+        self.offset_z = car_pos.z() - tracker_pos.z()
+
+        self.fixed_z = fixed_z
         if fixed_z is None:
             self.fixed_z = car_pos.z()
-        else:
-            self.fixed_z = fixed_z
 
-        tracker_pos = getTransformNodeTranslation(self.tracker.getNode(), 1)
-        new_x = tracker_pos.x() - self.offset_x
-        new_y = tracker_pos.y() - self.offset_y
+        # 记录初始旋转（用于计算相对旋转）
+        try:
+            self._initial_tracker_rot = _rot_to_tuple(getTransformNodeRotation(tracker_node))
+            self._initial_car_rot = _rot_to_tuple(getTransformNodeRotation(self.car_node))
+            print("[TrackerBinding] Initial tracker rot:", self._initial_tracker_rot)
+            print("[TrackerBinding] Initial car rot:", self._initial_car_rot)
+        except Exception as e:
+            print("[TrackerBinding] WARNING reading initial rotation:", e)
+            self._initial_tracker_rot = (0, 0, 0)
+            self._initial_car_rot = (0, 0, 0)
+
+        # 初始同步
+        new_x = tracker_pos.x() + self.offset_x
+        new_y = tracker_pos.y() + self.offset_y
         setTransformNodeTranslation(self.car_node, new_x, new_y, self.fixed_z, 1)
-        print("[TrackerBinding] Initialized: offset=(%.2f, %.2f), fixed_z=%.2f" % (
-            self.offset_x, self.offset_y, self.fixed_z))
+
+        print("[TrackerBinding] Initialized: offset=(%.2f, %.2f, %.2f), fixed_z=%.2f" % (
+            self.offset_x, self.offset_y, self.offset_z, self.fixed_z))
         return True
 
     def start(self):
@@ -247,10 +287,9 @@ class TrackerBinding:
             self.timer = vrTimer()
             self.timer.connect(self._update)
             self.timer_connected = True
-        # 修正：使用 setActive(1) 启动定时器
         self.timer.setActive(1)
         self.active = True
-        print("[TrackerBinding] Started (X/Y follow, Z fixed)")
+        print("[TrackerBinding] Started (position + rotation follow)")
 
     def stop(self):
         if not self.active:
@@ -264,12 +303,37 @@ class TrackerBinding:
         if not self.active:
             return
         try:
-            tracker_pos = getTransformNodeTranslation(self.tracker.getNode(), 1)
-            new_x = tracker_pos.x() - self.offset_x
-            new_y = tracker_pos.y() - self.offset_y
-            cur_pos = getTransformNodeTranslation(self.car_node, 1)
-            if abs(cur_pos.x() - new_x) > 0.01 or abs(cur_pos.y() - new_y) > 0.01:
-                setTransformNodeTranslation(self.car_node, new_x, new_y, self.fixed_z, 1)
+            tracker_node = self.tracker.getNode()
+            tracker_pos = getTransformNodeTranslation(tracker_node, 1)
+            tracker_rot = _rot_to_tuple(getTransformNodeRotation(tracker_node))
+
+            # 位置：car = tracker + offset
+            new_x = tracker_pos.x() + self.offset_x
+            new_y = tracker_pos.y() + self.offset_y
+
+            # 旋转：car_rot = car_initial + (tracker_current - tracker_initial)
+            # 即 car 跟随 tracker 的旋转变化
+            delta_x = _angle_diff(tracker_rot[0], self._initial_tracker_rot[0])
+            delta_y = _angle_diff(tracker_rot[1], self._initial_tracker_rot[1])
+            delta_z = _angle_diff(tracker_rot[2], self._initial_tracker_rot[2])
+
+            new_rot_x = self._initial_car_rot[0] + delta_x
+            new_rot_y = self._initial_car_rot[1] + delta_y
+            new_rot_z = self._initial_car_rot[2] + delta_z
+
+            # 应用
+            setTransformNodeTranslation(self.car_node, new_x, new_y, self.fixed_z, 1)
+            setTransformNodeRotation(self.car_node, new_rot_x, new_rot_y, new_rot_z)
+
+            # 每 60 帧打印一次调试信息
+            if hasattr(self, '_debug_counter'):
+                self._debug_counter += 1
+            else:
+                self._debug_counter = 0
+            if self._debug_counter % 60 == 0:
+                print("[TrackerBinding] tracker_rot=%s car_rot=%s" % (
+                    str(tracker_rot), str((new_rot_x, new_rot_y, new_rot_z))))
+
         except Exception as e:
             print("[TrackerBinding] Update error:", e)
 
@@ -323,7 +387,7 @@ class WheelSwapTool:
     def _enable_tracker_binding(self):
         if self._tracker_binding.active:
             return
-        ok = self._tracker_binding.setup(_TRACKER_NAME, _TRACKER_BIND_NODE, _TRACKER_ANCHOR_NODE, _TRACKER_FIXED_Z)
+        ok = self._tracker_binding.setup(_TRACKER_NAME, _TRACKER_BIND_NODE, _TRACKER_FIXED_Z)
         if ok:
             self._tracker_binding.start()
 
