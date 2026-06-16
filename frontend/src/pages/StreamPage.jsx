@@ -26,11 +26,11 @@ const StreamPage = () => {
         const load = async () => {
             try {
                 const [p, m, procs] = await Promise.all([
-                    api.projects.list(),
+                    api.projects.list(1, 100),
                     api.machines.list(),
                     api.processes.list(),
                 ]);
-                setProjects(p || []);
+                setProjects(p.data || []);
                 setMachines(
                     (m || []).map(mach => ({
                         ...mach,

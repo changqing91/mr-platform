@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { LayoutDashboard, Activity, Search, Calendar, Edit2, Trash2, Link, X, Tag, Save, Upload, Image as ImageIcon } from 'lucide-react';
+import { LayoutDashboard, Activity, Search, Calendar, Edit2, Trash2, Link, X, Tag, Save, Upload, Image as ImageIcon, FolderOpen, ChevronLeft, ChevronRight } from 'lucide-react';
 import ResourceDetail from './ResourceDetail';
 import ProjectThumbnail from './ProjectThumbnail';
 import { THEME_COLOR } from '../constants';
@@ -28,10 +28,16 @@ const ProjectWorkspace = ({
     runningMachines,
     handleDeleteProject,
     handleUpdateProject,
-    handleReplaceClick
+    handleReplaceClick,
+    projectGroups = [],
+    totalProjectCount = 0,
+    activeGroupId = 'all',
+    setActiveGroupId = () => {},
+    projectPagination,
+    onPageChange,
 }) => {
     const [editingProject, setEditingProject] = useState(null);
-    const [editForm, setEditForm] = useState({ name: '', tags: '', thumbnail: undefined });
+    const [editForm, setEditForm] = useState({ name: '', tags: '', thumbnail: undefined, projectGroupId: '' });
     const [isUploadingThumb, setIsUploadingThumb] = useState(false);
     const thumbInputRef = useRef(null);
 
@@ -41,7 +47,8 @@ const ProjectWorkspace = ({
         setEditForm({
             name: project.name,
             tags: Array.isArray(project.tags) ? project.tags.join(', ') : (project.tags || ''),
-            thumbnail: undefined // undefined = not changed
+            thumbnail: undefined,
+            projectGroupId: project.projectGroup?.documentId || project.projectGroup || '',
         });
     };
 
@@ -72,7 +79,8 @@ const ProjectWorkspace = ({
         await handleUpdateProject(editingProject.id, {
             name: editForm.name,
             tags: editForm.tags,
-            ...(editForm.thumbnail !== undefined && { thumbnail: editForm.thumbnail })
+            ...(editForm.thumbnail !== undefined && { thumbnail: editForm.thumbnail }),
+            ...(editForm.projectGroupId !== undefined && { projectGroup: editForm.projectGroupId || null }),
         });
         closeEdit();
     };
@@ -120,8 +128,25 @@ const ProjectWorkspace = ({
                     setProjectViewMode={setViewMode}
                     setShowProjectModal={setShowProjectModal}
                     allAvailableTags={allAvailableTags}
-                    projectCount={projects.length}
+                    projectCount={totalProjectCount ?? projectPagination?.total ?? projects.length}
                 />
+
+                {/* Project group tabs */}
+                <div className="flex gap-1 mt-4 border-b border-gray-200 overflow-x-auto">
+                    <TabButton
+                        label={`全部 (${totalProjectCount ?? 0})`}
+                        active={activeGroupId === 'all'}
+                        onClick={() => setActiveGroupId('all')}
+                    />
+                    {projectGroups.map((g) => (
+                        <TabButton
+                            key={g.id}
+                            label={`${g.name} (${g.projectCount ?? 0})`}
+                            active={String(activeGroupId) === String(g.documentId || g.id)}
+                            onClick={() => setActiveGroupId(g.documentId || g.id)}
+                        />
+                    ))}
+                </div>
             </div>
 
             {/* Content Grid/List */}
@@ -268,6 +293,71 @@ const ProjectWorkspace = ({
                 )}
             </div>
 
+            {/* Pagination */}
+            {projectPagination && projectPagination.pageCount > 0 && (
+                <div className="shrink-0 px-6 py-3 border-t border-gray-200 bg-white flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                        <span className="text-sm text-gray-500">
+                            共 {projectPagination.total} 个项目
+                        </span>
+                        <div className="flex items-center gap-1.5">
+                            <span className="text-sm text-gray-500">每页</span>
+                            <select
+                                value={projectPagination.pageSize}
+                                onChange={(e) => onPageChange?.(1, Number(e.target.value))}
+                                className="px-2 py-1 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#39C5BB]/50"
+                            >
+                                {[10, 20, 40, 60].map(s => (
+                                    <option key={s} value={s}>{s}</option>
+                                ))}
+                            </select>
+                            <span className="text-sm text-gray-500">条</span>
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <button
+                            onClick={() => onPageChange?.(projectPagination.page - 1)}
+                            disabled={projectPagination.page <= 1}
+                            className="p-1.5 rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                        >
+                            <ChevronLeft size={16} />
+                        </button>
+                        {projectPagination.pageCount > 1 && Array.from({ length: projectPagination.pageCount }, (_, i) => i + 1)
+                            .filter(p => p === 1 || p === projectPagination.pageCount || Math.abs(p - projectPagination.page) <= 1)
+                            .reduce((acc, p, idx, arr) => {
+                                if (idx > 0 && p - arr[idx - 1] > 1) acc.push('...');
+                                acc.push(p);
+                                return acc;
+                            }, [])
+                            .map((p, idx) =>
+                                p === '...' ? (
+                                    <span key={`ellipsis-${idx}`} className="px-2 text-gray-400 text-sm">...</span>
+                                ) : (
+                                    <button
+                                        key={p}
+                                        onClick={() => onPageChange?.(p)}
+                                        className={`min-w-[32px] h-8 rounded-lg text-sm font-medium transition-colors ${
+                                            p === projectPagination.page
+                                                ? 'text-white shadow-sm'
+                                                : 'border border-gray-200 text-gray-600 hover:bg-gray-50'
+                                        }`}
+                                        style={p === projectPagination.page ? { backgroundColor: THEME_COLOR } : {}}
+                                    >
+                                        {p}
+                                    </button>
+                                )
+                            )}
+                        <button
+                            onClick={() => onPageChange?.(projectPagination.page + 1)}
+                            disabled={projectPagination.page >= projectPagination.pageCount}
+                            className="p-1.5 rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                        >
+                            <ChevronRight size={16} />
+                        </button>
+                    </div>
+                </div>
+            )}
+
             {/* Project Edit Modal */}
             {editingProject && (
                 <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center animate-in fade-in" onClick={closeEdit}>
@@ -350,6 +440,23 @@ const ProjectWorkspace = ({
                                 />
                             </div>
 
+                            {/* Project Group */}
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1.5 flex items-center gap-1.5">
+                                    <FolderOpen size={14} /> 所属项目组 <span className="text-red-500">*</span>
+                                </label>
+                                <select
+                                    value={editForm.projectGroupId || ''}
+                                    onChange={(e) => setEditForm(f => ({ ...f, projectGroupId: e.target.value }))}
+                                    className={`w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#39C5BB]/50 focus:border-[#39C5BB] transition-all appearance-none bg-white ${!editForm.projectGroupId ? 'border-red-300' : 'border-gray-200'}`}
+                                >
+                                    <option value="">请选择项目组</option>
+                                    {projectGroups.map(g => (
+                                        <option key={g.id} value={g.documentId || g.id}>{g.name}</option>
+                                    ))}
+                                </select>
+                            </div>
+
                             {/* Replace File */}
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 mb-1.5">项目文件</label>
@@ -369,7 +476,7 @@ const ProjectWorkspace = ({
                             </button>
                             <button
                                 onClick={saveEdit}
-                                disabled={!editForm.name.trim() || isUploadingThumb}
+                                disabled={!editForm.name.trim() || !editForm.projectGroupId || isUploadingThumb}
                                 className="px-4 py-2 text-sm text-white rounded-lg font-medium transition-colors flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
                                 style={{ backgroundColor: THEME_COLOR }}
                             >
@@ -379,8 +486,22 @@ const ProjectWorkspace = ({
                     </div>
                 </div>
             )}
+
         </main>
     );
 };
+
+const TabButton = ({ label, active, onClick }) => (
+    <button
+        onClick={onClick}
+        className={`px-3 py-2 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${
+            active
+                ? 'border-[#39C5BB] text-[#39C5BB]'
+                : 'border-transparent text-gray-500 hover:text-gray-800'
+        }`}
+    >
+        {label}
+    </button>
+);
 
 export default ProjectWorkspace;

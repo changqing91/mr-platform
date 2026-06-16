@@ -1,12 +1,11 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import LicenseGuard from './components/LicenseGuard';
-import LoginScreen from './components/LoginScreen';
-import RegisterScreen from './components/RegisterScreen';
-import AccountManagement from './components/AccountManagement';
+import ManagementPanel from './components/ManagementPanel';
 import { THEME_COLOR } from './constants';
 import { api } from './services/api';
 import { uploadFile, TUSD_PATH_PREFIX } from './services/upload';
+import { isCallbackUrl, completeCallback, login as oidcLogin, logout as oidcLogout, getUser as getOidcUser } from './services/auth';
 
 // Components
 import MonitorWall from './components/MonitorWall';
@@ -26,21 +25,24 @@ import {
 import StreamPage from './pages/StreamPage';
 
 const MainApp = () => {
-    // --- State: Auth ---
-    const [isLoggedIn, setIsLoggedIn] = useState(() => !!localStorage.getItem('jwt'));
-    const [loginForm, setLoginForm] = useState({ username: '', password: '' });
-    const [loginError, setLoginError] = useState(null);
-    const [currentUser, setCurrentUser] = useState(() => {
-        const saved = localStorage.getItem('currentUser');
-        return saved ? JSON.parse(saved) : null;
-    });
-    const [showRegister, setShowRegister] = useState(false);
-    const [registerError, setRegisterError] = useState(null);
-    const [showAccountManagement, setShowAccountManagement] = useState(false);
+    // --- State: Auth (OIDC via Keycloak) ---
+    // Boot states: 'pending' (verifying token / completing callback) | 'unauth' | 'auth'
+    const [authStatus, setAuthStatus] = useState('pending');
+    const [currentUser, setCurrentUser] = useState(null); // payload from /api/me
+    const [showManagement, setShowManagement] = useState(false);
+
+    const isLoggedIn = authStatus === 'auth';
+    const isManager = !!currentUser?.isManager;
 
     // --- State: Data ---
     const [projects, setProjects] = useState([]);
+    const [projectPagination, setProjectPagination] = useState({ page: 1, pageSize: 20, pageCount: 1, total: 0 });
+    const projectPageRef = useRef(1);
+    const projectPageSizeRef = useRef(20);
     const [machines, setMachines] = useState([]);
+    const [projectGroups, setProjectGroups] = useState([]);
+    const [totalProjectCount, setTotalProjectCount] = useState(0);
+    const [activeGroupId, setActiveGroupId] = useState('all'); // 'all' or group id
 
     // --- State: UI & Selection ---
     const [activeProject, setActiveProject] = useState(null);
@@ -83,7 +85,7 @@ const MainApp = () => {
     const [replacingProject, setReplacingProject] = useState(null);
 
     // --- State: Forms ---
-    const [newProjectForm, setNewProjectForm] = useState({ name: '', type: 'VRED', fileName: '', size: '', thumbnail: null, tags: '', file: null });
+    const [newProjectForm, setNewProjectForm] = useState({ name: '', type: 'VRED', fileName: '', size: '', thumbnail: null, tags: '', file: null, projectGroupId: '' });
     const [newMachineForm, setNewMachineForm] = useState({ name: '', ip: '', port: '' });
     const fileInputRef = useRef(null);
     const thumbnailInputRef = useRef(null);
@@ -101,23 +103,77 @@ const MainApp = () => {
         }, 3000);
     };
 
+    // --- Effect: Bootstrap OIDC auth ---
+    useEffect(() => {
+        let cancelled = false;
+        (async () => {
+            try {
+                if (isCallbackUrl()) {
+                    await completeCallback();
+                }
+                const oidcUser = await getOidcUser();
+                if (!oidcUser || oidcUser.expired) {
+                    if (!cancelled) setAuthStatus('unauth');
+                    return;
+                }
+                const me = await api.auth.me();
+                if (cancelled) return;
+                setCurrentUser(me);
+                setAuthStatus('auth');
+                addNotification('登录成功', 'success');
+            } catch (e) {
+                console.error('[auth] bootstrap failed', e);
+                if (!cancelled) setAuthStatus('unauth');
+            }
+        })();
+        return () => { cancelled = true; };
+    }, []);
+
     // --- Effect: Load Data ---
     useEffect(() => {
         if (isLoggedIn) {
-            loadData();
-            const interval = setInterval(loadData, 2000);
+            projectPageRef.current = 1;
+            loadData(1);
+            loadProjectGroups();
+            const interval = setInterval(() => loadData(), 2000);
             return () => clearInterval(interval);
         }
-    }, [isLoggedIn]);
+    }, [isLoggedIn, activeGroupId]);
 
-    const loadData = async () => {
+    // --- Effect: Auto-select project group when modal opens with exactly one group ---
+    useEffect(() => {
+        if (showProjectModal && projectGroups.length === 1 && !newProjectForm.projectGroupId) {
+            const g = projectGroups[0];
+            setNewProjectForm(f => ({ ...f, projectGroupId: g.documentId || g.id }));
+        }
+    }, [showProjectModal, projectGroups.length]);
+
+    const loadProjectGroups = async () => {
         try {
+            const result = await api.projectGroups.list();
+            const groups = Array.isArray(result.data) ? result.data : (Array.isArray(result) ? result : []);
+            setProjectGroups(groups);
+            setTotalProjectCount(result.meta?.totalProjects ?? 0);
+        } catch (e) {
+            console.error('Failed to load project groups', e);
+        }
+    };
+
+    const loadData = async (page, pageSize) => {
+        try {
+            const currentPage = page || projectPageRef.current;
+            const currentPageSize = pageSize || projectPageSizeRef.current;
+            const groupDocId = activeGroupId !== 'all' ? activeGroupId : null;
             const [p, m, procs] = await Promise.all([
-                api.projects.list(), 
+                api.projects.list(currentPage, currentPageSize, groupDocId), 
                 api.machines.list(),
                 api.processes.list()
             ]);
-            setProjects(p || []);
+            setProjects(p.data || []);
+            const pg = p.pagination || { page: currentPage, pageSize: currentPageSize, pageCount: 1, total: 0 };
+            setProjectPagination(pg);
+            projectPageRef.current = pg.page;
+            projectPageSizeRef.current = pg.pageSize;
             
             const mappedMachines = (m || []).map(mach => ({
                 ...mach,
@@ -184,53 +240,22 @@ const MainApp = () => {
         }
     }, [isLoggedIn]);
 
-    // --- Handlers: Auth ---
-    const handleLogin = async (e) => {
-        e.preventDefault();
-        setLoginError(null);
-        if (loginForm.username && loginForm.password) {
-            try {
-                const { jwt, user } = await api.auth.login(loginForm.username, loginForm.password);
-                
-                setIsLoggedIn(true);
-                setCurrentUser(user);
-                
-                localStorage.setItem('jwt', jwt);
-                localStorage.setItem('currentUser', JSON.stringify(user));
-                
-                addNotification('登录成功', 'success');
-            } catch (e) {
-                console.error(e);
-                setLoginError(e.message || '登录失败，请检查账号密码');
-                addNotification(e.message || '登录失败，请检查账号密码', 'error');
-            }
-        }
+    // --- Handlers: Auth (OIDC redirect to Keycloak) ---
+    const handleLogin = (e) => {
+        if (e && e.preventDefault) e.preventDefault();
+        oidcLogin();
     };
 
-    const handleLogout = () => {
-        setIsLoggedIn(false);
+    const handleLogout = async () => {
+        setAuthStatus('unauth');
         setCurrentUser(null);
-        setLoginForm({ username: '', password: '' });
-        localStorage.removeItem('jwt');
-        localStorage.removeItem('currentUser');
-    };
-
-    const handleRegister = async (username, email, password) => {
-        setRegisterError(null);
-        try {
-            await api.auth.register(username, email, password);
-            setShowRegister(false);
-            addNotification('注册成功，请登录', 'success');
-        } catch (e) {
-            console.error(e);
-            setRegisterError(e.message || '注册失败，请重试');
-        }
+        await oidcLogout();
     };
 
     // --- Handlers: Projects ---
     const handleAddProject = async () => {
         const projectName = newProjectForm.name || newProjectForm.fileName;
-        if (!projectName || !newProjectForm.fileName) return;
+        if (!projectName || !newProjectForm.fileName || !newProjectForm.projectGroupId) return;
         
         try {
             let filePath = '';
@@ -253,13 +278,15 @@ const MainApp = () => {
                 date: new Date().toISOString().split('T')[0],
                 tags: newProjectForm.tags ? newProjectForm.tags.split(',').map(t => t.trim()).filter(Boolean) : [],
                 fileName: newProjectForm.fileName,
-                filePath: filePath
+                filePath: filePath,
+                ...(newProjectForm.projectGroupId && { projectGroup: newProjectForm.projectGroupId }),
             };
             
             const created = await api.projects.create(newProjectData);
-            setProjects([created, ...projects]);
+            if (!created) throw new Error('创建返回空数据');
+            loadData();
             setShowProjectModal(false);
-            setNewProjectForm({ name: '', type: 'VRED', fileName: '', size: '', thumbnail: null, tags: '', file: null });
+            setNewProjectForm({ name: '', type: 'VRED', fileName: '', size: '', thumbnail: null, tags: '', file: null, projectGroupId: '' });
             addNotification(`项目 "${created.name}" 已添加`, 'success');
         } catch (e) {
             console.error(e);
@@ -277,7 +304,7 @@ const MainApp = () => {
         if (window.confirm('确定要删除该项目吗？')) {
             try {
                 await api.projects.delete(project.documentId);
-                setProjects(projects.filter(p => p.id !== projectId));
+                loadData();
                 if (activeProject === projectId) setActiveProject(null);
                 addNotification('项目已删除', 'info');
             } catch (e) {
@@ -301,7 +328,7 @@ const MainApp = () => {
         }
     };
 
-    const handleUpdateProject = async (projectId, { name, tags, thumbnail }) => {
+    const handleUpdateProject = async (projectId, { name, tags, thumbnail, projectGroup }) => {
         const project = projects.find(p => p.id === projectId);
         if (!project) return;
         const trimmedName = name?.trim();
@@ -313,6 +340,7 @@ const MainApp = () => {
 
         const updateData = { name: trimmedName, tags: tagsArray };
         if (thumbnail !== undefined) updateData.thumbnail = thumbnail;
+        if (projectGroup !== undefined) updateData.projectGroup = projectGroup;
 
         try {
             const updated = await api.projects.update(project.documentId, updateData);
@@ -840,9 +868,10 @@ except Exception as e:
     }, [projects]);
 
     const filteredProjects = useMemo(() => {
-        let result = projects.filter(p => 
-            p.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
-            (p.tags && p.tags.some(t => t.toLowerCase().includes(searchQuery.toLowerCase())))
+        let result = projects;
+        result = result.filter(p =>
+            (p.name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+            (p.tags && p.tags.some(t => (t || '').toLowerCase().includes(searchQuery.toLowerCase())))
         );
 
         if (selectedFilterTags.size > 0) {
@@ -853,7 +882,6 @@ except Exception as e:
             let valA = a[sortBy];
             let valB = b[sortBy];
             
-            // Handle date string comparison
             if (sortBy === 'date') {
                 valA = new Date(valA).getTime();
                 valB = new Date(valB).getTime();
@@ -870,24 +898,30 @@ except Exception as e:
 
     const pendingCount = Object.keys(pendingLaunches).length;
 
+    if (authStatus === 'pending') {
+        return (
+            <LicenseGuard>
+                <div className="flex items-center justify-center h-screen w-screen bg-gray-50 text-gray-500 text-sm">
+                    正在验证登录...
+                </div>
+            </LicenseGuard>
+        );
+    }
+
     if (!isLoggedIn) {
         return (
             <LicenseGuard>
-                {showRegister ? (
-                    <RegisterScreen
-                        handleRegister={handleRegister}
-                        onBackToLogin={() => { setShowRegister(false); setRegisterError(null); }}
-                        registerError={registerError}
-                    />
-                ) : (
-                    <LoginScreen
-                        handleLogin={handleLogin}
-                        loginForm={loginForm}
-                        setLoginForm={setLoginForm}
-                        loginError={loginError}
-                        onRegister={() => { setShowRegister(true); setLoginError(null); }}
-                    />
-                )}
+                <div className="flex flex-col items-center justify-center h-screen w-screen bg-gray-50 gap-4">
+                    <div className="text-2xl font-bold text-gray-800">WhatTech <span style={{ color: THEME_COLOR }}>MR</span></div>
+                    <div className="text-sm text-gray-500">您尚未登录</div>
+                    <button
+                        onClick={handleLogin}
+                        className="px-6 py-2.5 rounded-lg text-white font-bold text-sm shadow-md hover:opacity-90 transition-opacity"
+                        style={{ backgroundColor: THEME_COLOR }}
+                    >
+                        通过 Keycloak 登录
+                    </button>
+                </div>
             </LicenseGuard>
         );
     }
@@ -912,7 +946,11 @@ except Exception as e:
                         onProjectCreated={(project) => setProjects(prev => [project, ...prev])}
                     />
                 )}
-                <Header currentUser={currentUser} handleLogout={handleLogout} onAccountManagement={() => setShowAccountManagement(true)} />
+                <Header
+                    currentUser={currentUser}
+                    handleLogout={handleLogout}
+                    onAccountManagement={isManager ? () => setShowManagement(true) : null}
+                />
 
                 <div className="flex-1 flex overflow-hidden bg-gray-50">
                     {showMonitorWall ? (
@@ -945,6 +983,8 @@ except Exception as e:
                             allAvailableTags={allAvailableTags}
                             projects={projects}
                             filteredProjects={filteredProjects}
+                            projectPagination={projectPagination}
+                            onPageChange={(page, pageSize) => loadData(page, pageSize)}
                             activeProject={activeProject}
                             handleProjectClick={handleProjectClick}
                             runningMachines={runningMachines}
@@ -953,6 +993,10 @@ except Exception as e:
                             handleReplaceClick={handleReplaceClick}
                             isUploading={isUploading}
                             uploadProgress={uploadProgress}
+                            projectGroups={projectGroups}
+                            totalProjectCount={totalProjectCount}
+                            activeGroupId={activeGroupId}
+                            setActiveGroupId={setActiveGroupId}
                         />
                     )}
                     
@@ -998,10 +1042,11 @@ except Exception as e:
             <input type="file" ref={replaceFileInputRef} onChange={handleReplaceFileSelect} className="hidden" />
 
             {/* Modals */}
-            {showAccountManagement && (
-                <AccountManagement
-                    onClose={() => setShowAccountManagement(false)}
+            {showManagement && isManager && (
+                <ManagementPanel
+                    onClose={() => { setShowManagement(false); loadProjectGroups(); }}
                     addNotification={addNotification}
+                    currentUser={currentUser}
                 />
             )}
 
@@ -1046,6 +1091,7 @@ except Exception as e:
                 handleAddProject={handleAddProject} 
                 isUploading={isUploading}
                 uploadProgress={uploadProgress}
+                projectGroups={projectGroups}
             />
             
             <DeleteNodeConfirmModal 

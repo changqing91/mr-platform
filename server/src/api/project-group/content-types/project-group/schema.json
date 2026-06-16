@@ -1,0 +1,31 @@
+{
+  "kind": "collectionType",
+  "collectionName": "project_groups",
+  "info": {
+    "singularName": "project-group",
+    "pluralName": "project-groups",
+    "displayName": "Project Group"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "name": {
+      "type": "string",
+      "required": true
+    },
+    "users": {
+      "type": "relation",
+      "relation": "manyToMany",
+      "target": "api::app-user.app-user",
+      "mappedBy": "projectGroups"
+    },
+    "projects": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::project.project",
+      "mappedBy": "projectGroup"
+    }
+  }
+}

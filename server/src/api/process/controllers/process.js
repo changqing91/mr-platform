@@ -127,6 +127,15 @@ const terminateProcess = async (strapi, processEntity) => {
 };
 
 module.exports = createCoreController('api::process.process', ({ strapi }) => ({
+    async find(ctx) {
+        const results = await strapi.db.query('api::process.process').findMany({
+            where: { status: { $in: ['running', 'starting'] } },
+            populate: { machine: true, project: true },
+            orderBy: { id: 'DESC' },
+        });
+        return ctx.send({ data: results });
+    },
+
     async kill(ctx) {
         try {
             const { machineId } = ctx.request.body;

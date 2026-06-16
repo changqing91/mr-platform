@@ -2,6 +2,14 @@
 
 const { validate, getReasonMessage } = require('./license/validator');
 
+const SEED_ROLES = [
+  { name: 'VP',           canManage: true,  isSystem: true },
+  { name: '数字主管',      canManage: true,  isSystem: true },
+  { name: '可视化专员',    canManage: true,  isSystem: true },
+  { name: '造型设计师',    canManage: false, isSystem: true },
+  { name: '数字模型师',    canManage: false, isSystem: true },
+];
+
 module.exports = {
   register(/*{ strapi }*/) {},
 
@@ -16,84 +24,45 @@ module.exports = {
       strapi.log.warn('[License] 系统将启动，但所有 API 请求将被拦截，直到上传有效许可证。');
     }
 
+    // --- 自动放行 public 角色调用 license/process custom 路由 ---
     try {
-      const permissionActions = [
-        // Project
-        'api::project.project.find',
-        'api::project.project.findOne',
-        'api::project.project.create',
-        'api::project.project.update',
-        'api::project.project.delete',
-        // Machine
-        'api::machine.machine.find',
-        'api::machine.machine.findOne',
-        'api::machine.machine.create',
-        'api::machine.machine.update',
-        'api::machine.machine.delete',
-        // Process (Custom)
-        'api::process.process.launch',
-        'api::process.process.stop',
-        // User Admin (Custom)
-        'api::user-admin.user-admin.listUsers',
-        'api::user-admin.user-admin.changePassword',
+      const publicActions = [
+        'api::license.license.status',
+        'api::license.license.upload',
+        'api::process.process.executePython',
       ];
-
-      const bootstrapPermissions = async (roleType) => {
-        const role = await strapi.db.query('plugin::users-permissions.role').findOne({
-          where: { type: roleType },
-        });
-
-        if (role) {
-          await Promise.all(permissionActions.map(async (action) => {
-            const count = await strapi.db.query('plugin::users-permissions.permission').count({
-              where: {
-                role: role.id,
-                action: action
-              }
-            });
-            
-            if (count === 0) {
-              await strapi.db.query('plugin::users-permissions.permission').create({
-                data: {
-                  action: action,
-                  role: role.id,
-                  enabled: true
-                }
-              });
-              strapi.log.info(`Granted ${roleType} permission: ${action}`);
-            }
-          }));
-        }
-        return role;
-      };
-
-      // 1. Bootstrap Permissions for Public and Authenticated
-      await bootstrapPermissions('public');
-      const authenticatedRole = await bootstrapPermissions('authenticated');
-
-      // 2. Create Default User (admin / Password123!)
-      if (authenticatedRole) {
-        const userCount = await strapi.db.query('plugin::users-permissions.user').count({
-          where: { email: 'admin@what-tech.cn' }
-        });
-
-        if (userCount === 0) {
-          await strapi.entityService.create('plugin::users-permissions.user', {
-            data: {
-              username: 'admin',
-              email: 'admin@what-tech.cn',
-              password: 'Password123!',
-              confirmed: true,
-              blocked: false,
-              role: authenticatedRole.id
-            }
+      const role = await strapi.db.query('plugin::users-permissions.role').findOne({
+        where: { type: 'public' },
+      });
+      if (role) {
+        await Promise.all(publicActions.map(async (action) => {
+          const count = await strapi.db.query('plugin::users-permissions.permission').count({
+            where: { role: role.id, action },
           });
-          strapi.log.info('Created default user: admin@what-tech.cn / Password123!');
+          if (count === 0) {
+            await strapi.db.query('plugin::users-permissions.permission').create({
+              data: { action, role: role.id, enabled: true },
+            });
+          }
+        }));
+      }
+    } catch (e) {
+      strapi.log.warn('[bootstrap] failed to grant public permissions for license/process custom endpoints', e);
+    }
+
+    // --- Seed 内置 app-role ---
+    try {
+      for (const seed of SEED_ROLES) {
+        const existing = await strapi.db.query('api::app-role.app-role').findOne({ where: { name: seed.name } });
+        if (!existing) {
+          await strapi.entityService.create('api::app-role.app-role', { data: seed });
+          strapi.log.info(`[bootstrap] created seed app-role: ${seed.name}`);
+        } else if (!existing.isSystem) {
+          await strapi.entityService.update('api::app-role.app-role', existing.id, { data: { isSystem: true } });
         }
       }
-
     } catch (e) {
-      strapi.log.error('Failed to bootstrap permissions or user', e);
+      strapi.log.error('[bootstrap] failed to seed app-roles', e);
     }
   },
 };

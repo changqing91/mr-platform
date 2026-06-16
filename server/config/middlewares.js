@@ -12,4 +12,7 @@ module.exports = [
   {
     resolve: './src/middlewares/license-check',
   },
+  {
+    resolve: './src/middlewares/keycloak-auth',
+  },
 ];

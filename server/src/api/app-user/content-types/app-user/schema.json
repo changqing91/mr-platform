@@ -1,0 +1,45 @@
+{
+  "kind": "collectionType",
+  "collectionName": "app_users",
+  "info": {
+    "singularName": "app-user",
+    "pluralName": "app-users",
+    "displayName": "App User",
+    "description": "Local mirror of a Keycloak user with mr-platform business attributes"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "keycloakId": {
+      "type": "string",
+      "required": true,
+      "unique": true
+    },
+    "username": {
+      "type": "string"
+    },
+    "email": {
+      "type": "string"
+    },
+    "displayName": {
+      "type": "string"
+    },
+    "appRole": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::app-role.app-role",
+      "inversedBy": "users"
+    },
+    "projectGroups": {
+      "type": "relation",
+      "relation": "manyToMany",
+      "target": "api::project-group.project-group",
+      "inversedBy": "users"
+    },
+    "lastSyncAt": {
+      "type": "datetime"
+    }
+  }
+}

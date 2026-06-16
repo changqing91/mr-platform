@@ -430,6 +430,84 @@ export interface AdminUser extends Struct.CollectionTypeSchema {
   };
 }
 
+export interface ApiAppRoleAppRole extends Struct.CollectionTypeSchema {
+  collectionName: 'app_roles';
+  info: {
+    description: 'Business role inside mr-platform (e.g. VP / \u6570\u5B57\u4E3B\u7BA1)';
+    displayName: 'App Role';
+    pluralName: 'app-roles';
+    singularName: 'app-role';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    canManage: Schema.Attribute.Boolean &
+      Schema.Attribute.Required &
+      Schema.Attribute.DefaultTo<false>;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    isSystem: Schema.Attribute.Boolean &
+      Schema.Attribute.Required &
+      Schema.Attribute.DefaultTo<false>;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::app-role.app-role'
+    > &
+      Schema.Attribute.Private;
+    name: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.Unique;
+    publishedAt: Schema.Attribute.DateTime;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    users: Schema.Attribute.Relation<'oneToMany', 'api::app-user.app-user'>;
+  };
+}
+
+export interface ApiAppUserAppUser extends Struct.CollectionTypeSchema {
+  collectionName: 'app_users';
+  info: {
+    description: 'Local mirror of a Keycloak user with mr-platform business attributes';
+    displayName: 'App User';
+    pluralName: 'app-users';
+    singularName: 'app-user';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    appRole: Schema.Attribute.Relation<'manyToOne', 'api::app-role.app-role'>;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    displayName: Schema.Attribute.String;
+    email: Schema.Attribute.String;
+    keycloakId: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.Unique;
+    lastSyncAt: Schema.Attribute.DateTime;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::app-user.app-user'
+    > &
+      Schema.Attribute.Private;
+    projectGroups: Schema.Attribute.Relation<
+      'manyToMany',
+      'api::project-group.project-group'
+    >;
+    publishedAt: Schema.Attribute.DateTime;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    username: Schema.Attribute.String;
+  };
+}
+
 export interface ApiMachineMachine extends Struct.CollectionTypeSchema {
   collectionName: 'machines';
   info: {
@@ -506,6 +584,37 @@ export interface ApiProcessProcess extends Struct.CollectionTypeSchema {
   };
 }
 
+export interface ApiProjectGroupProjectGroup
+  extends Struct.CollectionTypeSchema {
+  collectionName: 'project_groups';
+  info: {
+    displayName: 'Project Group';
+    pluralName: 'project-groups';
+    singularName: 'project-group';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::project-group.project-group'
+    > &
+      Schema.Attribute.Private;
+    name: Schema.Attribute.String & Schema.Attribute.Required;
+    projects: Schema.Attribute.Relation<'oneToMany', 'api::project.project'>;
+    publishedAt: Schema.Attribute.DateTime;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    users: Schema.Attribute.Relation<'manyToMany', 'api::app-user.app-user'>;
+  };
+}
+
 export interface ApiProjectProject extends Struct.CollectionTypeSchema {
   collectionName: 'projects';
   info: {
@@ -532,6 +641,10 @@ export interface ApiProjectProject extends Struct.CollectionTypeSchema {
       Schema.Attribute.Private;
     machines: Schema.Attribute.Relation<'oneToMany', 'api::machine.machine'>;
     name: Schema.Attribute.String;
+    projectGroup: Schema.Attribute.Relation<
+      'manyToOne',
+      'api::project-group.project-group'
+    >;
     publishedAt: Schema.Attribute.DateTime;
     size: Schema.Attribute.String;
     tags: Schema.Attribute.JSON;
@@ -1053,8 +1166,11 @@ declare module '@strapi/strapi' {
       'admin::transfer-token': AdminTransferToken;
       'admin::transfer-token-permission': AdminTransferTokenPermission;
       'admin::user': AdminUser;
+      'api::app-role.app-role': ApiAppRoleAppRole;
+      'api::app-user.app-user': ApiAppUserAppUser;
       'api::machine.machine': ApiMachineMachine;
       'api::process.process': ApiProcessProcess;
+      'api::project-group.project-group': ApiProjectGroupProjectGroup;
       'api::project.project': ApiProjectProject;
       'plugin::content-releases.release': PluginContentReleasesRelease;
       'plugin::content-releases.release-action': PluginContentReleasesReleaseAction;

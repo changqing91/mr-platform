@@ -1,16 +1,21 @@
+import { getAccessToken, login as oidcLogin, logout as oidcLogout, userManager } from './auth';
+
 const API_URL = '/api';
 
-const getAuthHeaders = () => {
-    const token = localStorage.getItem('jwt');
-    return token ? {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json'
-    } : {
-        'Content-Type': 'application/json'
-    };
+const buildHeaders = async (extra = {}) => {
+    const token = await getAccessToken();
+    const headers = { 'Content-Type': 'application/json', ...extra };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    return headers;
 };
 
-// Helper to handle Strapi's { data: [...] } structure and flattening
+const buildHeadersNoBody = async () => {
+    const token = await getAccessToken();
+    const headers = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    return headers;
+};
+
 const normalize = (data) => {
     if (!data) return null;
     if (Array.isArray(data)) {
@@ -26,238 +31,144 @@ const normalize = (data) => {
     };
 };
 
-const unwrap = async (response) => {
-    if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error?.message || 'API Error');
+const handle401 = async () => {
+    // Token may be revoked or expired; try silent refresh, fall back to redirect.
+    try {
+        await userManager.signinSilent();
+    } catch (_) {
+        oidcLogin();
     }
-    if (response.status === 204) {
-        return null;
+};
+
+const unwrap = async (response) => {
+    if (response.status === 401) {
+        await handle401();
+        throw new Error('UNAUTHENTICATED');
+    }
+    if (!response.ok) {
+        let msg = 'API Error';
+        try {
+            const j = await response.json();
+            msg = j.error?.message || j.message || msg;
+        } catch (_) { /* ignore */ }
+        throw new Error(msg);
+    }
+    if (response.status === 204) return null;
+    const json = await response.json();
+    return normalize(json.data || json);
+};
+
+const unwrapPaginated = async (response) => {
+    if (response.status === 401) {
+        await handle401();
+        throw new Error('UNAUTHENTICATED');
+    }
+    if (!response.ok) {
+        let msg = 'API Error';
+        try {
+            const j = await response.json();
+            msg = j.error?.message || j.message || msg;
+        } catch (_) { /* ignore */ }
+        throw new Error(msg);
     }
     const json = await response.json();
-    return normalize(json.data || json); // Login returns { jwt, user }, not { data: ... } sometimes
+    return {
+        data: normalize(json.data || []),
+        pagination: json.meta?.pagination || { page: 1, pageSize: 20, pageCount: 1, total: 0 },
+    };
+};
+
+const get = async (path) => {
+    const res = await fetch(`${API_URL}${path}`, { headers: await buildHeaders() });
+    return unwrap(res);
+};
+
+const send = async (method, path, body) => {
+    const res = await fetch(`${API_URL}${path}`, {
+        method,
+        headers: await buildHeaders(),
+        body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+    return unwrap(res);
 };
 
 export const api = {
     auth: {
-        login: async (identifier, password) => {
-            const res = await fetch(`${API_URL}/auth/local`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ identifier, password })
-            });
-            // Strapi Login response: { jwt: "...", user: { ... } }
-            // It doesn't follow { data: ... } wrapper usually
-            if (!res.ok) {
-                const error = await res.json();
-                const msg = error.error?.message || '';
-                // Translate common Strapi auth error messages to Chinese
-                if (msg.toLowerCase().includes('identifier') || msg.toLowerCase().includes('password') || msg.toLowerCase().includes('invalid')) {
-                    throw new Error('账号或密码错误');
-                }
-                if (msg.toLowerCase().includes('blocked')) {
-                    throw new Error('账户已被锁定，请联系管理员');
-                }
-                if (msg.toLowerCase().includes('confirmed')) {
-                    throw new Error('账户尚未激活');
-                }
-                throw new Error(msg || '登录失败');
-            }
-            return res.json();
-        },
-        register: async (username, email, password) => {
-            const res = await fetch(`${API_URL}/auth/local/register`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ username, email, password })
-            });
-            if (!res.ok) {
-                const error = await res.json();
-                const msg = error.error?.message || '';
-                if (msg.toLowerCase().includes('already taken') || msg.toLowerCase().includes('unique')) {
-                    throw new Error('用户名或邮箱已被注册');
-                }
-                if (msg.toLowerCase().includes('email')) {
-                    throw new Error('邮箱格式无效');
-                }
-                throw new Error(msg || '注册失败');
-            }
-            return res.json();
-        }
+        login: oidcLogin,
+        logout: oidcLogout,
+        me: () => get('/me'),
     },
-    userAdmin: {
-        listUsers: async () => {
-            const res = await fetch(`${API_URL}/user-admin/users`, {
-                headers: getAuthHeaders()
-            });
-            return unwrap(res);
+    appUsers: {
+        list:           ()                        => get('/app-users'),
+        create:         (data)                    => send('POST',   '/app-users', data),
+        update:         (id, data)                => send('PUT',    `/app-users/${id}`, data),
+        delete:         (id)                      => send('DELETE', `/app-users/${id}`),
+        resetPassword:  (id, password, temporary) => send('PUT',    `/app-users/${id}/password`, { password, temporary }),
+    },
+    appRoles: {
+        list:    ()         => get('/app-roles'),
+        create:  (data)     => send('POST',   '/app-roles', data),
+        update:  (id, data) => send('PUT',    `/app-roles/${id}`, data),
+        delete:  (id)       => send('DELETE', `/app-roles/${id}`),
+    },
+    projectGroups: {
+        list:    async () => {
+            const res = await fetch(`${API_URL}/project-groups`, { headers: await buildHeaders() });
+            if (res.status === 401) { await handle401(); throw new Error('UNAUTHENTICATED'); }
+            if (!res.ok) throw new Error('Failed to load project groups');
+            const json = await res.json();
+            return { data: normalize(json.data || []), meta: json.meta || {} };
         },
-        changePassword: async (userId, password) => {
-            const res = await fetch(`${API_URL}/user-admin/users/${userId}/password`, {
-                method: 'PUT',
-                headers: getAuthHeaders(),
-                body: JSON.stringify({ password })
-            });
-            return unwrap(res);
-        }
+        create:  (data)     => send('POST',   '/project-groups', data),
+        update:  (id, data) => send('PUT',    `/project-groups/${id}`, data),
+        delete:  (id)       => send('DELETE', `/project-groups/${id}`),
     },
     projects: {
-        list: async () => {
-            const res = await fetch(`${API_URL}/projects?sort=createdAt:desc&populate=*`, {
-                headers: getAuthHeaders()
-            });
-            return unwrap(res);
+        list: async (page = 1, pageSize = 20, groupDocId = null) => {
+            const params = new URLSearchParams({ sort: 'createdAt:desc', 'pagination[page]': page, 'pagination[pageSize]': pageSize });
+            if (groupDocId) params.set('filters[projectGroup]', groupDocId);
+            const res = await fetch(`${API_URL}/projects?${params}`, { headers: await buildHeaders() });
+            return unwrapPaginated(res);
         },
-        create: async (data) => {
-            const res = await fetch(`${API_URL}/projects`, {
-                method: 'POST',
-                headers: getAuthHeaders(),
-                body: JSON.stringify({ data })
-            });
-            return unwrap(res);
-        },
-        update: async (documentId, data) => {
-            const res = await fetch(`${API_URL}/projects/${documentId}`, {
-                method: 'PUT',
-                headers: getAuthHeaders(),
-                body: JSON.stringify({ data })
-            });
-            return unwrap(res);
-        },
-        delete: async (documentId) => {
-            const res = await fetch(`${API_URL}/projects/${documentId}`, {
-                method: 'DELETE',
-                headers: getAuthHeaders()
-            });
-            return unwrap(res);
-        }
+        create: (data)            => send('POST',   '/projects', { data }),
+        update: (documentId, data) => send('PUT',    `/projects/${documentId}`, { data }),
+        delete: (documentId)      => send('DELETE', `/projects/${documentId}`),
     },
     machines: {
-        list: async () => {
-            const res = await fetch(`${API_URL}/machines?sort=createdAt:asc`, {
-                headers: getAuthHeaders()
-            });
-            return unwrap(res);
-        },
-        create: async (data) => {
-            const res = await fetch(`${API_URL}/machines`, {
-                method: 'POST',
-                headers: getAuthHeaders(),
-                body: JSON.stringify({ data })
-            });
-            return unwrap(res);
-        },
-        update: async (documentId, data) => {
-            const res = await fetch(`${API_URL}/machines/${documentId}`, {
-                method: 'PUT',
-                headers: getAuthHeaders(),
-                body: JSON.stringify({ data })
-            });
-            return unwrap(res);
-        },
-        delete: async (documentId) => {
-            const res = await fetch(`${API_URL}/machines/${documentId}`, {
-                method: 'DELETE',
-                headers: getAuthHeaders()
-            });
-            return unwrap(res);
-        }
+        list:   ()                 => get('/machines?sort=createdAt:asc'),
+        create: (data)             => send('POST',   '/machines', { data }),
+        update: (documentId, data) => send('PUT',    `/machines/${documentId}`, { data }),
+        delete: (documentId)       => send('DELETE', `/machines/${documentId}`),
     },
     processes: {
-        list: async () => {
-            const res = await fetch(`${API_URL}/processes?populate=*`, {
-                headers: getAuthHeaders()
-            });
-            return unwrap(res);
-        },
-        create: async (data) => {
-            const res = await fetch(`${API_URL}/processes`, {
-                method: 'POST',
-                headers: getAuthHeaders(),
-                body: JSON.stringify({ data })
-            });
-            return unwrap(res);
-        },
-        update: async (documentId, data) => {
-            const res = await fetch(`${API_URL}/processes/${documentId}`, {
-                method: 'PUT',
-                headers: getAuthHeaders(),
-                body: JSON.stringify({ data })
-            });
-            return unwrap(res);
-        },
-        // Custom endpoints
-        launch: async (machineId, projectId) => {
-            const res = await fetch(`${API_URL}/processes/launch`, {
-                method: 'POST',
-                headers: getAuthHeaders(),
-                body: JSON.stringify({ machineId, projectId })
-            });
-            return unwrap(res);
-        },
-        kill: async (machineId) => {
-            const res = await fetch(`${API_URL}/processes/kill`, {
-                method: 'POST',
-                headers: getAuthHeaders(),
-                body: JSON.stringify({ machineId })
-            });
-            return res.json();
-        },
-        killAll: async () => {
-            const res = await fetch(`${API_URL}/processes/kill-all`, {
-                method: 'POST',
-                headers: getAuthHeaders()
-            });
-            return res.json();
-        },
-        batchKill: async (machineIds) => {
-            const res = await fetch(`${API_URL}/processes/batch-kill`, {
-                method: 'POST',
-                headers: getAuthHeaders(),
-                body: JSON.stringify({ machineIds })
-            });
-            return res.json();
-        },
-        executePython: async (ip, port, code) => {
-            const res = await fetch(`${API_URL}/processes/execute-python`, {
-                method: 'POST',
-                headers: getAuthHeaders(),
-                body: JSON.stringify({ ip, port, code })
-            });
-            return unwrap(res);
-        },
-        getScriptConfig: async () => {
-            const res = await fetch(`${API_URL}/processes/script-config`, {
-                headers: getAuthHeaders()
-            });
-            return unwrap(res);
-        },
-        saveScriptConfig: async (config) => {
-            const res = await fetch(`${API_URL}/processes/script-config`, {
-                method: 'PUT',
-                headers: getAuthHeaders(),
-                body: JSON.stringify(config)
-            });
-            return unwrap(res);
-        }
+        list: () => get('/processes'),
+        create: (data)             => send('POST', '/processes', { data }),
+        update: (documentId, data) => send('PUT',  `/processes/${documentId}`, { data }),
+        launch:    (machineId, projectId) => send('POST', '/processes/launch',    { machineId, projectId }),
+        kill:      (machineId)            => send('POST', '/processes/kill',      { machineId }),
+        killAll:   ()                     => send('POST', '/processes/kill-all'),
+        batchKill: (machineIds)           => send('POST', '/processes/batch-kill', { machineIds }),
+        executePython:    (ip, port, code) => send('POST', '/processes/execute-python', { ip, port, code }),
+        getScriptConfig:  ()              => get('/processes/script-config'),
+        saveScriptConfig: (config)        => send('PUT',  '/processes/script-config', config),
     },
     upload: async (file) => {
         const formData = new FormData();
         formData.append('files', file);
-
-        const token = localStorage.getItem('jwt');
-        const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
-
         const res = await fetch(`${API_URL}/upload`, {
             method: 'POST',
-            headers: headers,
-            body: formData
+            headers: await buildHeadersNoBody(),
+            body: formData,
         });
-
+        if (res.status === 401) {
+            await handle401();
+            throw new Error('UNAUTHENTICATED');
+        }
         if (!res.ok) {
-            const error = await res.json();
-            throw new Error(error.error?.message || 'Upload Failed');
+            let msg = 'Upload Failed';
+            try { const j = await res.json(); msg = j.error?.message || msg; } catch (_) { /* ignore */ }
+            throw new Error(msg);
         }
         return res.json();
-    }
+    },
 };

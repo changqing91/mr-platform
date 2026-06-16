@@ -42,6 +42,12 @@
       "relation": "oneToMany",
       "target": "api::machine.machine",
       "mappedBy": "current_project"
+    },
+    "projectGroup": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::project-group.project-group",
+      "inversedBy": "projects"
     }
   }
 }

@@ -1,9 +1,15 @@
 'use strict';
 
-/**
- * process router
- */
-
 const { createCoreRouter } = require('@strapi/strapi').factories;
 
-module.exports = createCoreRouter('api::process.process');
+const noAuth = { auth: false, policies: [], middlewares: [] };
+
+module.exports = createCoreRouter('api::process.process', {
+  config: {
+    find:    noAuth,
+    findOne: noAuth,
+    create:  noAuth,
+    update:  noAuth,
+    delete:  noAuth,
+  },
+});

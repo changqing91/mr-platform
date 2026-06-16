@@ -1,5 +1,5 @@
 import React from 'react';
-import { FilePlus, Upload, FileText, Trash2, X, Image as ImageIcon, Tag, Save } from 'lucide-react';
+import { FilePlus, Upload, FileText, Trash2, X, Image as ImageIcon, Tag, Save, FolderOpen } from 'lucide-react';
 import { THEME_COLOR } from '../constants';
 
 const ProjectModal = ({
@@ -13,7 +13,8 @@ const ProjectModal = ({
     handleThumbnailSelect,
     handleAddProject,
     isUploading,
-    uploadProgress
+    uploadProgress,
+    projectGroups = [],
 }) => {
     if (!showProjectModal) return null;
 
@@ -108,6 +109,29 @@ const ProjectModal = ({
                         </div>
                     </div>
 
+                    {/* Project Group Section */}
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">所属项目组 <span className="text-red-500">*</span></label>
+                        <div className="relative">
+                            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-400">
+                                <FolderOpen size={16} />
+                            </div>
+                            <select
+                                value={newProjectForm.projectGroupId || ''}
+                                onChange={(e) => setNewProjectForm({...newProjectForm, projectGroupId: e.target.value})}
+                                className={`w-full pl-10 pr-8 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-[#39C5BB] transition-all text-sm appearance-none bg-white ${!newProjectForm.projectGroupId ? 'border-red-300' : 'border-gray-200'}`}
+                            >
+                                <option value="">请选择项目组</option>
+                                {projectGroups.map(g => (
+                                    <option key={g.id} value={g.documentId || g.id}>{g.name}</option>
+                                ))}
+                            </select>
+                            <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none text-gray-400">
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                            </div>
+                        </div>
+                    </div>
+
                     <div className="flex gap-3 pt-4">
                         <button 
                             onClick={() => setShowProjectModal(false)} 
@@ -118,9 +142,9 @@ const ProjectModal = ({
                         </button>
                         <button 
                             onClick={handleAddProject} 
-                            disabled={!newProjectForm.fileName || isUploading} 
-                            className={`flex-1 py-2 text-white rounded-lg font-medium transition-colors shadow-lg flex items-center justify-center gap-2 ${(!newProjectForm.fileName || isUploading) ? 'bg-gray-300 cursor-not-allowed' : 'hover:shadow-xl hover:-translate-y-0.5'}`} 
-                            style={{ backgroundColor: (!newProjectForm.fileName || isUploading) ? undefined : THEME_COLOR }}
+                            disabled={!newProjectForm.fileName || !newProjectForm.projectGroupId || isUploading} 
+                            className={`flex-1 py-2 text-white rounded-lg font-medium transition-colors shadow-lg flex items-center justify-center gap-2 ${(!newProjectForm.fileName || !newProjectForm.projectGroupId || isUploading) ? 'bg-gray-300 cursor-not-allowed' : 'hover:shadow-xl hover:-translate-y-0.5'}`} 
+                            style={{ backgroundColor: (!newProjectForm.fileName || !newProjectForm.projectGroupId || isUploading) ? undefined : THEME_COLOR }}
                         >
                             <Save size={18} />
                             {isUploading ? '正在保存...' : '保存项目'}

@@ -812,6 +812,20 @@
   resolved "https://registry.npmmirror.com/@juggle/resize-observer/-/resize-observer-3.4.0.tgz"
   integrity sha512-dfLbk+PwWvFzSxwk3n5ySL0hfBog779o8h68wK/7/APo/7cgyWp5jcXockbxdk5kFRkbeXWm4Fbi9FrdN381sA==
 
+"@keycloak/keycloak-admin-client@^26.0.0":
+  version "26.6.3"
+  resolved "https://registry.npmmirror.com/@keycloak/keycloak-admin-client/-/keycloak-admin-client-26.6.3.tgz"
+  integrity sha512-hHSdEl9Hxww7w1Q+SbMPshhHxjvZZsNEfsL+7PXGxi0fYPggSQUyd/PC1ko1/UX7gNyDmDI89sOYSBoFQ/bcaQ==
+  dependencies:
+    "@microsoft/kiota-abstractions" "^1.0.0-preview.86"
+    "@microsoft/kiota-http-fetchlibrary" "^1.0.0-preview.80"
+    "@microsoft/kiota-serialization-form" "^1.0.0-preview.74"
+    "@microsoft/kiota-serialization-json" "^1.0.0-preview.86"
+    "@microsoft/kiota-serialization-multipart" "^1.0.0-preview.67"
+    "@microsoft/kiota-serialization-text" "^1.0.0-preview.79"
+    camelize-ts "^3.0.0"
+    url-template "^3.1.1"
+
 "@koa/cors@5.0.0":
   version "5.0.0"
   resolved "https://registry.npmmirror.com/@koa/cors/-/cors-5.0.0.tgz"
@@ -862,6 +876,57 @@
   version "1.0.2"
   resolved "https://registry.npmmirror.com/@marijn/find-cluster-break/-/find-cluster-break-1.0.2.tgz"
   integrity sha512-l0h88YhZFyKdXIFNfSWpyjStDjGHwZ/U7iobcK1cQQD8sejsONdQtTVU+1wVN1PBw40PiiHB1vA5S7VTfQiP9g==
+
+"@microsoft/kiota-abstractions@^1.0.0-preview.102", "@microsoft/kiota-abstractions@^1.0.0-preview.86":
+  version "1.0.0-preview.102"
+  resolved "https://registry.npmmirror.com/@microsoft/kiota-abstractions/-/kiota-abstractions-1.0.0-preview.102.tgz"
+  integrity sha512-WL+S7X+W6zpDO6vFk+FClb5hoUJMV1ZcMHo1H52r2Q49xTuYx9esJqmwh/0EXsftmxKwOOIOoPfO7+Tp5QAddw==
+  dependencies:
+    "@opentelemetry/api" "^1.7.0"
+    "@std-uritemplate/std-uritemplate" "^2.0.0"
+    tinyduration "^3.3.0"
+    tslib "^2.6.2"
+
+"@microsoft/kiota-http-fetchlibrary@^1.0.0-preview.80":
+  version "1.0.0-preview.102"
+  resolved "https://registry.npmmirror.com/@microsoft/kiota-http-fetchlibrary/-/kiota-http-fetchlibrary-1.0.0-preview.102.tgz"
+  integrity sha512-oXfrPOWkIR2/Gs700n00EY3VDc+Qgz6y7ZiA/f8FHJsnwSjZ017xcWFw2PLzJItczVsad0pq/N5DYnoF6Co11Q==
+  dependencies:
+    "@microsoft/kiota-abstractions" "^1.0.0-preview.102"
+    "@opentelemetry/api" "^1.7.0"
+    tslib "^2.6.2"
+
+"@microsoft/kiota-serialization-form@^1.0.0-preview.74":
+  version "1.0.0-preview.102"
+  resolved "https://registry.npmmirror.com/@microsoft/kiota-serialization-form/-/kiota-serialization-form-1.0.0-preview.102.tgz"
+  integrity sha512-1w70XAA/F4RgbyNbRAaZCjLAOiKQjdiQDYlNZC9x8g7xgd7tNqYqowt/auQS1A9SZOrT626q6+Gr2xKKyW3wOg==
+  dependencies:
+    "@microsoft/kiota-abstractions" "^1.0.0-preview.102"
+    tslib "^2.6.2"
+
+"@microsoft/kiota-serialization-json@^1.0.0-preview.86":
+  version "1.0.0-preview.102"
+  resolved "https://registry.npmmirror.com/@microsoft/kiota-serialization-json/-/kiota-serialization-json-1.0.0-preview.102.tgz"
+  integrity sha512-YpIt5pXNX13ND736oJFf0wBYPAafCv+CAE17Fa1HcS1drCdXx8ELPQ5GxGDbQG7J5LIMDgUtBOUmf5R/FrMQ6A==
+  dependencies:
+    "@microsoft/kiota-abstractions" "^1.0.0-preview.102"
+    tslib "^2.6.2"
+
+"@microsoft/kiota-serialization-multipart@^1.0.0-preview.67":
+  version "1.0.0-preview.102"
+  resolved "https://registry.npmmirror.com/@microsoft/kiota-serialization-multipart/-/kiota-serialization-multipart-1.0.0-preview.102.tgz"
+  integrity sha512-tjwt0m+8+OqZizZU6gBARTcA8suPYS0onD9IUbhKsvRrAJpBIyp07hnyOTXBgE+gurGGbeT3TTl9AUK2ic6DiA==
+  dependencies:
+    "@microsoft/kiota-abstractions" "^1.0.0-preview.102"
+    tslib "^2.6.2"
+
+"@microsoft/kiota-serialization-text@^1.0.0-preview.79":
+  version "1.0.0-preview.102"
+  resolved "https://registry.npmmirror.com/@microsoft/kiota-serialization-text/-/kiota-serialization-text-1.0.0-preview.102.tgz"
+  integrity sha512-ZCihyrXKYGfTz/frqNQvwKsD+EgjhjfclB5/XDrSGNXduisL/f1MbyvjsgmrZnLmtCwX8/v+Mc3vlz716KWYbg==
+  dependencies:
+    "@microsoft/kiota-abstractions" "^1.0.0-preview.102"
+    tslib "^2.6.2"
 
 "@mux/mux-player-react@3.1.0":
   version "3.1.0"
@@ -926,7 +991,7 @@
     "@nodelib/fs.scandir" "2.1.5"
     fastq "^1.6.0"
 
-"@opentelemetry/api@1.9.0":
+"@opentelemetry/api@^1.7.0", "@opentelemetry/api@1.9.0":
   version "1.9.0"
   resolved "https://registry.npmmirror.com/@opentelemetry/api/-/api-1.9.0.tgz"
   integrity sha512-3giAOQvZiH5F9bMlMiv8+GSPMeqg0dbaeo58/0SlA9sxSqZhnUtxzX9/2FzyhS9sWQf5S0GJE0AKBrFqjpeYcg==
@@ -1600,6 +1665,11 @@
   version "1.1.0"
   resolved "https://registry.npmmirror.com/@standard-schema/spec/-/spec-1.1.0.tgz"
   integrity sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==
+
+"@std-uritemplate/std-uritemplate@^2.0.0":
+  version "2.0.10"
+  resolved "https://registry.npmmirror.com/@std-uritemplate/std-uritemplate/-/std-uritemplate-2.0.10.tgz"
+  integrity sha512-EGxlaZDK+CcvMYzxLWKgQlhNiyGIoznEi/CVnzM1DCiQQh/EwSH0ThvseXJ4g6btu1hvlUZ70SrZD6ahsglXcw==
 
 "@strapi/admin@^5.0.0", "@strapi/admin@5.33.2":
   version "5.33.2"
@@ -3467,6 +3537,11 @@ camelcase@^6.2.0:
   version "6.3.0"
   resolved "https://registry.npmmirror.com/camelcase/-/camelcase-6.3.0.tgz"
   integrity sha512-Gmy6FhYlCY7uOElZUSbxo2UCDH8owEk996gkbrpsgGtrJLM3J7jGxl9Ic7Qwwj4ivOE5AWZWRMecDdF7hqGjFA==
+
+camelize-ts@^3.0.0:
+  version "3.0.0"
+  resolved "https://registry.npmmirror.com/camelize-ts/-/camelize-ts-3.0.0.tgz"
+  integrity sha512-cgRwKKavoDKLTjO4FQTs3dRBePZp/2Y9Xpud0FhuCOTE86M2cniKN4CCXgRnsyXNMmQMifVHcv6SPaMtTx6ofQ==
 
 camelize@^1.0.0:
   version "1.0.1"
@@ -6128,6 +6203,11 @@ jose@^4.14.6:
   version "4.15.9"
   resolved "https://registry.npmmirror.com/jose/-/jose-4.15.9.tgz"
   integrity sha512-1vUQX+IdDMVPj4k8kOxgUqlcK518yluMuGZwqlr44FS1ppZB/5GWh4rZG89erpOBOJjU/OBsnCVFfapsRz6nEA==
+
+jose@^5.9.6:
+  version "5.10.0"
+  resolved "https://registry.npmmirror.com/jose/-/jose-5.10.0.tgz"
+  integrity sha512-s+3Al/p9g32Iq+oqXxkW//7jk2Vig6FF1CFqzVXoTUXt2qz89YWbL+OwS17NFYEvxC35n0FKeGO2LGYSxeM2Gg==
 
 js-sha3@0.8.0:
   version "0.8.0"
@@ -9784,6 +9864,11 @@ tiny-warning@^1.0.2, tiny-warning@^1.0.3:
   resolved "https://registry.npmmirror.com/tiny-warning/-/tiny-warning-1.0.3.tgz"
   integrity sha512-lBN9zLN/oAf68o3zNXYrdCt1kP8WsiGW8Oo2ka41b2IM5JL/S1CTyX1rW0mb/zSuJun0ZUrDxx4sqvYS2FWzPA==
 
+tinyduration@^3.3.0:
+  version "3.4.1"
+  resolved "https://registry.npmmirror.com/tinyduration/-/tinyduration-3.4.1.tgz"
+  integrity sha512-NemFoamVYn7TmtwZKZ3OiliM9fZkr6EWiTM+wKknco6POSy2gS689xx/pXip0JYp40HXpUw6k65CUYHWYUXdaA==
+
 tinyglobby@^0.2.15:
   version "0.2.15"
   resolved "https://registry.npmmirror.com/tinyglobby/-/tinyglobby-0.2.15.tgz"
@@ -9865,7 +9950,7 @@ trough@^2.0.0:
   resolved "https://registry.npmmirror.com/trough/-/trough-2.2.0.tgz"
   integrity sha512-tmMpK00BjZiUyVyvrBK7knerNgmgvcV/KLVyuma/SC+TQN167GrMRciANTz09+k3zW8L8t60jWO1GpfkZdjTaw==
 
-tslib@^2.0.0, tslib@^2.0.1, tslib@^2.0.3, tslib@^2.1.0, tslib@^2.4.0, tslib@^2.7.0, tslib@^2.8.0, tslib@2.8.1:
+tslib@^2.0.0, tslib@^2.0.1, tslib@^2.0.3, tslib@^2.1.0, tslib@^2.4.0, tslib@^2.6.2, tslib@^2.7.0, tslib@^2.8.0, tslib@2.8.1:
   version "2.8.1"
   resolved "https://registry.npmmirror.com/tslib/-/tslib-2.8.1.tgz"
   integrity sha512-oJFu94HQb+KVduSUQL7wnpmqnfmLsOA/nAh6b6EH0wCEoK0/mPeXU6c3wKDV83MkOuHPRHtSXKKU99IBazS/2w==
@@ -10110,6 +10195,11 @@ url-join@4.0.1:
   version "4.0.1"
   resolved "https://registry.npmmirror.com/url-join/-/url-join-4.0.1.tgz"
   integrity sha512-jk1+QP6ZJqyOiuEI9AEWQfju/nB2Pw466kbA0LEZljHwKeMgd9WrAEgEGxjPDD2+TNbbb37rTyhEfrCXfuKXnA==
+
+url-template@^3.1.1:
+  version "3.1.1"
+  resolved "https://registry.npmmirror.com/url-template/-/url-template-3.1.1.tgz"
+  integrity sha512-4oszoaEKE/mQOtAmdMWqIRHmkxWkUZMnXFnjQ5i01CuRSK3uluxcH1MRVVVWmhlnzT1SCDfKxxficm2G37qzCA==
 
 use-callback-ref@^1.3.0:
   version "1.3.3"
