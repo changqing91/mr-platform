@@ -1,0 +1,1237 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MI XR Platform</title>
+    <!-- 引入 Tailwind CSS 运行时 -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 引入 React 全局变量 -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <!-- 引入 Babel 进行浏览器端的 JSX 实时编译 -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- 引入 Lucide 基础图库 -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+<body class="bg-gray-50 text-gray-900 font-sans antialiased">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useRef, useEffect } = React;
+
+        // ==========================================
+        // 核心：Lucide-React 到 浏览器版本的适配器
+        // ==========================================
+        const LucideIcon = ({ name, size = 24, className = '', strokeWidth = 2, color = 'currentColor', ...props }) => {
+            // 从全局 lucide 对象提取 SVG 结构数据
+            const iconData = window.lucide?.icons[name];
+            
+            // 防御性渲染：如果某些旧版本图标被重命名导致找不到，渲染一个灰色占位块
+            if (!iconData) {
+                return <span style={{ width: size, height: size, display: 'inline-block', backgroundColor: '#f3f4f6' }} className={`rounded ${className}`} {...props} />;
+            }
+
+            return React.createElement('svg', {
+                xmlns: "http://www.w3.org/2000/svg",
+                width: size,
+                height: size,
+                viewBox: "0 0 24 24",
+                fill: "none",
+                stroke: color,
+                strokeWidth: strokeWidth,
+                strokeLinecap: "round",
+                strokeLinejoin: "round",
+                className: className,
+                ...props
+            }, iconData.map(([elemTag, elemAttrs], index) => React.createElement(elemTag, { ...elemAttrs, key: index })));
+        };
+
+        const createIcon = (name) => (props) => <LucideIcon name={name} {...props} />;
+
+        // 映射你代码中使用到的所有图标 (必须符合 Lucide 的 PascalCase 键名)
+        const Menu = createIcon('Menu');
+        const Search = createIcon('Search');
+        const Plus = createIcon('Plus');
+        const Settings = createIcon('Settings');
+        const Check = createIcon('Check');
+        const User = createIcon('User');
+        const ChevronRight = createIcon('ChevronRight');
+        const ChevronLeft = createIcon('ChevronLeft');
+        const Eye = createIcon('Eye');
+        const Trash2 = createIcon('Trash2');
+        const Edit3 = createIcon('Edit3');
+        const Lock = createIcon('Lock');
+        const Box = createIcon('Box');
+        const ImageIcon = createIcon('Image'); // 解决原代码中的 import { Image as ImageIcon }
+        const RotateCw = createIcon('RotateCw');
+        const Monitor = createIcon('Monitor');
+        const PenTool = createIcon('PenTool');
+        const MonitorPlay = createIcon('MonitorPlay');
+        const Component = createIcon('Component');
+        const List = createIcon('List');
+        const DownloadCloud = createIcon('DownloadCloud');
+        const Play = createIcon('Play');
+        const CheckCircle2 = createIcon('CheckCircle2');
+        const FolderOpen = createIcon('FolderOpen');
+        const UploadCloud = createIcon('UploadCloud');
+        const X = createIcon('X');
+        const Key = createIcon('Key');
+        const LogOut = createIcon('LogOut');
+        const ShieldAlert = createIcon('ShieldAlert');
+        const ChevronDown = createIcon('ChevronDown');
+
+
+        // ==========================================
+        // 原有业务数据与状态设定
+        // ==========================================
+        const INITIAL_GROUPS = [
+          { id: 'g1', name: '项目A' },
+          { id: 'g2', name: '项目B' },
+          { id: 'g3', name: '项目C' },
+        ];
+
+        const INITIAL_PROJECTS = [
+          { id: 1, name: 'SU7 外观评审', updated: '2026-01-14 15:59', status: '已停止', imageColor: 'bg-orange-200', groupId: 'g1', coverImage: null },
+          { id: 2, name: '项目B_内饰', updated: '最近编辑：大约 2 个月前', status: '', imageColor: 'bg-gray-200', groupId: 'g2', coverImage: null },
+          { id: 3, name: '项目C_底盘', updated: '最近编辑：大约 4 个月前', status: '', imageColor: 'bg-gray-200', groupId: 'g3', coverImage: null },
+          { id: 4, name: '通用材质库', updated: '最近编辑：大约 4 个月前', status: '', imageColor: 'bg-gray-200', groupId: null, coverImage: null },
+        ];
+
+        const INITIAL_USERS = [
+          { id: '001', name: 'yelin', username: 'yelin', password: '123', role: 'VP', roleColor: 'text-yellow-600 bg-yellow-100 border-yellow-200', groups: ['g1', 'g2', 'g3'] },
+          { id: 'WT', name: 'WT', username: 'WT', password: '123', role: '数字主管', roleColor: 'text-red-600 bg-red-100 border-red-200', groups: ['g1', 'g2', 'g3'] },
+          { id: '004', name: 'weida', username: 'weida', password: '123', role: '可视化专员', roleColor: 'text-blue-600 bg-blue-100 border-blue-200', groups: ['g1', 'g2', 'g3'] },
+          { id: '007', name: 'haidewei', username: 'haidewei', password: '123', role: '数字模型师', roleColor: 'text-green-600 bg-green-100 border-green-200', groups: ['g2'] },
+        ];
+
+        const MOCK_TASKS = [
+          { id: 1, scene: 'Spectralight_RT_Environment_Modify7.vpb', creator: 'WT', time: '2026-03-03 19:09:00', progress: 100, status: '解析完成' },
+          { id: 2, scene: 'ANi.vpb', creator: 'WT', time: '2026-03-03 19:09:00', progress: 100, status: '解析完成' },
+          { id: 3, scene: 'Audi RS E-Tron GT 2022_0007.vpb', creator: 'WT', time: '2026-03-03 19:09:00', progress: 100, status: '解析完成' },
+        ];
+
+        const ROLES = ['VP', '数字主管', '可视化专员', '造型设计师', '数字模型师'];
+
+        // ==========================================
+        // UI 组件区
+        // ==========================================
+        const ViewLogin = ({ onLogin, users }) => {
+          const [username, setUsername] = useState('');
+          const [password, setPassword] = useState('');
+          const [error, setError] = useState('');
+
+          const handleLogin = (e) => {
+            e.preventDefault();
+            const user = users.find(u => u.username === username && u.password === password);
+            if (user) {
+              onLogin(user);
+            } else {
+              setError('账号或密码错误 (所有测试账号密码均为 123)');
+            }
+          };
+
+          return (
+            <div className="flex h-screen w-full bg-gray-50 items-center justify-center font-sans">
+              <div className="bg-white p-8 rounded-xl shadow-lg border border-gray-100 w-96">
+                <div className="flex items-center gap-2 justify-center mb-8">
+                  <div className="bg-orange-500 text-white font-bold px-2 py-1 rounded text-lg tracking-wider">MI</div>
+                  <h1 className="text-2xl font-bold text-gray-800">XR Platform</h1>
+                </div>
+                
+                {error && <div className="bg-red-50 text-red-500 text-sm p-3 rounded mb-4 text-center border border-red-100">{error}</div>}
+                
+                <form onSubmit={handleLogin} className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">系统账号</label>
+                    <div className="relative">
+                      <User size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                      <input type="text" value={username} onChange={e => setUsername(e.target.value)} placeholder="如: WT" className="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500" required />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">登录密码</label>
+                    <div className="relative">
+                      <Lock size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                      <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="所有账号默认密码 123" className="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500" required />
+                    </div>
+                  </div>
+                  <button type="submit" className="w-full mt-6 bg-orange-500 hover:bg-orange-600 text-white py-2.5 rounded-md text-sm font-medium transition-colors shadow-sm">
+                    登 录
+                  </button>
+                </form>
+                <div className="mt-6 text-xs text-gray-400 text-center">
+                    可用测试账号: yelin, WT, weida, haidewei
+                </div>
+              </div>
+            </div>
+          );
+        };
+
+        const Sidebar = ({ isExpanded, setIsExpanded, currentPage, setCurrentPage }) => {
+          const menuItems = [
+            { id: 'xr-platform', icon: Box, label: 'XR Platform' },
+            { id: 'render-farm', icon: MonitorPlay, label: 'Render Farm' }
+          ];
+
+          return (
+            <div className={`bg-white border-r border-gray-200 flex flex-col transition-all duration-300 ${isExpanded ? 'w-48' : 'w-16'} shrink-0 z-10`}>
+              <div className={`h-14 flex items-center border-b border-gray-200 ${isExpanded ? 'justify-between px-4' : 'justify-center'}`}>
+                {isExpanded && <span className="font-bold text-gray-800 text-sm">系统</span>}
+                <button onClick={() => setIsExpanded(!isExpanded)} className="p-1.5 hover:bg-gray-100 rounded text-gray-500">
+                  <Menu size={18} />
+                </button>
+              </div>
+              <div className="flex-1 py-4 flex flex-col gap-2">
+                {menuItems.map(item => (
+                  <button
+                    key={item.id}
+                    onClick={() => setCurrentPage(item.id)}
+                    className={`flex items-center px-4 py-3 mx-2 rounded-md transition-colors overflow-hidden ${
+                      (currentPage === item.id || (item.id === 'xr-platform' && currentPage === 'project-detail')) 
+                        ? 'text-orange-500 bg-orange-50' 
+                        : 'text-gray-500 hover:bg-gray-100 hover:text-gray-900'
+                    }`}
+                    title={item.label}
+                  >
+                    <div className="flex-shrink-0 flex items-center justify-center w-6">
+                      <item.icon size={20} strokeWidth={currentPage === item.id ? 2.5 : 2} />
+                    </div>
+                    <span className={`ml-3 text-sm font-medium whitespace-nowrap transition-opacity duration-300 ${isExpanded ? 'opacity-100' : 'opacity-0 w-0'}`}>
+                      {item.label}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          );
+        };
+
+        const TopNav = ({ title, onUserManageClick, currentUser, onLogout }) => (
+          <header className="h-14 bg-white border-b border-gray-200 flex items-center justify-between px-6 shrink-0 relative z-0">
+            <div className="flex items-center gap-2">
+              <div className="bg-orange-500 text-white font-bold px-1.5 py-0.5 rounded text-sm tracking-wider">MI</div>
+              <h1 className="text-lg font-bold text-gray-800">{title}</h1>
+            </div>
+
+            {title === 'MI Render Farm' && (
+               <div className="flex-1 flex justify-center h-full">
+                   <div className="flex gap-8 h-full text-sm">
+                       <button className="h-full border-b-2 border-orange-500 text-orange-500 font-medium px-2 transition-colors">解析列表</button>
+                       <button className="h-full border-b-2 border-transparent text-gray-600 hover:text-gray-900 px-2 transition-colors">渲染作业</button>
+                       <button className="h-full border-b-2 border-transparent text-gray-600 hover:text-gray-900 px-2 transition-colors">快速渲染</button>
+                       <button className="h-full border-b-2 border-transparent text-gray-600 hover:text-gray-900 px-2 transition-colors">历史任务</button>
+                   </div>
+               </div>
+            )}
+
+            <div className="flex items-center gap-6">
+              {title === 'MI Render Farm' && (
+                <button className="text-gray-600 hover:text-orange-500 text-sm flex items-center gap-1 transition-colors">
+                  <List size={16} /> 任务管理
+                </button>
+              )}
+              <button 
+                onClick={onUserManageClick}
+                className="text-gray-600 hover:text-orange-500 text-sm flex items-center gap-1 transition-colors"
+              >
+                <User size={16} /> 用户/项目组管理
+              </button>
+              <div className="flex items-center gap-4">
+                <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 rounded-full bg-orange-400 text-white flex items-center justify-center font-bold text-sm">
+                      {currentUser?.name.charAt(0).toUpperCase()}
+                    </div>
+                    <div className="flex flex-col">
+                      <span className="text-xs font-bold leading-tight">{currentUser?.name}</span>
+                      <span className="text-[10px] text-gray-500 leading-tight">{currentUser?.role}</span>
+                    </div>
+                </div>
+                <button onClick={onLogout} className="text-gray-400 hover:text-red-500 transition-colors" title="退出登录">
+                   <LogOut size={16} />
+                </button>
+              </div>
+            </div>
+          </header>
+        );
+
+        const ViewXRPlatform = ({ projects, projectGroups, openNewProject, openProjectDetail }) => {
+          const [activeTab, setActiveTab] = useState('all');
+
+          const filteredProjects = activeTab === 'all' 
+            ? projects 
+            : projects.filter(p => p.groupId === activeTab);
+
+          return (
+            <div className="flex-1 overflow-auto bg-gray-50 p-6 flex flex-col">
+              <div className="flex justify-between items-center mb-6">
+                <button className="text-gray-600 flex items-center gap-1 text-sm hover:text-gray-900">
+                    最近创建 <ChevronRight size={14} className="rotate-90"/>
+                </button>
+                <div className="flex gap-3">
+                  <div className="relative">
+                    <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                    <input 
+                      type="text" 
+                      placeholder="搜索项目名称" 
+                      className="pl-9 pr-4 py-1.5 border border-gray-200 rounded text-sm w-64 focus:outline-none focus:border-orange-500"
+                    />
+                  </div>
+                  <button onClick={openNewProject} className="bg-orange-500 hover:bg-orange-600 text-white px-4 py-1.5 rounded text-sm flex items-center gap-1 transition-colors">
+                    新建项目
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex gap-6 border-b border-gray-200 mb-6">
+                <button 
+                  onClick={() => setActiveTab('all')}
+                  className={`pb-3 text-sm font-medium transition-colors border-b-2 ${activeTab === 'all' ? 'border-orange-500 text-orange-500' : 'border-transparent text-gray-500 hover:text-gray-800'}`}
+                >
+                  全部
+                </button>
+                {projectGroups.map(group => (
+                  <button 
+                    key={group.id}
+                    onClick={() => setActiveTab(group.id)}
+                    className={`pb-3 text-sm font-medium transition-colors border-b-2 ${activeTab === group.id ? 'border-orange-500 text-orange-500' : 'border-transparent text-gray-500 hover:text-gray-800'}`}
+                  >
+                    {group.name}
+                  </button>
+                ))}
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
+                {filteredProjects.map(project => (
+                  <div 
+                    key={project.id} 
+                    className="bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden cursor-pointer hover:shadow-md transition-shadow group relative"
+                    onClick={() => openProjectDetail(project)}
+                  >
+                    <div className={`h-40 w-full ${project.coverImage ? 'bg-black' : project.imageColor} relative flex items-center justify-center overflow-hidden`}>
+                      {project.coverImage ? (
+                         <img src={project.coverImage} alt="cover" className="w-full h-full object-cover opacity-80" />
+                      ) : project.id === 1 ? (
+                          <div className="absolute inset-0 bg-orange-100/50 flex flex-col items-center justify-center text-orange-800">
+                              <Box size={48} className="opacity-50" />
+                              <span className="font-bold mt-2">Model</span>
+                          </div>
+                      ) : (
+                          <div className="absolute inset-0 bg-gray-800 flex items-center justify-center text-gray-600">
+                              <span className="text-xs">Covered Model</span>
+                          </div>
+                      )}
+                      <div className="absolute top-2 left-2 flex gap-1">
+                         {project.groupId && (
+                            <span className="bg-black/50 text-white text-[10px] px-1.5 py-0.5 rounded backdrop-blur-sm">
+                              {projectGroups.find(g => g.id === project.groupId)?.name}
+                            </span>
+                         )}
+                      </div>
+                      <div className="absolute bottom-2 right-2 bg-orange-500 text-white text-xs px-2 py-1 rounded-full flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                         <Box size={12}/> 3D 预览 <ChevronRight size={12}/>
+                      </div>
+                    </div>
+                    <div className="p-4">
+                      <div className="flex justify-between items-start mb-2">
+                        <h3 className="font-bold text-gray-800 flex items-center gap-2 truncate">
+                           <FolderOpen size={14} className="text-gray-500 shrink-0"/> 
+                           <span className="truncate">{project.name}</span>
+                        </h3>
+                      </div>
+                      <p className="text-xs text-gray-400">{project.updated}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        };
+
+        const ViewRenderFarm = () => (
+            <div className="flex-1 flex flex-col bg-white overflow-hidden p-6">
+                <div className="flex justify-between items-center mb-6">
+                    <h2 className="text-lg font-bold text-gray-800">解析列表</h2>
+                    <div className="relative">
+                        <input type="text" placeholder="请输入" className="pl-3 pr-8 py-1.5 border border-gray-200 rounded text-sm w-64 focus:outline-none focus:border-orange-500 transition-colors" />
+                        <Search size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                    </div>
+                </div>
+
+                <div className="flex-1 overflow-auto">
+                    <table className="w-full text-left border-collapse">
+                        <thead>
+                            <tr className="border-b border-gray-100">
+                                <th className="py-4 px-2 text-sm font-medium text-gray-500 w-[25%]">场景名</th>
+                                <th className="py-4 px-2 text-sm font-medium text-gray-500 w-[15%]">制作人</th>
+                                <th className="py-4 px-2 text-sm font-medium text-gray-500 w-[20%]">添加时间</th>
+                                <th className="py-4 px-2 text-sm font-medium text-gray-500 w-[15%]">上传进度</th>
+                                <th className="py-4 px-2 text-sm font-medium text-gray-500 w-[15%]">解析状态</th>
+                                <th className="py-4 px-2 text-sm font-medium text-gray-500 text-right w-[10%]">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-50">
+                            {MOCK_TASKS.map((task) => (
+                                <tr key={task.id} className="hover:bg-gray-50/50 transition-colors">
+                                    <td className="py-4 px-2 text-sm text-gray-800">{task.scene}</td>
+                                    <td className="py-4 px-2 text-sm text-gray-600">{task.creator}</td>
+                                    <td className="py-4 px-2 text-sm text-gray-500">{task.time}</td>
+                                    <td className="py-4 px-2">
+                                        <div className="flex items-center gap-2 w-full max-w-[200px]">
+                                            <div className="h-1.5 flex-1 bg-gray-100 rounded-full overflow-hidden">
+                                                <div className="h-full bg-[#8bc34a] w-full"></div>
+                                            </div>
+                                            <CheckCircle2 size={14} className="text-[#8bc34a]" />
+                                        </div>
+                                    </td>
+                                    <td className="py-4 px-2">
+                                        <span className="text-xs px-2 py-1 rounded text-[#8bc34a] border border-[#8bc34a]/30 bg-[#8bc34a]/5">
+                                            {task.status}
+                                        </span>
+                                    </td>
+                                    <td className="py-4 px-2 text-right text-sm whitespace-nowrap">
+                                        <button className="text-blue-500 hover:text-blue-600 mr-3 transition-colors">提交渲染</button>
+                                        <button className="text-red-500 hover:text-red-600 transition-colors">删除</button>
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        );
+
+        const ViewProjectDetail = ({ project, onBack, onUpdateProject, currentUser, projectGroups }) => {
+          const [isEditingName, setIsEditingName] = useState(false);
+          const [editName, setEditName] = useState(project?.name || '');
+          const [models, setModels] = useState([{ id: 1, name: 'Audi_RS_E-tron_GT_2022_VR.vpb', type: '主模型' }]);
+          const fileInputRef = useRef(null);
+          const coverInputRef = useRef(null);
+
+          const isSuperUser = ['VP', '数字主管', '可视化专员'].includes(currentUser.role);
+          const hasAccess = !project.groupId || currentUser.groups.includes(project.groupId) || isSuperUser;
+
+          if (!hasAccess) {
+              return (
+                  <div className="flex-1 flex flex-col bg-gray-50 overflow-hidden items-center justify-center">
+                      <div className="bg-white p-8 rounded-lg shadow-sm border border-gray-100 text-center max-w-md">
+                          <div className="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center mx-auto mb-4 text-red-500">
+                              <ShieldAlert size={32} />
+                          </div>
+                          <h2 className="text-xl font-bold text-gray-800 mb-2">无访问权限</h2>
+                          <p className="text-sm text-gray-500 mb-6">
+                              抱歉，你当前不在该项目的项目组中。<br/>如需访问，请联系管理员分配 <b>{projectGroups.find(g=>g.id===project.groupId)?.name}</b> 的权限。
+                          </p>
+                          <button onClick={onBack} className="bg-orange-500 hover:bg-orange-600 text-white px-6 py-2.5 rounded-md text-sm transition-colors shadow-sm">
+                              返回系统列表
+                          </button>
+                      </div>
+                  </div>
+              );
+          }
+
+          const canEditGroup = ['VP', '数字主管', '可视化专员'].includes(currentUser.role);
+
+          const handleSaveName = () => {
+            if (editName.trim()) {
+              onUpdateProject(project.id, { name: editName.trim() });
+            } else {
+              setEditName(project.name);
+            }
+            setIsEditingName(false);
+          };
+
+          const handleCoverUpload = (e) => {
+            const file = e.target.files[0];
+            if (file) {
+              const imageUrl = URL.createObjectURL(file);
+              onUpdateProject(project.id, { coverImage: imageUrl });
+            }
+          };
+
+          const handleModelUpload = (e) => {
+            const file = e.target.files[0];
+            if (file) {
+              setModels([...models, { id: Date.now(), name: file.name, type: '子模型' }]);
+            }
+          };
+
+          return (
+            <div className="flex-1 flex flex-col bg-gray-50 overflow-hidden">
+               <div className="h-12 bg-white flex items-center px-6 shrink-0 border-b border-gray-100">
+                  <button onClick={onBack} className="flex items-center text-gray-600 hover:text-gray-900 text-sm">
+                      <ChevronLeft size={16} /> 返回项目列表
+                  </button>
+               </div>
+               
+               <div className="flex-1 overflow-auto p-6 flex flex-col gap-6">
+                  <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-100 flex gap-6">
+                      <div 
+                        className={`relative w-64 h-36 rounded-md overflow-hidden ${project?.coverImage ? 'bg-black' : project?.imageColor || 'bg-orange-100'} flex items-center justify-center shrink-0 group cursor-pointer`}
+                        onClick={() => coverInputRef.current?.click()}
+                      >
+                          {project?.coverImage ? (
+                            <img src={project.coverImage} alt="cover" className="w-full h-full object-cover" />
+                          ) : (
+                            <Box size={48} className="text-orange-500 opacity-50" />
+                          )}
+                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white text-sm font-medium">
+                              <ImageIcon size={16} className="mr-1" /> 更换封面
+                          </div>
+                          <input type="file" className="hidden" ref={coverInputRef} accept="image/*" onChange={handleCoverUpload} />
+                      </div>
+
+                      <div className="flex-1 flex flex-col justify-between py-1">
+                          <div>
+                              <div className="flex justify-between items-start">
+                                  <div className="flex items-center gap-2 mb-2">
+                                    {isEditingName ? (
+                                       <input 
+                                          type="text" 
+                                          value={editName}
+                                          onChange={(e) => setEditName(e.target.value)}
+                                          onBlur={handleSaveName}
+                                          onKeyDown={(e) => e.key === 'Enter' && handleSaveName()}
+                                          autoFocus
+                                          className="text-2xl font-bold text-gray-800 border-b-2 border-orange-500 focus:outline-none bg-gray-50 px-1 py-0.5 rounded"
+                                       />
+                                    ) : (
+                                       <>
+                                         <h2 className="text-2xl font-bold text-gray-800">{project?.name}</h2>
+                                         <button onClick={() => setIsEditingName(true)} className="text-gray-400 hover:text-orange-500 transition-colors">
+                                           <Edit3 size={18} />
+                                         </button>
+                                       </>
+                                    )}
+                                  </div>
+
+                                  {canEditGroup ? (
+                                     <div className="flex items-center gap-2 text-sm bg-gray-50 px-3 py-1.5 rounded border border-gray-200">
+                                        <span className="text-gray-500">归属项目组:</span>
+                                        <select 
+                                           value={project?.groupId || ''}
+                                           onChange={(e) => onUpdateProject(project.id, { groupId: e.target.value || null })}
+                                           className="bg-transparent font-medium text-orange-600 focus:outline-none cursor-pointer"
+                                        >
+                                           <option value="">(未分配)</option>
+                                           {projectGroups.map(g => (
+                                              <option key={g.id} value={g.id}>{g.name}</option>
+                                           ))}
+                                        </select>
+                                     </div>
+                                  ) : (
+                                     <div className="text-sm bg-gray-50 px-3 py-1.5 rounded border border-gray-200 text-gray-600">
+                                         归属项目组: <span className="font-medium">{projectGroups.find(g=>g.id===project?.groupId)?.name || '(未分配)'}</span>
+                                     </div>
+                                  )}
+                              </div>
+
+                              <p className="text-sm text-gray-500 mb-4 mt-2">创建于 {project?.updated || '2026-01-14 15:59'}</p>
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-gray-100 text-gray-600 text-xs">
+                                  <div className="w-1.5 h-1.5 rounded-full bg-gray-400"></div> 已停止
+                              </span>
+                          </div>
+                          <div className="flex justify-end gap-3 mt-auto">
+                              <button className="bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded text-sm flex items-center gap-1 transition-colors">
+                                  <Play size={16} className="fill-current" /> 启动项目
+                              </button>
+                          </div>
+                      </div>
+                  </div>
+
+                  <div className="bg-white rounded-lg shadow-sm border border-gray-100 p-6">
+                      <div className="flex justify-between items-center mb-6">
+                        <div>
+                          <h3 className="text-base font-bold text-gray-800 mb-1">模型资源</h3>
+                          <p className="text-xs text-gray-400">管理项目关联的 3D 模型文件 (支持 .vpb, .blend 等)</p>
+                        </div>
+                        <button 
+                          onClick={() => fileInputRef.current?.click()}
+                          className="bg-gray-800 hover:bg-gray-900 text-white px-4 py-2 rounded text-sm flex items-center gap-2 transition-colors shadow-sm"
+                        >
+                          <UploadCloud size={16}/> 上传模型文件
+                        </button>
+                        <input type="file" className="hidden" ref={fileInputRef} onChange={handleModelUpload} />
+                      </div>
+                      
+                      <div className="border border-gray-200 rounded-lg overflow-hidden">
+                          {models.map((model, index) => (
+                            <div key={model.id} className={`p-4 flex justify-between items-center ${index !== models.length - 1 ? 'border-b border-gray-100' : ''} hover:bg-gray-50`}>
+                               <div className="flex items-center gap-3">
+                                  <div className={`p-2 rounded ${model.type === '主模型' ? 'bg-orange-100 text-orange-500' : 'bg-gray-100 text-gray-500'}`}>
+                                     <Box size={20} />
+                                  </div>
+                                  <div>
+                                    <div className="font-medium text-gray-800 text-sm flex items-center gap-2">
+                                       {model.name}
+                                       {model.type === '主模型' && <span className="text-[10px] bg-orange-500 text-white px-1.5 py-0.5 rounded">主模型</span>}
+                                    </div>
+                                    <div className="text-xs text-gray-400 mt-0.5">上传于 刚刚</div>
+                                  </div>
+                               </div>
+                               <div className="flex gap-2">
+                                  <button className="text-gray-400 hover:text-red-500 p-1.5 rounded hover:bg-red-50 transition-colors"><Trash2 size={16}/></button>
+                               </div>
+                            </div>
+                          ))}
+                          {models.length === 0 && (
+                                <div className="p-8 text-center text-sm text-gray-400 flex flex-col items-center">
+                                   <FolderOpen size={32} className="mb-2 text-gray-300" />
+                                   暂无模型文件，请点击右上角上传
+                                </div>
+                          )}
+                      </div>
+                  </div>
+               </div>
+            </div>
+          );
+        };
+
+        const ViewUserManagement = ({ onBack, users, setUsers, projectGroups, setProjectGroups, projects }) => {
+          const [activeTab, setActiveTab] = useState('users'); 
+          
+          const [newUserName, setNewUserName] = useState('');
+          const [newUserAccount, setNewUserAccount] = useState('');
+          const [newUserPassword, setNewUserPassword] = useState('');
+          const [newUserRole, setNewUserRole] = useState('');
+          const [selectedGroups, setSelectedGroups] = useState([]);
+          const [newGroupSearchQuery, setNewGroupSearchQuery] = useState('');
+
+          const [editingGroupId, setEditingGroupId] = useState(null);
+          const [editingGroupName, setEditingGroupName] = useState('');
+          const [newGroupName, setNewGroupName] = useState('');
+          const [groupError, setGroupError] = useState('');
+
+          const [editingUser, setEditingUser] = useState(null);
+          const [groupSearchQuery, setGroupSearchQuery] = useState('');
+          const [userSearchQuery, setUserSearchQuery] = useState('');
+
+          const [resetPasswordUser, setResetPasswordUser] = useState(null);
+          const [newPasswordInput, setNewPasswordInput] = useState('');
+
+          const handleAddUser = () => {
+            if (!newUserName || !newUserRole) return;
+            const newUser = {
+              id: Date.now().toString(),
+              name: newUserName,
+              username: newUserAccount || newUserName,
+              password: newUserPassword,
+              role: newUserRole,
+              roleColor: 'text-gray-600 bg-gray-100 border-gray-200',
+              groups: selectedGroups
+            };
+            setUsers([...users, newUser]);
+            setNewUserName(''); setNewUserAccount(''); setNewUserPassword(''); setNewUserRole(''); setSelectedGroups([]); setNewGroupSearchQuery('');
+          };
+
+          const handleAddGroup = () => {
+            if (!newGroupName.trim()) return;
+            setProjectGroups([...projectGroups, { id: Date.now().toString(), name: newGroupName.trim() }]);
+            setNewGroupName('');
+          };
+
+          const handleUpdateGroup = (id) => {
+            if (!editingGroupName.trim()) return;
+            setProjectGroups(projectGroups.map(g => g.id === id ? { ...g, name: editingGroupName.trim() } : g));
+            setEditingGroupId(null);
+          };
+
+          const handleDeleteGroup = (id) => {
+            const hasProjects = projects.some(p => p.groupId === id);
+            if (hasProjects) {
+                setGroupError('无法删除：该项目组下仍有关联的项目。请先在项目中移除或转移。');
+                setTimeout(() => setGroupError(''), 3000); 
+                return;
+            }
+            setProjectGroups(projectGroups.filter(g => g.id !== id));
+            setUsers(users.map(u => ({ ...u, groups: u.groups.filter(gid => gid !== id) })));
+          };
+
+          const handleDeleteUser = (id) => setUsers(users.filter(u => u.id !== id));
+
+          const handleSaveUserEdit = () => {
+              if (!editingUser) return;
+              setUsers(users.map(u => u.id === editingUser.id ? editingUser : u));
+              setEditingUser(null);
+          };
+
+          const handleSaveNewPassword = () => {
+              if (!resetPasswordUser || !newPasswordInput.trim()) return;
+              setUsers(users.map(u => u.id === resetPasswordUser.id ? { ...u, password: newPasswordInput.trim() } : u));
+              setResetPasswordUser(null);
+              setNewPasswordInput('');
+          };
+
+          return (
+            <div className="flex-1 flex flex-col bg-gray-50 h-full overflow-hidden">
+               <div className="h-14 flex justify-between items-center px-6 shrink-0 border-b border-gray-200 bg-white">
+                  <button onClick={onBack} className="flex items-center text-gray-600 hover:text-gray-900 text-sm border border-gray-200 px-3 py-1.5 rounded-md hover:bg-gray-50">
+                      <ChevronLeft size={16} /> 返回系统
+                  </button>
+                  <div className="flex gap-2">
+                     <button onClick={() => setActiveTab('users')} className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${activeTab === 'users' ? 'bg-orange-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>成员管理</button>
+                     <button onClick={() => setActiveTab('groups')} className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${activeTab === 'groups' ? 'bg-orange-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>项目组管理</button>
+                  </div>
+               </div>
+               
+               <div className="flex-1 overflow-auto p-6 flex gap-6">
+                  {activeTab === 'users' ? (
+                    <>
+                      <div className="w-[320px] bg-white rounded-lg shadow-sm border border-gray-100 p-6 shrink-0 h-fit">
+                          <h2 className="text-lg font-bold text-gray-800 mb-2">添加新用户</h2>
+                          <div className="space-y-4 mt-6">
+                              <div>
+                                  <label className="block text-sm font-medium text-gray-700 mb-1"><span className="text-red-500">*</span> 真实姓名</label>
+                                  <input type="text" value={newUserName} onChange={e => setNewUserName(e.target.value)} placeholder="输入真实姓名" className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500" />
+                              </div>
+                              <div>
+                                  <label className="block text-sm font-medium text-gray-700 mb-1">系统账号</label>
+                                  <input type="text" value={newUserAccount} onChange={e => setNewUserAccount(e.target.value)} placeholder="设置账号 (默认同姓名)" className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500" />
+                              </div>
+                              <div>
+                                  <label className="block text-sm font-medium text-gray-700 mb-1"><span className="text-red-500">*</span> 登录密码</label>
+                                  <div className="relative">
+                                      <Lock size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                                      <input type="password" value={newUserPassword} onChange={e => setNewUserPassword(e.target.value)} placeholder="设置初始密码" className="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500" />
+                                  </div>
+                              </div>
+                              <div>
+                                  <label className="block text-sm font-medium text-gray-700 mb-1"><span className="text-red-500">*</span> 角色权限</label>
+                                  <select value={newUserRole} onChange={e => setNewUserRole(e.target.value)} className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:border-orange-500 bg-white">
+                                      <option value="">选择角色...</option>
+                                      {ROLES.map(role => <option key={role} value={role}>{role}</option>)}
+                                  </select>
+                              </div>
+                              
+                              <div>
+                                  <label className="block text-sm font-medium text-gray-700 mb-1 flex justify-between">
+                                     <span>分配项目组 (多选)</span>
+                                     <span className="text-xs text-orange-500 bg-orange-50 px-1 rounded border border-orange-100">已选 {selectedGroups.length}</span>
+                                  </label>
+                                  <div className="border border-gray-200 rounded-md overflow-hidden bg-gray-50 flex flex-col">
+                                      <div className="p-1.5 border-b border-gray-100 bg-white flex items-center gap-2">
+                                          <Search size={12} className="text-gray-400 ml-1"/>
+                                          <input 
+                                              type="text" 
+                                              placeholder="搜索项目组快速勾选..." 
+                                              value={newGroupSearchQuery}
+                                              onChange={(e) => setNewGroupSearchQuery(e.target.value)}
+                                              className="bg-transparent text-xs w-full focus:outline-none py-1"
+                                          />
+                                      </div>
+                                      <div className="max-h-32 overflow-y-auto p-1.5 space-y-0.5">
+                                          {projectGroups
+                                              .filter(g => g.name.toLowerCase().includes(newGroupSearchQuery.toLowerCase()))
+                                              .map(group => (
+                                             <label key={group.id} className="flex items-center gap-2 text-sm text-gray-700 hover:bg-gray-100 px-2 py-1.5 rounded cursor-pointer transition-colors">
+                                                <input 
+                                                  type="checkbox" 
+                                                  checked={selectedGroups.includes(group.id)}
+                                                  onChange={(e) => {
+                                                    if (e.target.checked) setSelectedGroups([...selectedGroups, group.id]);
+                                                    else setSelectedGroups(selectedGroups.filter(id => id !== group.id));
+                                                  }}
+                                                  className="rounded text-orange-500 focus:ring-orange-500" 
+                                                />
+                                                <span className="truncate">{group.name}</span>
+                                             </label>
+                                          ))}
+                                          {projectGroups.length > 0 && projectGroups.filter(g => g.name.toLowerCase().includes(newGroupSearchQuery.toLowerCase())).length === 0 && (
+                                              <div className="text-center text-[10px] text-gray-400 py-3">无匹配的项目组</div>
+                                          )}
+                                      </div>
+                                  </div>
+                              </div>
+                              <button onClick={handleAddUser} className="w-full mt-2 bg-gray-800 hover:bg-gray-900 text-white py-2.5 rounded-md text-sm font-medium transition-colors flex justify-center items-center gap-1 shadow-sm">
+                                  <Plus size={16} /> 创建用户
+                              </button>
+                          </div>
+                      </div>
+
+                      <div className="flex-1 bg-white rounded-lg shadow-sm border border-gray-100 flex flex-col h-fit">
+                          <div className="p-5 border-b border-gray-100 flex justify-between items-center">
+                              <h2 className="text-base font-bold text-gray-800">团队成员列表</h2>
+                              <div className="relative">
+                                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                                  <input type="text" placeholder="检索姓名或账号..." value={userSearchQuery} onChange={e => setUserSearchQuery(e.target.value)} className="pl-8 pr-3 py-1.5 border border-gray-200 rounded-md text-sm w-56 bg-gray-50 focus:outline-none focus:bg-white focus:border-orange-500 transition-colors" />
+                              </div>
+                          </div>
+                          <table className="w-full text-left border-collapse">
+                              <thead>
+                                  <tr className="bg-gray-50/50 border-b border-gray-100">
+                                      <th className="py-3 px-4 text-xs font-medium text-gray-500 w-1/4">用户信息</th>
+                                      <th className="py-3 px-4 text-xs font-medium text-gray-500 w-1/5">角色</th>
+                                      <th className="py-3 px-4 text-xs font-medium text-gray-500 w-1/3">所属项目组</th>
+                                      <th className="py-3 px-4 text-xs font-medium text-gray-500">操作</th>
+                                  </tr>
+                              </thead>
+                              <tbody className="divide-y divide-gray-100">
+                                  {users
+                                      .filter(u => u.name.toLowerCase().includes(userSearchQuery.toLowerCase()) || u.username.toLowerCase().includes(userSearchQuery.toLowerCase()))
+                                      .map((user) => (
+                                      <tr key={user.id} className="hover:bg-gray-50/30">
+                                          <td className="py-3 px-4">
+                                              <div className="flex items-center gap-3">
+                                                  <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold bg-orange-400`}>
+                                                      {user.name.charAt(0).toUpperCase()}
+                                                  </div>
+                                                  <div>
+                                                      <div className="text-sm font-medium text-gray-800">{user.name}</div>
+                                                      <div className="text-xs text-gray-400">@{user.username}</div>
+                                                  </div>
+                                              </div>
+                                          </td>
+                                          <td className="py-3 px-4">
+                                              <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded border text-[11px] ${user.roleColor}`}>
+                                                  {user.role}
+                                              </span>
+                                          </td>
+                                          <td className="py-3 px-4">
+                                              <div className="flex flex-wrap gap-1">
+                                                  {user.groups.map(gid => {
+                                                      const group = projectGroups.find(g => g.id === gid);
+                                                      return group ? (
+                                                        <span key={gid} className="bg-gray-100 border border-gray-200 text-gray-600 text-[10px] px-1.5 py-0.5 rounded">
+                                                          {group.name}
+                                                        </span>
+                                                      ) : null;
+                                                  })}
+                                                  {user.groups.length === 0 && <span className="text-xs text-gray-400">-</span>}
+                                              </div>
+                                          </td>
+                                          <td className="py-3 px-4 text-gray-400">
+                                              <button onClick={() => { setResetPasswordUser(user); setNewPasswordInput(''); }} className="hover:text-orange-500 mr-3 transition-colors" title="修改密码"><Key size={16} /></button>
+                                              <button onClick={() => setEditingUser({...user})} className="hover:text-blue-500 mr-3 transition-colors" title="编辑信息"><Edit3 size={16} /></button>
+                                              <button onClick={() => handleDeleteUser(user.id)} className="hover:text-red-500 transition-colors" title="删除用户"><Trash2 size={16} /></button>
+                                          </td>
+                                      </tr>
+                                  ))}
+                              </tbody>
+                          </table>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="w-full max-w-4xl mx-auto bg-white rounded-lg shadow-sm border border-gray-100 flex flex-col h-fit relative">
+                        {groupError && (
+                            <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-red-500 text-white px-4 py-2 rounded shadow-lg text-sm z-50 flex items-center gap-2 animate-in fade-in slide-in-from-top-2">
+                                <X size={16} className="cursor-pointer" onClick={() => setGroupError('')}/> {groupError}
+                            </div>
+                        )}
+                        <div className="p-6 border-b border-gray-100 bg-gray-50/50 flex justify-between items-center">
+                            <div>
+                                <h2 className="text-base font-bold text-gray-800 mb-1">项目组管理</h2>
+                                <p className="text-xs text-gray-500">创建并管理系统内的各个项目组，项目和人员需绑定项目组进行权限隔离。</p>
+                            </div>
+                        </div>
+                        
+                        <div className="p-6 border-b border-gray-100">
+                           <div className="flex gap-3">
+                              <input 
+                                 type="text" 
+                                 value={newGroupName}
+                                 onChange={e => setNewGroupName(e.target.value)}
+                                 placeholder="输入新项目组名称..." 
+                                 className="flex-1 px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:border-orange-500"
+                              />
+                              <button onClick={handleAddGroup} className="bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-md text-sm flex items-center gap-2">
+                                 <Plus size={16}/> 新建项目组
+                              </button>
+                           </div>
+                        </div>
+
+                        <ul className="divide-y divide-gray-100">
+                           {projectGroups.map(group => (
+                             <li key={group.id} className="p-4 px-6 flex justify-between items-center hover:bg-gray-50 transition-colors">
+                                {editingGroupId === group.id ? (
+                                   <div className="flex items-center gap-3 flex-1 mr-6">
+                                      <input 
+                                        type="text"
+                                        value={editingGroupName}
+                                        onChange={e => setEditingGroupName(e.target.value)}
+                                        className="px-3 py-1.5 border border-orange-500 rounded text-sm flex-1 focus:outline-none"
+                                        autoFocus
+                                      />
+                                      <button onClick={() => handleUpdateGroup(group.id)} className="text-green-600 p-1.5 hover:bg-green-50 rounded"><Check size={18}/></button>
+                                      <button onClick={() => setEditingGroupId(null)} className="text-gray-400 p-1.5 hover:bg-gray-100 rounded"><X size={18}/></button>
+                                   </div>
+                                ) : (
+                                   <>
+                                     <div className="flex items-center gap-3">
+                                       <div className="w-8 h-8 rounded bg-orange-50 flex items-center justify-center text-orange-500">
+                                          <FolderOpen size={16}/>
+                                       </div>
+                                       <span className="font-medium text-gray-800">{group.name}</span>
+                                       <span className="text-xs text-gray-400 ml-2 border border-gray-200 px-1.5 rounded-full">
+                                          {users.filter(u => u.groups.includes(group.id)).length} 名成员
+                                       </span>
+                                     </div>
+                                     <div className="flex gap-2">
+                                        <button onClick={() => { setEditingGroupId(group.id); setEditingGroupName(group.name); }} className="text-gray-400 hover:text-blue-500 p-2 hover:bg-blue-50 rounded transition-colors"><Edit3 size={16}/></button>
+                                        <button onClick={() => handleDeleteGroup(group.id)} className="text-gray-400 hover:text-red-500 p-2 hover:bg-red-50 rounded transition-colors"><Trash2 size={16}/></button>
+                                     </div>
+                                   </>
+                                )}
+                             </li>
+                           ))}
+                        </ul>
+                    </div>
+                  )}
+               </div>
+
+               {editingUser && (
+                <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center transition-opacity">
+                  <div className="bg-white rounded-lg w-[500px] shadow-xl overflow-hidden flex flex-col">
+                    <div className="flex justify-between items-center p-4 border-b border-gray-100">
+                      <h3 className="font-bold text-gray-800">编辑用户与权限</h3>
+                      <button onClick={() => setEditingUser(null)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
+                    </div>
+                    
+                    <div className="p-6 flex flex-col gap-5">
+                      <div className="flex gap-4">
+                          <div className="flex-1">
+                              <label className="block text-sm text-gray-700 mb-1.5">真实姓名</label>
+                              <input type="text" value={editingUser.name} onChange={e => setEditingUser({...editingUser, name: e.target.value})} className="w-full px-3 py-2 border border-gray-200 rounded text-sm focus:outline-none focus:border-orange-500" />
+                          </div>
+                          <div className="flex-1">
+                              <label className="block text-sm text-gray-700 mb-1.5">角色权限</label>
+                              <select value={editingUser.role} onChange={e => setEditingUser({...editingUser, role: e.target.value})} className="w-full px-3 py-2 border border-gray-200 rounded text-sm focus:outline-none focus:border-orange-500 bg-white">
+                                  {ROLES.map(role => <option key={role} value={role}>{role}</option>)}
+                              </select>
+                          </div>
+                      </div>
+                      
+                      <div>
+                        <label className="block text-sm text-gray-700 mb-1.5 flex justify-between">
+                            <span>分配项目组</span>
+                            <span className="text-xs text-orange-500 bg-orange-50 px-1.5 py-0.5 rounded border border-orange-100">已分配 {editingUser.groups.length} 个</span>
+                        </label>
+                        <div className="border border-gray-200 rounded-md overflow-hidden flex flex-col">
+                            <div className="p-2 border-b border-gray-100 bg-gray-50 flex items-center gap-2">
+                                <Search size={14} className="text-gray-400"/>
+                                <input type="text" placeholder="搜索项目组快速分配..." value={groupSearchQuery} onChange={(e) => setGroupSearchQuery(e.target.value)} className="bg-transparent text-sm w-full focus:outline-none"/>
+                            </div>
+                            <div className="max-h-48 overflow-y-auto p-2 space-y-1">
+                                {projectGroups.filter(g => g.name.toLowerCase().includes(groupSearchQuery.toLowerCase())).map(group => {
+                                    const isSelected = editingUser.groups.includes(group.id);
+                                    return (
+                                        <label key={group.id} className={`flex items-center gap-2 text-sm px-2 py-2 rounded cursor-pointer transition-colors ${isSelected ? 'bg-orange-50 text-orange-700 font-medium' : 'text-gray-700 hover:bg-gray-100'}`}>
+                                            <input type="checkbox" checked={isSelected} onChange={(e) => {
+                                                    const newGroups = e.target.checked 
+                                                        ? [...editingUser.groups, group.id]
+                                                        : editingUser.groups.filter(id => id !== group.id);
+                                                    setEditingUser({...editingUser, groups: newGroups});
+                                                }} className="rounded text-orange-500 focus:ring-orange-500 w-4 h-4" />
+                                            {group.name}
+                                        </label>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="p-4 border-t border-gray-100 flex justify-end gap-3 bg-gray-50/50">
+                      <button onClick={() => setEditingUser(null)} className="px-4 py-2 text-sm text-gray-600 bg-white border border-gray-200 rounded hover:bg-gray-50 transition-colors">取消</button>
+                      <button onClick={handleSaveUserEdit} className="px-4 py-2 text-sm text-white bg-orange-500 rounded hover:bg-orange-600 shadow-sm transition-colors">保存修改</button>
+                    </div>
+                  </div>
+                </div>
+               )}
+
+               {resetPasswordUser && (
+                <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center transition-opacity">
+                  <div className="bg-white rounded-lg w-[400px] shadow-xl overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-200">
+                    <div className="flex justify-between items-center p-4 border-b border-gray-100">
+                      <h3 className="font-bold text-gray-800">修改登录密码</h3>
+                      <button onClick={() => setResetPasswordUser(null)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
+                    </div>
+                    <div className="p-6 flex flex-col gap-4">
+                      <div className="text-sm text-gray-600 bg-gray-50 p-3 rounded-md border border-gray-100 flex items-center gap-3 mb-2">
+                         <div className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold bg-orange-400">
+                             {resetPasswordUser.name.charAt(0).toUpperCase()}
+                         </div>
+                         <div>
+                            <div className="font-medium text-gray-800">正在为 <span className="text-orange-500">{resetPasswordUser.name}</span> 修改密码</div>
+                            <div className="text-xs text-gray-400">账号: {resetPasswordUser.username}</div>
+                         </div>
+                      </div>
+                      <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1"><span className="text-red-500">*</span> 新密码</label>
+                          <div className="relative">
+                              <Lock size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                              <input type="password" value={newPasswordInput} onChange={e => setNewPasswordInput(e.target.value)} placeholder="请输入新密码" autoFocus className="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500" />
+                          </div>
+                      </div>
+                    </div>
+                    <div className="p-4 border-t border-gray-100 flex justify-end gap-3 bg-gray-50/50">
+                      <button onClick={() => setResetPasswordUser(null)} className="px-4 py-2 text-sm text-gray-600 bg-white border border-gray-200 rounded hover:bg-gray-50 transition-colors">取消</button>
+                      <button onClick={handleSaveNewPassword} disabled={!newPasswordInput.trim()} className={`px-4 py-2 text-sm text-white rounded shadow-sm transition-colors ${newPasswordInput.trim() ? 'bg-orange-500 hover:bg-orange-600' : 'bg-orange-300 cursor-not-allowed'}`}>保存新密码</button>
+                    </div>
+                  </div>
+                </div>
+               )}
+            </div>
+          );
+        };
+
+        const ModalNewProject = ({ isOpen, onClose, onCreate, allowedGroups }) => {
+          const [name, setName] = useState('');
+          const [groupId, setGroupId] = useState('');
+          const [coverImage, setCoverImage] = useState(null);
+          
+          const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+          const [groupSearchQuery, setGroupSearchQuery] = useState('');
+          
+          const fileInputRef = useRef(null);
+
+          useEffect(() => {
+            if (isOpen) {
+              setName('');
+              setGroupId('');
+              setCoverImage(null);
+              setIsDropdownOpen(false);
+              setGroupSearchQuery('');
+            }
+          }, [isOpen]);
+
+          if (!isOpen) return null;
+
+          const handleImageUpload = (e) => {
+            const file = e.target.files[0];
+            if (file) {
+              setCoverImage(URL.createObjectURL(file));
+            }
+          };
+
+          const handleSubmit = () => {
+            if (!name.trim() || !groupId) return;
+            onCreate({ name: name.trim(), groupId: groupId, coverImage });
+            onClose();
+          };
+
+          const selectedGroup = allowedGroups.find(g => g.id === groupId);
+
+          return (
+            <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center transition-opacity">
+              <div className="bg-white rounded-lg w-[500px] shadow-xl overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-200">
+                <div className="flex justify-between items-center p-4 border-b border-gray-100">
+                  <h3 className="font-bold text-gray-800">新建项目</h3>
+                  <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
+                </div>
+                
+                <div className="p-6 flex flex-col gap-5">
+                  <div>
+                    <label className="block text-sm text-gray-700 mb-1.5"><span className="text-red-500">*</span> 项目名称</label>
+                    <input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="请输入项目名称" className="w-full px-3 py-2 border border-gray-200 rounded text-sm focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500"/>
+                  </div>
+
+                  <div>
+                     <label className="block text-sm text-gray-700 mb-1.5"><span className="text-red-500">*</span> 所属项目组</label>
+                     <div className="relative">
+                         <div 
+                           className={`w-full px-3 py-2 border ${isDropdownOpen ? 'border-orange-500 ring-1 ring-orange-500' : 'border-gray-200'} rounded text-sm bg-white flex justify-between items-center cursor-pointer`}
+                           onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+                         >
+                             <span className={selectedGroup ? 'text-gray-900' : 'text-gray-400'}>
+                                 {selectedGroup ? selectedGroup.name : '请搜索并选择分配的项目组...'}
+                             </span>
+                             <ChevronDown size={16} className={`text-gray-400 transition-transform ${isDropdownOpen ? 'rotate-180' : ''}`} />
+                         </div>
+                         
+                         {isDropdownOpen && (
+                             <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-md shadow-lg max-h-48 flex flex-col overflow-hidden">
+                                 <div className="p-2 border-b border-gray-100 bg-gray-50 flex items-center gap-2">
+                                     <Search size={14} className="text-gray-400" />
+                                     <input 
+                                       type="text" 
+                                       placeholder="检索我的项目组..." 
+                                       value={groupSearchQuery}
+                                       onChange={e => setGroupSearchQuery(e.target.value)}
+                                       onClick={e => e.stopPropagation()} 
+                                       className="w-full text-sm bg-transparent outline-none py-1"
+                                       autoFocus
+                                     />
+                                 </div>
+                                 <div className="overflow-y-auto">
+                                     {allowedGroups.filter(g => g.name.toLowerCase().includes(groupSearchQuery.toLowerCase())).map(g => (
+                                         <div 
+                                            key={g.id} 
+                                            className={`px-3 py-2 text-sm cursor-pointer hover:bg-orange-50 transition-colors ${groupId === g.id ? 'bg-orange-50 text-orange-600 font-medium' : 'text-gray-700'}`}
+                                            onClick={() => { setGroupId(g.id); setIsDropdownOpen(false); setGroupSearchQuery(''); }}
+                                         >
+                                             {g.name}
+                                         </div>
+                                     ))}
+                                     {allowedGroups.length > 0 && allowedGroups.filter(g => g.name.toLowerCase().includes(groupSearchQuery.toLowerCase())).length === 0 && (
+                                         <div className="px-3 py-4 text-center text-xs text-gray-400">无匹配的项目组</div>
+                                     )}
+                                     {allowedGroups.length === 0 && (
+                                         <div className="px-3 py-4 text-center text-xs text-red-400">你当前未被分配到任何项目组，无法创建项目</div>
+                                     )}
+                                 </div>
+                             </div>
+                         )}
+                     </div>
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm text-gray-700 mb-1.5">标签</label>
+                    <button className="text-gray-500 border border-dashed border-gray-300 px-3 py-1.5 rounded text-sm flex items-center gap-1 hover:border-orange-500 hover:text-orange-500 transition-colors">
+                      <Plus size={14} /> 添加标签
+                    </button>
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm text-gray-700 mb-1.5">封面图</label>
+                    <div onClick={() => fileInputRef.current?.click()} className="w-24 h-24 border border-dashed border-gray-300 rounded flex flex-col items-center justify-center text-gray-400 hover:border-orange-500 hover:text-orange-500 transition-colors cursor-pointer bg-gray-50/50 overflow-hidden relative">
+                      {coverImage ? <img src={coverImage} alt="Cover preview" className="w-full h-full object-cover" /> : <><Plus size={24} className="mb-1" strokeWidth={1.5} /><span className="text-xs">点击上传</span></>}
+                    </div>
+                    <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleImageUpload} />
+                  </div>
+                </div>
+
+                <div className="p-4 border-t border-gray-100 flex justify-end gap-3 bg-gray-50/50">
+                  <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 bg-white border border-gray-200 rounded hover:bg-gray-50 transition-colors">取消</button>
+                  <button 
+                     onClick={handleSubmit} 
+                     disabled={!name.trim() || !groupId} 
+                     className={`px-4 py-2 text-sm text-white rounded shadow-sm transition-colors ${name.trim() && groupId ? 'bg-orange-500 hover:bg-orange-600' : 'bg-orange-300 cursor-not-allowed'}`}
+                  >
+                    创建项目
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        };
+
+        function App() {
+          const [currentUser, setCurrentUser] = useState(null); 
+          
+          const [currentPage, setCurrentPage] = useState('xr-platform');
+          const [isSidebarExpanded, setIsSidebarExpanded] = useState(false);
+          const [selectedProjectId, setSelectedProjectId] = useState(null);
+          const [isNewProjectModalOpen, setIsNewProjectModalOpen] = useState(false);
+
+          const [projectGroups, setProjectGroups] = useState(INITIAL_GROUPS);
+          const [projects, setProjects] = useState(INITIAL_PROJECTS);
+          const [users, setUsers] = useState(INITIAL_USERS);
+
+          if (!currentUser) {
+            return <ViewLogin onLogin={setCurrentUser} users={users} />;
+          }
+
+          const isSuperUser = ['VP', '数字主管', '可视化专员'].includes(currentUser.role);
+          const allowedGroups = isSuperUser ? projectGroups : projectGroups.filter(g => currentUser.groups.includes(g.id));
+          const allowedProjects = isSuperUser ? projects : projects.filter(p => p.groupId && currentUser.groups.includes(p.groupId));
+
+          const getTopNavTitle = () => {
+            switch (currentPage) {
+              case 'user-management': return '系统设置 / 成员与权限';
+              case 'render-farm': return 'MI Render Farm';
+              default: return 'MI XR Platform';
+            }
+          };
+
+          const handleUpdateProject = (projectId, updates) => {
+            setProjects(projects.map(p => p.id === projectId ? { ...p, ...updates } : p));
+          };
+
+          const handleCreateProject = (projectData) => {
+            const newProject = {
+              id: Date.now(),
+              name: projectData.name,
+              updated: '刚刚',
+              status: '',
+              imageColor: 'bg-orange-200', 
+              groupId: projectData.groupId,
+              coverImage: projectData.coverImage
+            };
+            setProjects([newProject, ...projects]);
+          };
+
+          const handleLogout = () => {
+            setCurrentUser(null);
+            setCurrentPage('xr-platform');
+          };
+
+          const renderMainContent = () => {
+            switch (currentPage) {
+              case 'user-management':
+                return (
+                  <ViewUserManagement 
+                    onBack={() => setCurrentPage('xr-platform')} 
+                    users={users} setUsers={setUsers}
+                    projectGroups={projectGroups} setProjectGroups={setProjectGroups}
+                    projects={projects}
+                  />
+                );
+              case 'project-detail':
+                const currentProject = projects.find(p => p.id === selectedProjectId);
+                return (
+                  <ViewProjectDetail 
+                     project={currentProject} 
+                     onBack={() => setCurrentPage('xr-platform')} 
+                     onUpdateProject={handleUpdateProject}
+                     currentUser={currentUser} 
+                     projectGroups={projectGroups}
+                  />
+                );
+              case 'render-farm':
+                return <ViewRenderFarm />;
+              case 'xr-platform':
+              default:
+                return (
+                  <ViewXRPlatform 
+                    projects={allowedProjects}        
+                    projectGroups={allowedGroups}     
+                    openNewProject={() => setIsNewProjectModalOpen(true)}
+                    openProjectDetail={(project) => {
+                      setSelectedProjectId(project.id);
+                      setCurrentPage('project-detail');
+                    }}
+                  />
+                );
+            }
+          };
+
+          return (
+            <div className="flex h-screen w-full bg-white font-sans text-gray-900 overflow-hidden">
+              <Sidebar 
+                isExpanded={isSidebarExpanded} 
+                setIsExpanded={setIsSidebarExpanded}
+                currentPage={currentPage}
+                setCurrentPage={(page) => {
+                  setCurrentPage(page);
+                  if (page !== 'project-detail') setSelectedProjectId(null);
+                }}
+              />
+              
+              <div className="flex-1 flex flex-col min-w-0 bg-gray-50 relative">
+                <TopNav 
+                  title={getTopNavTitle()} 
+                  onUserManageClick={() => setCurrentPage('user-management')}
+                  currentUser={currentUser}
+                  onLogout={handleLogout}
+                />
+                {renderMainContent()}
+              </div>
+
+              <ModalNewProject 
+                 isOpen={isNewProjectModalOpen}
+                 onClose={() => setIsNewProjectModalOpen(false)}
+                 onCreate={handleCreateProject}
+                 allowedGroups={allowedGroups} 
+              />
+            </div>
+          );
+        }
+
+        // ==========================================
+        // 挂载 React 根节点
+        // ==========================================
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>

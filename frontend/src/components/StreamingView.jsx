@@ -332,6 +332,8 @@ if node.isValid():
     const handleEnterVR = async () => {
         updateStreamParam('displayMode', 'vr');
         sendPython('setDisplayMode(VR_DISPLAY_OPEN_VR)');
+        setShadowPlaneVisibility(true);
+        await removeSceneplateFloor();
     };
 
     const handleEnterXR = async () => {
