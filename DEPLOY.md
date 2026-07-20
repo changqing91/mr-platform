@@ -63,6 +63,21 @@ sudo ./svc.sh start
 触发条件：
 - 推送到 `main` 分支自动运行并执行 `mr-platform/deploy.sh`
 
+## 停止服务
+
+停止并移除全部容器（数据卷和挂载目录保留）：
+
+```bash
+chmod +x stop.sh
+./stop.sh
+```
+
+重新部署：
+
+```bash
+./deploy.sh && ./deploy-keycloak.sh
+```
+
 ## 分模块部署
 
 仅部署前端：
