@@ -23,6 +23,7 @@ import {
     DeleteNodeConfirmModal 
 } from './components/ConfirmationModals';
 import StreamPage from './pages/StreamPage';
+import MeetingPanel from './components/MeetingPanel';
 
 const MainApp = () => {
     // --- State: Auth (OIDC via Keycloak) ---
@@ -70,7 +71,7 @@ const MainApp = () => {
     const [bootingMachines, setBootingMachines] = useState(new Set()); // Set<machineId>
     const [pendingLaunches, setPendingLaunches] = useState({}); // { machineId: projectId } (Staged for batch launch)
     const [streamingMachineId, setStreamingMachineId] = useState(null);
-    const [collaborationMachineIds, setCollaborationMachineIds] = useState(new Set());
+    const [showMeetingPanel, setShowMeetingPanel] = useState(false);
     const [globalScriptConfig, setGlobalScriptConfig] = useState({});
 
     // --- State: Modals ---
@@ -224,13 +225,6 @@ const MainApp = () => {
             // Don't show error immediately on load to avoid spam if server is down initially
         }
     };
-
-    useEffect(() => {
-        setCollaborationMachineIds(prev => {
-            const next = new Set(Array.from(prev).filter(machineId => !!runningMachines[machineId]));
-            return next;
-        });
-    }, [runningMachines]);
 
     useEffect(() => {
         if (isLoggedIn) {
@@ -616,95 +610,6 @@ const MainApp = () => {
     };
 
 
-    const escapePythonString = (value) => String(value || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-
-    const joinCollaborationSession = async (machine, hostMachineId) => {
-        const hostMachine = machines.find(m => m.id === hostMachineId);
-        if (!hostMachine) return;
-
-        const isHost = machine.id === hostMachine.id;
-        const sessionLink = isHost ? 'localhost' : hostMachine.ip;
-        const userName = escapePythonString(isHost ? `Primary-${machine.name}` : `Secondary-${machine.name}`);
-        const roomName = 'MR-Room';
-        const color = isHost ? '0 1 0 1' : '1 0 0 1';
-        const pythonCode = `
-try:
-    vrSessionService.join('${sessionLink}', '${userName}', '${color}', '${roomName}', '')
-    vrSessionService.setAudioEnabled(True)
-    print('Joined collaboration room: ${roomName}')
-except Exception as e:
-    print('Join collaboration failed:', str(e))
-`;
-
-        await api.processes.executePython(machine.ip, machine.port || 8888, pythonCode);
-    };
-
-    const leaveCollaborationSession = async (machine) => {
-        const pythonCode = `
-try:
-    vrSessionService.leave()
-    print('Left collaboration room')
-except Exception as e:
-    print('Leave collaboration failed:', str(e))
-`;
-
-        await api.processes.executePython(machine.ip, machine.port || 8888, pythonCode);
-    };
-
-    const toggleMachineCollaboration = async (machine, checked) => {
-        if (!runningMachines[machine.id]) {
-            addNotification('仅运行中的节点可加入协作', 'warning');
-            return;
-        }
-
-        if (checked) {
-            const currentIds = Array.from(collaborationMachineIds);
-            const hostMachineId = currentIds.length > 0 ? currentIds[0] : machine.id;
-
-            try {
-                await joinCollaborationSession(machine, hostMachineId);
-                setCollaborationMachineIds(prev => new Set([...prev, machine.id]));
-                addNotification(`节点 ${machine.name} 已加入 VRED 协作`, 'success');
-            } catch (e) {
-                console.error('Failed to join VRED collaboration:', e);
-                addNotification(`节点 ${machine.name} 加入协作失败`, 'error');
-            }
-            return;
-        }
-
-        try {
-            await leaveCollaborationSession(machine);
-
-            const currentIds = Array.from(collaborationMachineIds);
-            const hostMachineId = currentIds[0];
-
-            setCollaborationMachineIds(prev => {
-                const next = new Set(prev);
-                next.delete(machine.id);
-                return next;
-            });
-
-            if (hostMachineId === machine.id) {
-                const remainingIds = currentIds.filter(id => id !== machine.id && !!runningMachines[id]);
-                if (remainingIds.length > 0) {
-                    const newHostId = remainingIds[0];
-                    await Promise.all(remainingIds.map(async (id) => {
-                        const target = machines.find(m => m.id === id);
-                        if (!target) return;
-                        await joinCollaborationSession(target, newHostId);
-                    }));
-                    addNotification('协作主节点已切换', 'info');
-                }
-            }
-
-            addNotification(`节点 ${machine.name} 已离开 VRED 协作`, 'info');
-        } catch (e) {
-            console.error('Failed to leave VRED collaboration:', e);
-            addNotification(`节点 ${machine.name} 离开协作失败`, 'error');
-        }
-    };
-
-
     // --- Handlers: Process Control ---
     const commitLaunches = async () => {
         const machineIds = Object.keys(pendingLaunches);
@@ -950,6 +855,7 @@ except Exception as e:
                     currentUser={currentUser}
                     handleLogout={handleLogout}
                     onAccountManagement={isManager ? () => setShowManagement(true) : null}
+                    onMeetingPanel={() => setShowMeetingPanel(true)}
                 />
 
                 <div className="flex-1 flex overflow-hidden bg-gray-50">
@@ -1032,8 +938,6 @@ except Exception as e:
                             setGlobalScriptConfig(config);
                             try { await api.processes.saveScriptConfig(config); } catch(e) { console.error('Failed to save script config', e); }
                         }}
-                        collaborationMachineIds={collaborationMachineIds}
-                        toggleMachineCollaboration={toggleMachineCollaboration}
                     />
                 </div>
             </div>
@@ -1042,6 +946,13 @@ except Exception as e:
             <input type="file" ref={replaceFileInputRef} onChange={handleReplaceFileSelect} className="hidden" />
 
             {/* Modals */}
+            {showMeetingPanel && (
+                <MeetingPanel
+                    onClose={() => setShowMeetingPanel(false)}
+                    addNotification={addNotification}
+                    currentUser={currentUser}
+                />
+            )}
             {showManagement && isManager && (
                 <ManagementPanel
                     onClose={() => { setShowManagement(false); loadProjectGroups(); }}

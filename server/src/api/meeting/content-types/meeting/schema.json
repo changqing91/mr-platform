@@ -1,0 +1,53 @@
+{
+  "kind": "collectionType",
+  "collectionName": "meetings",
+  "info": {
+    "singularName": "meeting",
+    "pluralName": "meetings",
+    "displayName": "Meeting",
+    "description": "VRED协作会议"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "title": {
+      "type": "string",
+      "required": true
+    },
+    "status": {
+      "type": "enumeration",
+      "enum": ["active", "ended"],
+      "default": "active"
+    },
+    "host": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::app-user.app-user"
+    },
+    "project": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::project.project"
+    },
+    "hostMachine": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::machine.machine"
+    },
+    "roomName": {
+      "type": "string",
+      "default": "Autodesk"
+    },
+    "endedAt": {
+      "type": "datetime"
+    },
+    "participants": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::meeting-participant.meeting-participant",
+      "mappedBy": "meeting"
+    }
+  }
+}

@@ -1,8 +1,8 @@
 import React from 'react';
-import { Box, LogOut, Users } from 'lucide-react';
+import { Box, LogOut, Users, Video } from 'lucide-react';
 import { THEME_COLOR } from '../constants';
 
-const Header = ({ currentUser, handleLogout, onAccountManagement }) => {
+const Header = ({ currentUser, handleLogout, onAccountManagement, onMeetingPanel }) => {
     const isManager = !!currentUser?.isManager;
     const displayName = currentUser?.displayName || currentUser?.username || '';
     const username = currentUser?.username || '';
@@ -40,6 +40,15 @@ const Header = ({ currentUser, handleLogout, onAccountManagement }) => {
                         title="管理面板（成员/项目组/角色）"
                     >
                         <Users size={18} />
+                    </button>
+                )}
+                {onMeetingPanel && (
+                    <button
+                        onClick={onMeetingPanel}
+                        className="p-2 text-gray-400 hover:bg-gray-100 rounded-lg transition-colors"
+                        title="会议"
+                    >
+                        <Video size={18} />
                     </button>
                 )}
                 <button onClick={handleLogout} className="p-2 text-gray-400 hover:bg-gray-100 rounded-lg transition-colors ml-1" title="退出登录">

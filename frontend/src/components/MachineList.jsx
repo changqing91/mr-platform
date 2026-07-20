@@ -31,8 +31,6 @@ const MachineList = ({
     setActiveMachineId,
     setShowMonitorWall,
     setIsBatchMode,
-    collaborationMachineIds,
-    toggleMachineCollaboration,
     globalScriptConfig,
     onScriptConfigChange,
 }) => {
@@ -240,8 +238,7 @@ const MachineList = ({
                      const project = pendingProject || currentProject;
                      
                      const isSelectedInBatch = isBatchMode && selectedBatchIds.has(machine.id);
-                     const isActiveInSingle = !isBatchMode && activeMachineId === machine.id;
-                     const isInCollaboration = collaborationMachineIds?.has(machine.id);
+                      const isActiveInSingle = !isBatchMode && activeMachineId === machine.id;
                      
                      let borderClass = 'border-white';
                      let ringClass = '';
@@ -348,38 +345,23 @@ const MachineList = ({
                                  </div>
 
                                  <div className="flex items-center justify-end gap-2 mt-2">
-                                     {!isBatchMode && (
-                                         <>
-                                             {isRunning && (
-                                                 <label 
-                                                    className="flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-100 transition-colors text-sm font-bold cursor-pointer whitespace-nowrap"
-                                                    onClick={(e) => e.stopPropagation()}
-                                                    title="加入VRED协作"
-                                                 >
-                                                    <input
-                                                        type="checkbox"
-                                                        className="w-4 h-4 accent-emerald-500"
-                                                        checked={!!isInCollaboration}
-                                                        onChange={(e) => toggleMachineCollaboration(machine, e.target.checked)}
-                                                    />
-                                                    协作
-                                                 </label>
-                                             )}
-                                             {isRunning ? (
-                                                 <>
-                                                     <button onClick={(e) => restartNode(machine, e)} className="p-2.5 bg-blue-50 text-blue-500 rounded-lg hover:bg-blue-100 transition-colors" title="重启项目"><RotateCcw size={18} /></button>
-                                                     <button onClick={(e) => { e.stopPropagation(); setKillCandidate(machine); }} className="p-2.5 bg-red-50 text-red-500 rounded-lg hover:bg-red-100 transition-colors" title="停止进程"><Square size={18} fill="currentColor" /></button>
-                                                 </>
-                                             ) : (
-                                                 !isBooting && (
-                                                     <>
-                                                         <button onClick={(e) => openEditModal(machine, e)} className="p-2.5 hover:bg-gray-100 text-gray-400 hover:text-gray-600 rounded-lg transition-colors" title="编辑"><Edit2 size={18} /></button>
-                                                         <button onClick={(e) => promptDeleteNode(machine, e)} className="p-2.5 hover:bg-red-50 text-gray-400 hover:text-red-500 rounded-lg transition-colors" title="删除"><Trash2 size={18} /></button>
-                                                     </>
-                                                 )
-                                             )}
-                                         </>
-                                     )}
+                                      {!isBatchMode && (
+                                          <>
+                                              {isRunning ? (
+                                                  <>
+                                                      <button onClick={(e) => restartNode(machine, e)} className="p-2.5 bg-blue-50 text-blue-500 rounded-lg hover:bg-blue-100 transition-colors" title="重启项目"><RotateCcw size={18} /></button>
+                                                      <button onClick={(e) => { e.stopPropagation(); setKillCandidate(machine); }} className="p-2.5 bg-red-50 text-red-500 rounded-lg hover:bg-red-100 transition-colors" title="停止进程"><Square size={18} fill="currentColor" /></button>
+                                                  </>
+                                              ) : (
+                                                  !isBooting && (
+                                                      <>
+                                                          <button onClick={(e) => openEditModal(machine, e)} className="p-2.5 hover:bg-gray-100 text-gray-400 hover:text-gray-600 rounded-lg transition-colors" title="编辑"><Edit2 size={18} /></button>
+                                                          <button onClick={(e) => promptDeleteNode(machine, e)} className="p-2.5 hover:bg-red-50 text-gray-400 hover:text-red-500 rounded-lg transition-colors" title="删除"><Trash2 size={18} /></button>
+                                                      </>
+                                                  )
+                                              )}
+                                          </>
+                                      )}
                                  </div>
                              </div>
                          </div>

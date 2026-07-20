@@ -1,0 +1,56 @@
+{
+  "kind": "collectionType",
+  "collectionName": "meeting_participants",
+  "info": {
+    "singularName": "meeting-participant",
+    "pluralName": "meeting-participants",
+    "displayName": "Meeting Participant",
+    "description": "会议参会者"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "meeting": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::meeting.meeting",
+      "inversedBy": "participants"
+    },
+    "user": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::app-user.app-user"
+    },
+    "headset": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::vr-headset.vr-headset"
+    },
+    "machine": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::machine.machine"
+    },
+    "status": {
+      "type": "enumeration",
+      "enum": ["invited", "joined", "left"],
+      "default": "invited"
+    },
+    "micEnabled": {
+      "type": "boolean",
+      "default": true
+    },
+    "vrModeEnabled": {
+      "type": "boolean",
+      "default": false
+    },
+    "joinedAt": {
+      "type": "datetime"
+    },
+    "leftAt": {
+      "type": "datetime"
+    }
+  }
+}

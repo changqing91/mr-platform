@@ -152,6 +152,22 @@ export const api = {
         getScriptConfig:  ()              => get('/processes/script-config'),
         saveScriptConfig: (config)        => send('PUT',  '/processes/script-config', config),
     },
+    vrHeadsets: {
+        list:   ()              => get('/vr-headsets'),
+        create: (data)          => send('POST',   '/vr-headsets', { data }),
+        update: (id, data)      => send('PUT',    `/vr-headsets/${id}`, { data }),
+        delete: (id)            => send('DELETE', `/vr-headsets/${id}`),
+    },
+    meetings: {
+        create:          (data)     => send('POST',   '/meetings', data),
+        findActive:      ()         => get('/meetings/active'),
+        findOne:         (id)       => get(`/meetings/${id}`),
+        end:             (id)       => send('POST',   `/meetings/${id}/end`),
+        addParticipant:  (id, data) => send('POST',   `/meetings/${id}/participants`, data),
+        removeParticipant: (id, pid) => send('DELETE', `/meetings/${id}/participants/${pid}`),
+        updateParticipant: (id, pid, data) => send('PUT', `/meetings/${id}/participants/${pid}`, data),
+        visibleUsers:    ()         => get('/meetings/visible-users'),
+    },
     upload: async (file) => {
         const formData = new FormData();
         formData.append('files', file);

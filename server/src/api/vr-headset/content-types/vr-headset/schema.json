@@ -1,0 +1,38 @@
+{
+  "kind": "collectionType",
+  "collectionName": "vr_headsets",
+  "info": {
+    "singularName": "vr-headset",
+    "pluralName": "vr-headsets",
+    "displayName": "VR Headset",
+    "description": "VR头盔设备，可绑定到机器节点"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "name": {
+      "type": "string",
+      "required": true
+    },
+    "type": {
+      "type": "enumeration",
+      "enum": ["Vive", "Oculus", "Pico", "Other"],
+      "default": "Vive"
+    },
+    "serialNumber": {
+      "type": "string"
+    },
+    "status": {
+      "type": "enumeration",
+      "enum": ["idle", "in-use", "offline"],
+      "default": "idle"
+    },
+    "machine": {
+      "type": "relation",
+      "relation": "oneToOne",
+      "target": "api::machine.machine"
+    }
+  }
+}

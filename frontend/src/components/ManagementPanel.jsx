@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
-import { X, Users, FolderKanban, Shield } from 'lucide-react';
+import { X, Users, FolderKanban, Shield, Headset } from 'lucide-react';
 import { THEME_COLOR } from '../constants';
 import MemberView from './management/MemberView';
 import ProjectGroupView from './management/ProjectGroupView';
 import RoleView from './management/RoleView';
+import HeadsetView from './management/HeadsetView';
 
 const TAB_BTN = (active) =>
     `px-4 py-1.5 rounded-md text-sm font-medium transition-colors inline-flex items-center gap-1.5 ${
@@ -29,7 +30,7 @@ const ManagementPanel = ({ onClose, addNotification, currentUser }) => {
                         </div>
                         <div>
                             <h2 className="text-lg font-bold text-gray-800">管理面板</h2>
-                            <p className="text-xs text-gray-400">成员 / 项目组 / 角色</p>
+                            <p className="text-xs text-gray-400">成员 / 项目组 / 角色 / 头盔</p>
                         </div>
                     </div>
                     <div className="flex gap-2">
@@ -54,6 +55,13 @@ const ManagementPanel = ({ onClose, addNotification, currentUser }) => {
                         >
                             <Shield size={14} /> 角色
                         </button>
+                        <button
+                            onClick={() => setActiveTab('headsets')}
+                            className={TAB_BTN(activeTab === 'headsets')}
+                            style={activeTab === 'headsets' ? { backgroundColor: THEME_COLOR } : undefined}
+                        >
+                            <Headset size={14} /> 头盔
+                        </button>
                     </div>
                     <button
                         onClick={onClose}
@@ -69,6 +77,7 @@ const ManagementPanel = ({ onClose, addNotification, currentUser }) => {
                     )}
                     {activeTab === 'groups' && <ProjectGroupView addNotification={addNotification} />}
                     {activeTab === 'roles' && <RoleView addNotification={addNotification} />}
+                    {activeTab === 'headsets' && <HeadsetView addNotification={addNotification} />}
                 </div>
             </div>
         </div>

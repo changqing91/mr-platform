@@ -547,6 +547,88 @@ export interface ApiMachineMachine extends Struct.CollectionTypeSchema {
   };
 }
 
+export interface ApiMeetingParticipantMeetingParticipant
+  extends Struct.CollectionTypeSchema {
+  collectionName: 'meeting_participants';
+  info: {
+    description: '\u4F1A\u8BAE\u53C2\u4F1A\u8005';
+    displayName: 'Meeting Participant';
+    pluralName: 'meeting-participants';
+    singularName: 'meeting-participant';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    headset: Schema.Attribute.Relation<
+      'manyToOne',
+      'api::vr-headset.vr-headset'
+    >;
+    joinedAt: Schema.Attribute.DateTime;
+    leftAt: Schema.Attribute.DateTime;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::meeting-participant.meeting-participant'
+    > &
+      Schema.Attribute.Private;
+    machine: Schema.Attribute.Relation<'manyToOne', 'api::machine.machine'>;
+    meeting: Schema.Attribute.Relation<'manyToOne', 'api::meeting.meeting'>;
+    micEnabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    publishedAt: Schema.Attribute.DateTime;
+    status: Schema.Attribute.Enumeration<['invited', 'joined', 'left']> &
+      Schema.Attribute.DefaultTo<'invited'>;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    user: Schema.Attribute.Relation<'manyToOne', 'api::app-user.app-user'>;
+    vrModeEnabled: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
+  };
+}
+
+export interface ApiMeetingMeeting extends Struct.CollectionTypeSchema {
+  collectionName: 'meetings';
+  info: {
+    description: 'VRED\u534F\u4F5C\u4F1A\u8BAE';
+    displayName: 'Meeting';
+    pluralName: 'meetings';
+    singularName: 'meeting';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    endedAt: Schema.Attribute.DateTime;
+    host: Schema.Attribute.Relation<'manyToOne', 'api::app-user.app-user'>;
+    hostMachine: Schema.Attribute.Relation<'manyToOne', 'api::machine.machine'>;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::meeting.meeting'
+    > &
+      Schema.Attribute.Private;
+    participants: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::meeting-participant.meeting-participant'
+    >;
+    project: Schema.Attribute.Relation<'manyToOne', 'api::project.project'>;
+    publishedAt: Schema.Attribute.DateTime;
+    roomName: Schema.Attribute.String & Schema.Attribute.DefaultTo<'Autodesk'>;
+    status: Schema.Attribute.Enumeration<['active', 'ended']> &
+      Schema.Attribute.DefaultTo<'active'>;
+    title: Schema.Attribute.String & Schema.Attribute.Required;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
 export interface ApiProcessProcess extends Struct.CollectionTypeSchema {
   collectionName: 'processes';
   info: {
@@ -650,6 +732,41 @@ export interface ApiProjectProject extends Struct.CollectionTypeSchema {
     tags: Schema.Attribute.JSON;
     thumbnail: Schema.Attribute.Text;
     type: Schema.Attribute.String & Schema.Attribute.DefaultTo<'VRED'>;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
+export interface ApiVrHeadsetVrHeadset extends Struct.CollectionTypeSchema {
+  collectionName: 'vr_headsets';
+  info: {
+    description: 'VR\u5934\u76D4\u8BBE\u5907\uFF0C\u53EF\u7ED1\u5B9A\u5230\u673A\u5668\u8282\u70B9';
+    displayName: 'VR Headset';
+    pluralName: 'vr-headsets';
+    singularName: 'vr-headset';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::vr-headset.vr-headset'
+    > &
+      Schema.Attribute.Private;
+    machine: Schema.Attribute.Relation<'oneToOne', 'api::machine.machine'>;
+    name: Schema.Attribute.String & Schema.Attribute.Required;
+    publishedAt: Schema.Attribute.DateTime;
+    serialNumber: Schema.Attribute.String;
+    status: Schema.Attribute.Enumeration<['idle', 'in-use', 'offline']> &
+      Schema.Attribute.DefaultTo<'idle'>;
+    type: Schema.Attribute.Enumeration<['Vive', 'Oculus', 'Pico', 'Other']> &
+      Schema.Attribute.DefaultTo<'Vive'>;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -1169,9 +1286,12 @@ declare module '@strapi/strapi' {
       'api::app-role.app-role': ApiAppRoleAppRole;
       'api::app-user.app-user': ApiAppUserAppUser;
       'api::machine.machine': ApiMachineMachine;
+      'api::meeting-participant.meeting-participant': ApiMeetingParticipantMeetingParticipant;
+      'api::meeting.meeting': ApiMeetingMeeting;
       'api::process.process': ApiProcessProcess;
       'api::project-group.project-group': ApiProjectGroupProjectGroup;
       'api::project.project': ApiProjectProject;
+      'api::vr-headset.vr-headset': ApiVrHeadsetVrHeadset;
       'plugin::content-releases.release': PluginContentReleasesRelease;
       'plugin::content-releases.release-action': PluginContentReleasesReleaseAction;
       'plugin::i18n.locale': PluginI18NLocale;
